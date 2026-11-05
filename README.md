@@ -76,6 +76,7 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
 | **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
 | **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture. |
+| **People** | Look up anyone on GitHub and see their proof of work, read from their brain's files: working on, shipped, decisions, open to collaborate. Open their brain read-only and **Ask to join** (opens a prefilled GitHub issue). |
 
 ## Use it
 
@@ -96,6 +97,19 @@ It opens `http://127.0.0.1:4777` with code scanning and one-click **Commit brain
 (File System Access API). Nothing is uploaded.
 
 **3. Demo.** [Try the sample project](https://juw12.github.io/cairn/?demo=1) (an offline hiking app). It's saved only in your browser.
+
+### Share your brain and explore others
+
+Cairn uses GitHub as the network, so there is nothing new to sign up for.
+
+1. Keep `brain/` in a **public** repo and add the topic `cairn-brain` (repo page → About → Topics).
+2. Share your profile link: `https://juw12.github.io/cairn/?u=<your-username>`, or a brain directly:
+   `https://juw12.github.io/cairn/?brain=<owner>/<repo>`.
+
+This repo dogfoods it: see [@juw12's profile](https://juw12.github.io/cairn/?u=juw12) or
+[Cairn's own brain](https://juw12.github.io/cairn/?brain=juw12/cairn). Only repos with the topic ever appear;
+other people's brains are always read-only. Unsigned GitHub API calls are limited to 60 per hour per IP, so
+results are cached for 10 minutes.
 
 ### Command line
 
@@ -161,20 +175,22 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 
 ## Privacy and security
 
-* No account, no telemetry, no external requests. Fonts and icons are bundled.
+* No account and no telemetry. Fonts (SIL OFL) and icons are bundled.
+* The only external requests are to `api.github.com` and `raw.githubusercontent.com`, and only when you look someone up or open a published brain. Your own brain never leaves your machine.
 * The local server binds to `127.0.0.1` only, checks the `Host` header and requires a custom header on every API call, so other websites can't reach it.
 * It reads and writes only `.md` files inside the brain folder; paths that escape it are refused (tested).
 
 ## Development
 
 ```bash
-python -m unittest discover -s tests          # 34 tests: core, API, CLI, Python↔JS parity, browser e2e
+python -m unittest discover -s tests          # 39 tests: core, API, CLI, Python↔JS parity, browser e2e
 pip install playwright && playwright install chromium   # for the parity and e2e tests
 python scripts/make_media.py                  # regenerate the banner and screenshot
 ```
 
 The web app in `docs/` is plain HTML, CSS and ES modules with no build step. `cairn/core.py` and
 `docs/core.js` implement the same rules and are checked against each other by `tests/test_parity.py`.
+Design rationale (type, colour and the psychology behind it): [`plan/DESIGN.md`](plan/DESIGN.md).
 How it was planned and scored: [`PLAN.md`](PLAN.md), [`plan/rubric.md`](plan/rubric.md), [`plan/refine_log.md`](plan/refine_log.md).
 
 ## License

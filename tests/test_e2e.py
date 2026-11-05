@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from webserver import launch_browser, start_static_server  # noqa: E402
+from webserver import install_github_mock, launch_browser, start_static_server  # noqa: E402
 
 try:
     from playwright.sync_api import sync_playwright
@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
         raise
     sync_playwright = None
 
-VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "code", "context"]
+VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "code", "context", "people"]
 
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
@@ -32,15 +32,16 @@ class EndToEndTests(unittest.TestCase):
         cls.pw.stop()
         cls.server.shutdown()
 
-    def open(self, query="?demo=1", viewport=(1440, 900), theme="light"):
+    def open(self, query="?demo=1", viewport=(1440, 900), theme="light", wait="#nav button"):
         context = self.browser.new_context(viewport={"width": viewport[0], "height": viewport[1]})
+        self.github_log = install_github_mock(context)
         page = context.new_page()
         self.errors = []
         page.on("console", lambda m: self.errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: self.errors.append(str(e)))
         page.add_init_script(f"localStorage.setItem('cairn.theme', '{theme}')")
         page.goto(self.url + query)
-        page.wait_for_selector("#nav button")
+        page.wait_for_selector(wait)
         self.addCleanup(context.close)
         return page
 
@@ -143,6 +144,99 @@ class EndToEndTests(unittest.TestCase):
                 self.assertLessEqual(overflow, 0, f"{theme}/{view} scrolls sideways by {overflow}px")
             self.assertEqual(page.evaluate("document.documentElement.dataset.theme"), theme)
             self.assertEqual(self.errors, [])
+
+
+    # ------------------------------------------------------------ network: profiles + read-only brains
+
+    def test_github_input_parsing(self):
+        page = self.open()
+        results = page.evaluate(
+            """async () => {
+                const gh = await import('./github.js');
+                return ['juw12', '@juw12', 'https://github.com/juw12', 'github.com/juw12/cairn/', 'juw12/cairn',
+                        'https://github.com/juw12/cairn/tree/main/brain', 'not a user!', '', 'a/b/c..x']
+                    .map((v) => gh.parseGithubInput(v));
+            }"""
+        )
+        self.assertEqual(results[0], {"owner": "juw12", "repo": None})
+        self.assertEqual(results[1], {"owner": "juw12", "repo": None})
+        self.assertEqual(results[2], {"owner": "juw12", "repo": None})
+        self.assertEqual(results[3], {"owner": "juw12", "repo": "cairn"})
+        self.assertEqual(results[4], {"owner": "juw12", "repo": "cairn"})
+        self.assertEqual(results[5], {"owner": "juw12", "repo": "cairn"})
+        self.assertIsNone(results[6])
+        self.assertIsNone(results[7])
+
+    def test_profile_shows_proof_of_work(self):
+        page = self.open("?u=juw12")
+        page.wait_for_selector(".proof-grid")
+        profile = page.inner_text(".profile-card")
+        self.assertIn("Juwen Lie", profile)
+        self.assertIn("@juw12", profile)
+        proof = page.inner_text(".proof-grid")
+        self.assertIn("Get five people to publish a brain", proof)  # doing
+        self.assertIn("Explore: look up people and open their brains", proof)  # shipped
+        self.assertIn("GitHub is the backend", proof)  # accepted decision
+        self.assertIn("AI agents as brain members", proof)  # ready + help-wanted
+        self.assertNotIn("Sign in with GitHub", proof)  # todo tasks are not claimed as work
+        self.assertGreaterEqual(page.locator(".repo-row").count(), 1)
+        self.assertEqual(self.errors, [])
+
+    def test_unknown_user_and_bad_input(self):
+        page = self.open()
+        page.click('#nav [data-go="people"]')
+        page.fill("#people-query", "nobody-here-123")
+        page.click("#people-form button[type=submit]")
+        page.wait_for_selector(".notice")
+        self.assertIn("Not found", page.inner_text("#view"))
+        page.fill("#people-query", "not a user!")
+        page.click("#people-form button[type=submit]")
+        page.wait_for_function("() => document.querySelector('#view').innerText.includes(\"doesn't look like\")")
+
+    def test_read_only_brain(self):
+        page = self.open("?brain=juw12/cairn")
+        page.wait_for_selector(".ro-banner")
+        self.assertTrue(page.locator("#capture-form").is_hidden())
+        self.assertEqual(page.evaluate("window.cairn.state.notes.length"), 18)
+        join = page.get_attribute(".ro-banner a.btn.primary", "href")
+        self.assertTrue(join.startswith("https://github.com/juw12/cairn/issues/new?title="), join)
+        self.assertIn("Request%20to%20join", join)
+        self.go(page, "board")
+        self.assertEqual(page.locator('.item-card[draggable="true"]').count(), 0)
+        self.assertEqual(page.locator(".quick-add").count(), 0)
+        page.click('.item-card[data-open="tasks/mcp-server.md"]')
+        page.wait_for_selector(".drawer")
+        self.assertTrue(page.is_disabled("#ed-title"))
+        self.assertTrue(page.locator('[data-action="delete"]').is_hidden())
+        self.assertEqual(page.locator("#ed-body").count(), 0)
+        page.keyboard.press("Escape")
+        # No create buttons are offered on someone else's brain...
+        self.assertEqual(page.locator('.page-head [data-action="new"]').count(), 0)
+        # ...and the action guard still refuses if one is triggered anyway (e.g. a stale render).
+        before = page.evaluate("window.cairn.state.files.length")
+        page.evaluate(
+            """() => {
+                const button = document.createElement("button");
+                button.dataset.action = "new";
+                button.dataset.type = "task";
+                button.id = "stale-new";
+                document.querySelector("main").appendChild(button);
+            }"""
+        )
+        page.click("#stale-new")
+        page.wait_for_selector(".toast")
+        self.assertEqual(page.evaluate("window.cairn.state.files.length"), before)
+        self.assertEqual(self.errors, [])
+
+    def test_welcome_explore_box(self):
+        page = self.open("", wait=".choices")
+        page.evaluate("localStorage.clear()")
+        page.reload()
+        page.wait_for_selector("#explore-form")
+        page.fill("#explore-input", "https://github.com/juw12")
+        page.press("#explore-input", "Enter")
+        page.wait_for_selector(".profile-card")
+        self.assertIn("u=juw12", page.url)
 
 
 if __name__ == "__main__":

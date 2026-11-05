@@ -1,6 +1,7 @@
 import * as core from "./core.js";
 import { renderMarkdown, toggleTask, escapeHtml as esc } from "./md.js";
-import { ServerStore, FolderStore, DemoStore, ConflictError } from "./store.js";
+import { ServerStore, FolderStore, DemoStore, GitHubStore, ConflictError } from "./store.js";
+import * as gh from "./github.js";
 
 // ============================================================ constants
 
@@ -34,12 +35,15 @@ const ICONS = {
   play: '<path d="M7 5v14l11-7z"/>',
   zap: '<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>',
   save: '<path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M8 3v5h7M8 21v-7h8v7"/>',
+  users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.2c2.6.2 4.5 2.6 4.5 5.8"/>',
+  external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   github: '<path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>',
 };
 
 const icon = (name, cls = "") => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
-const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--accent)"/><ellipse cx="16" cy="23.4" rx="9" ry="3.5" fill="#fff"/><ellipse cx="16" cy="16.7" rx="6.3" ry="2.9" fill="#fff" fill-opacity=".88"/><ellipse cx="16" cy="10.7" rx="3.7" ry="2.3" fill="#fff" fill-opacity=".76"/></svg>`;
+const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--ink)"/><ellipse cx="16" cy="23.6" rx="9.2" ry="3.4" fill="var(--bg)"/><ellipse cx="15.2" cy="17.2" rx="6.4" ry="2.8" fill="var(--bg)" fill-opacity=".9"/><ellipse cx="16.4" cy="11.4" rx="3.8" ry="2.3" fill="var(--accent)"/></svg>`;
 
 const TYPE_META = {
   idea: { label: "Idea", icon: "idea" },
@@ -84,15 +88,16 @@ const SPARKS = [
 ];
 
 const VIEWS = [
-  { id: "home", label: "Home", icon: "home", group: "Workspace" },
-  { id: "ideas", label: "Ideas", icon: "idea", group: "Workspace" },
-  { id: "board", label: "Board", icon: "board", group: "Workspace" },
-  { id: "decisions", label: "Decisions", icon: "decision", group: "Workspace" },
-  { id: "notes", label: "Notes", icon: "note", group: "Library" },
-  { id: "journal", label: "Journal", icon: "journal", group: "Library" },
-  { id: "map", label: "Map", icon: "map", group: "Library" },
+  { id: "home", label: "Today", icon: "home", group: "Think & do" },
+  { id: "ideas", label: "Ideas", icon: "idea", group: "Think & do" },
+  { id: "board", label: "Board", icon: "board", group: "Think & do" },
+  { id: "decisions", label: "Decisions", icon: "decision", group: "Think & do" },
+  { id: "notes", label: "Notes", icon: "note", group: "Remember" },
+  { id: "journal", label: "Journal", icon: "journal", group: "Remember" },
+  { id: "map", label: "Map", icon: "map", group: "Remember" },
   { id: "code", label: "Code inbox", icon: "code", group: "Project" },
   { id: "context", label: "Context pack", icon: "sparkle", group: "Project" },
+  { id: "people", label: "People", icon: "users", group: "Network" },
 ];
 
 const REPO_URL = "https://github.com/juw12/cairn";
@@ -115,7 +120,12 @@ const state = {
   editorMode: "write",
   contextMode: "preview",
   spark: null,
+  peopleQuery: "",
+  profile: null,
+  discover: null,
 };
+
+const readOnly = () => Boolean(state.info?.readOnly);
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -318,6 +328,7 @@ function counts() {
     map: "",
     code: state.todos ? state.todos.length : "",
     context: "",
+    people: "",
   };
 }
 
@@ -370,14 +381,14 @@ function setView(view, { push = true } = {}) {
 }
 
 function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView, people: peopleView };
   const view = $("#view");
-  view.innerHTML = (renderers[state.view] || home)();
+  view.innerHTML = readOnlyBanner() + (renderers[state.view] || home)();
   afterRender();
 }
 
 function afterRender() {
-  if (state.view === "ideas" || state.view === "board") wireBoard();
+  if ((state.view === "ideas" || state.view === "board") && !readOnly()) wireBoard();
   if (state.view === "map") wireMap();
 }
 
@@ -432,6 +443,8 @@ function emptyState(iconName, title, text, action = "") {
 }
 
 function pageHead(title, sub, actions = "", eyebrow = "") {
+  // Someone else's brain is read-only: no create buttons, so nothing promises an action we would refuse.
+  if (readOnly()) actions = "";
   return `<div class="page-head"><div>${eyebrow ? `<p class="eyebrow">${eyebrow}</p>` : ""}<h1>${title}</h1>${sub ? `<p>${sub}</p>` : ""}</div><div class="actions">${actions}</div></div>`;
 }
 
@@ -444,56 +457,78 @@ function byRecent(a, b) {
 function home() {
   const tasks = state.notes.filter((n) => n.type === "task");
   const doing = tasks.filter((n) => n.status === "doing").sort(byRecent);
+  const done = tasks.filter((n) => n.status === "done");
   const ideasInPlay = state.notes.filter((n) => n.type === "idea" && ["raw", "exploring", "ready"].includes(n.status));
   const fresh = state.notes.filter((n) => n.type === "idea" && n.status === "raw").sort(byRecent).slice(0, 5);
   const proposed = state.notes.filter((n) => n.type === "decision" && n.status === "proposed");
   const recent = [...state.notes].sort(byRecent).slice(0, 6);
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const greeting = readOnly()
+    ? `What @${esc(state.info.owner)} is working on`
+    : hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
   const dateLabel = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
   const g = guide();
-  const showGuide = !g.dismissed && !(g.captured && g.moved && g.promoted);
-  const step = (done, n, title, text) =>
-    `<div class="guide-step ${done ? "done" : ""}"><span class="num">${done ? icon("check", "sm") : n}</span><div><strong>${title}</strong><span>${text}</span></div></div>`;
+  const showGuide = !readOnly() && !g.dismissed && !(g.captured && g.moved && g.promoted);
+  const step = (isDone, n, title, text) =>
+    `<li class="guide-step ${isDone ? "done" : ""}"><span class="num">${isDone ? icon("check", "sm") : n}</span><div><strong>${title}</strong><span>${text}</span></div></li>`;
   const guideHtml = showGuide
-    ? `<section class="card guide" id="guide" aria-label="Getting started">
-        <div class="guide-intro"><h2>The loop in three steps</h2><p>Cairn follows how projects actually move: capture → brainstorm → act. Everything lands as Markdown in <code>brain/</code>.</p></div>
-        <div class="guide-steps">
-          ${step(g.captured, 1, "Capture an idea", "Type anything in the bar above and press Enter.")}
-          ${step(g.moved, 2, "Move it on the Ideas wall", "Drag a card from Raw to Exploring.")}
-          ${step(g.promoted, 3, "Promote it to a task", "Open an idea and press “Promote to task”.")}
-        </div>
+    ? `<section class="guide" id="guide" aria-label="Getting started">
+        <div class="guide-intro"><h2>Three moves to get the hang of it</h2><p>Everything you do here is saved as plain Markdown in <code>brain/</code>.</p></div>
+        <ol class="guide-steps">
+          ${step(g.captured, 1, "Capture a thought", "Type in the bar at the top, press Enter.")}
+          ${step(g.moved, 2, "Move it forward", "On Ideas, drag a card from Raw to Exploring.")}
+          ${step(g.promoted, 3, "Turn it into work", "Open an idea, press Promote to task.")}
+        </ol>
         <button class="btn ghost sm icon-only guide-close" data-action="dismiss-guide" aria-label="Hide the guide">${icon("x", "sm")}</button>
       </section>`
     : "";
 
   const todoCount = state.todos === null ? "–" : state.todos.length;
-  const stat = (view, iconName, label, value) =>
-    `<button class="stat" data-go="${view}"><span class="label">${icon(iconName)}${label}</span><span class="value">${value}</span></button>`;
-
+  const figure = (view, value, label) => `<button class="figure" data-go="${view}"><span class="value">${value}</span><span class="label">${label}</span></button>`;
   const emptyBrain = state.notes.length === 0;
+  const sampleButton = emptyBrain && state.info.mode === "demo" ? `<button class="btn primary" data-action="load-sample">${icon("play")} Load the sample project</button>` : "";
+  const intro = emptyBrain
+    ? "An empty brain. Write the first thing on your mind in the bar above."
+    : readOnly()
+      ? `A read-only look at <strong>${esc(state.info.owner)}/${esc(state.info.repoName)}</strong>.`
+      : `Here's where <strong>${esc(state.info.project)}</strong> stands.`;
+
+  const column = (title, view, linkLabel, rows, empty) => `
+    <section class="column-block">
+      <header><h2>${title}</h2><button class="text-link" data-go="${view}">${linkLabel} ${icon("arrow", "sm")}</button></header>
+      ${rows.length ? `<div class="rows">${rows.join("")}</div>` : `<p class="empty">${empty}</p>`}
+    </section>`;
+
   return `
-    ${pageHead(`${greeting}`, emptyBrain ? "Your brain is empty. Capture the first thing on your mind above, or load the sample project." : `Here’s where <strong>${esc(state.info.project)}</strong> stands.`,
-      `<button class="btn" data-action="journal-today">${icon("journal")} Today’s journal</button>${emptyBrain && state.info.mode === "demo" ? `<button class="btn primary" data-action="load-sample">${icon("play")} Load sample project</button>` : ""}`,
-      dateLabel)}
+    <header class="today">
+      <div class="today-text">
+        <p class="eyebrow">${dateLabel}</p>
+        <h1>${greeting}</h1>
+        <p class="lede">${intro}</p>
+        <div class="actions">
+          ${readOnly() ? "" : `<button class="btn" data-action="journal-today">${icon("journal")} Today's journal</button>`}
+          ${sampleButton}
+        </div>
+      </div>
+      <figure class="cairn">
+        ${cairnSvg(done.length)}
+        <figcaption><strong>${done.length}</strong> ${done.length === 1 ? "stone" : "stones"}<span>one for every task finished</span></figcaption>
+      </figure>
+    </header>
     ${guideHtml}
-    <div class="stats">
-      ${stat("board", "task", "In progress", doing.length)}
-      ${stat("ideas", "idea", "Ideas in play", ideasInPlay.length)}
-      ${stat("decisions", "decision", "Open decisions", proposed.length)}
-      ${stat("code", "code", "Code TODOs", todoCount)}
+    <div class="figures">
+      ${figure("board", doing.length, "in progress")}
+      ${figure("ideas", ideasInPlay.length, "ideas in play")}
+      ${figure("decisions", proposed.length, "open decisions")}
+      ${figure("code", todoCount, "code TODOs")}
     </div>
-    <div class="grid-3">
-      <section class="card"><div class="card-head"><h2>Doing now</h2><button class="btn ghost sm" data-go="board">Board ${icon("arrow", "sm")}</button></div>
-        <div class="card-body">${doing.length ? doing.map((n) => rowItem(n, checklistMeta(n))).join("") : `<div class="empty">Nothing in progress. Drag a task to Doing on the board.</div>`}</div></section>
-      <section class="card"><div class="card-head"><h2>Fresh ideas</h2><button class="btn ghost sm" data-go="ideas">Wall ${icon("arrow", "sm")}</button></div>
-        <div class="card-body">${fresh.length ? fresh.map((n) => rowItem(n, relativeTime(n.mtime))).join("") : `<div class="empty">No raw ideas. Capture one with the bar above.</div>`}</div></section>
-      <section class="card"><div class="card-head"><h2>Needs a decision</h2><button class="btn ghost sm" data-go="decisions">All ${icon("arrow", "sm")}</button></div>
-        <div class="card-body">${proposed.length ? proposed.map((n) => rowItem(n, "proposed")).join("") : `<div class="empty">No open questions. Start one with “decision: …”.</div>`}</div></section>
+    <div class="columns-3">
+      ${column("Doing now", "board", "Board", doing.map((n) => rowItem(n, checklistMeta(n))), "Nothing in progress. Drag a task to Doing.")}
+      ${column("Fresh ideas", "ideas", "Ideas", fresh.map((n) => rowItem(n, relativeTime(n.mtime))), "No raw ideas. Capture one above.")}
+      ${column("Needs a decision", "decisions", "Decisions", proposed.map((n) => rowItem(n, "proposed")), "No open questions.")}
     </div>
-    <section class="card" style="margin-top:16px"><div class="card-head"><h2>Recently edited</h2><button class="btn ghost sm" data-go="notes">All notes ${icon("arrow", "sm")}</button></div>
-      <div class="card-body">${recent.length ? recent.map((n) => rowItem(n, `${TYPE_META[n.type].label} · ${relativeTime(n.mtime)}`)).join("") : `<div class="empty">Nothing yet.</div>`}</div></section>`;
+    ${column("Recently touched", "notes", "All notes", recent.map((n) => rowItem(n, `${TYPE_META[n.type].label}${n.mtime ? " · " + relativeTime(n.mtime) : ""}`)), "Nothing yet.")}`;
 }
 
 function checklistMeta(note) {
@@ -508,7 +543,7 @@ function itemCard(note) {
   const source = typeof note.meta.source === "string" ? note.meta.source : "";
   const statuses = core.STATUSES[note.type];
   return `
-    <article class="item-card t-${note.type}" draggable="true" data-open="${esc(note.path)}" data-drag="${esc(note.path)}" tabindex="0" aria-label="${esc(note.title)}">
+    <article class="item-card t-${note.type}" draggable="${readOnly() ? "false" : "true"}" data-open="${esc(note.path)}" data-drag="${esc(note.path)}" tabindex="0" aria-label="${esc(note.title)}">
       <div class="title">${esc(note.title)}</div>
       ${snippet ? `<div class="snippet">${esc(snippet)}</div>` : ""}
       ${total ? `<div class="progress" title="${done} of ${total} done"><i style="width:${Math.round((done / total) * 100)}%"></i></div>` : ""}
@@ -518,9 +553,9 @@ function itemCard(note) {
         ${links ? `<span class="metric" title="${plural(links, "link")}">${icon("link", "sm")}${links}</span>` : ""}
         ${total ? `<span class="metric">${done}/${total}</span>` : ""}
       </div>
-      <select class="move-select" data-move="${esc(note.path)}" aria-label="Move ${esc(note.title)}">
+      ${readOnly() ? "" : `<select class="move-select" data-move="${esc(note.path)}" aria-label="Move ${esc(note.title)}">
         ${statuses.map((s) => `<option value="${s}" ${s === note.status ? "selected" : ""}>${STATUS_LABEL[s]}</option>`).join("")}
-      </select>
+      </select>`}
     </article>`;
 }
 
@@ -535,7 +570,7 @@ function boardColumns(type) {
         <section class="column" data-column="${status}" aria-label="${STATUS_LABEL[status]}">
           <div class="column-head"><span class="dot status-${status}" style="background:var(--t)"></span><h2>${STATUS_LABEL[status]}</h2><span class="count">${inColumn.length}</span></div>
           ${STATUS_HINT[status] ? `<p class="column-hint">${STATUS_HINT[status]}</p>` : ""}
-          ${status !== "done" && status !== "parked" ? `<form class="quick-add" data-quick="${type}:${status}"><input name="title" placeholder="${placeholder}" aria-label="${placeholder} (${STATUS_LABEL[status]})"></form>` : ""}
+          ${status !== "done" && status !== "parked" && !readOnly() ? `<form class="quick-add" data-quick="${type}:${status}"><input name="title" placeholder="${placeholder}" aria-label="${placeholder} (${STATUS_LABEL[status]})"></form>` : ""}
           ${inColumn.map(itemCard).join("")}
         </section>`;
     })
@@ -543,14 +578,18 @@ function boardColumns(type) {
 }
 
 function ideas() {
-  return `${pageHead("Ideas", "Brainstorm here. Capture without judging, then drag ideas right as they firm up. Open one to spark it with a prompt or promote it to a task.",
+  return `${pageHead("Ideas", readOnly()
+    ? "What this brain is thinking about, from raw to ready. Open one to read it in full."
+    : "Brainstorm here. Capture without judging, then drag ideas right as they firm up. Open one to spark it with a prompt or promote it to a task.",
     `<button class="btn" data-action="spark-random">${icon("zap")} Spark a prompt</button><button class="btn primary" data-action="new" data-type="idea">${icon("plus")} New idea</button>`)}
     ${state.spark && !state.open ? `<div class="spark-card">${icon("zap")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Pick an idea and answer this in it, or capture what it makes you think of.</span></div></div>` : ""}
     ${boardColumns("idea")}`;
 }
 
 function board() {
-  return `${pageHead("Board", "Everything you are going to do, from to do to done. Drag cards between columns; open one to edit its checklist.",
+  return `${pageHead("Board", readOnly()
+    ? "What this brain is working on, from to do to done. Open a card to read its checklist."
+    : "Everything you are going to do, from to do to done. Drag cards between columns; open one to edit its checklist.",
     `<button class="btn primary" data-action="new" data-type="task">${icon("plus")} New task</button>`)}
     ${boardColumns("task")}`;
 }
@@ -819,6 +858,208 @@ function contextView() {
     <section class="card">${body}</section>`;
 }
 
+
+// ============================================================ network: profiles, discover, read-only brains
+
+function readOnlyBanner() {
+  if (!readOnly()) return "";
+  const { owner, repoName, url, avatar } = state.info;
+  return `
+    <div class="ro-banner" role="note">
+      ${avatar ? `<img class="ro-avatar" src="${esc(avatar)}" alt="" width="28" height="28">` : ""}
+      <div class="ro-text"><strong>@${esc(owner)}'s brain</strong><span>${esc(owner)}/${esc(repoName)} · ${icon("lock", "sm")} read-only</span></div>
+      <div class="ro-actions">
+        <button class="btn sm ghost" data-action="open-profile" data-login="${esc(owner)}">Profile</button>
+        <a class="btn sm ghost" href="${esc(url)}" target="_blank" rel="noopener">${icon("github", "sm")} Repo</a>
+        <a class="btn sm primary" href="${esc(gh.joinRequestUrl(owner, repoName))}" target="_blank" rel="noopener">Ask to join</a>
+        <button class="btn sm" data-action="leave-brain">Back to my brain</button>
+      </div>
+    </div>`;
+}
+
+function brainNotes(files) {
+  return files.filter((f) => !core.SPECIAL_FILES.includes(f.path)).map((f) => core.noteFromFile(f.path, f.text, f.mtime));
+}
+
+function proofOfWork(notes) {
+  const pick = (type, statuses) => notes.filter((n) => n.type === type && statuses.includes(n.status));
+  return {
+    now: pick("task", ["doing"]),
+    shipped: pick("task", ["done"]),
+    decisions: pick("decision", ["accepted"]),
+    open: notes.filter((n) => n.type === "idea" && (n.status === "ready" || n.tags.includes("help-wanted"))),
+    ideas: pick("idea", ["raw", "exploring", "ready"]).length,
+  };
+}
+
+async function lookupProfile(raw) {
+  const parsed = gh.parseGithubInput(raw);
+  state.peopleQuery = String(raw || "").trim();
+  if (!parsed) {
+    state.profile = { error: "That doesn't look like a GitHub username or link." };
+    return setView("people");
+  }
+  if (parsed.repo) return openBrain(`${parsed.owner}/${parsed.repo}`);
+  state.profile = { loading: true, login: parsed.owner };
+  setView("people");
+  try {
+    const [user, brains] = await Promise.all([gh.fetchUser(parsed.owner), gh.findBrains(parsed.owner)]);
+    state.profile = { user, brains, proof: null };
+    renderView();
+    if (brains.length) {
+      const files = await gh.loadBrainFiles(brains[0].owner, brains[0].name, brains[0].branch);
+      state.profile.proof = proofOfWork(brainNotes(files));
+      state.profile.proofRepo = brains[0];
+    }
+  } catch (error) {
+    state.profile = { ...(state.profile || {}), loading: false, error: error.message };
+  }
+  if (state.view === "people") renderView();
+}
+
+async function loadDiscover() {
+  if (state.discover) return;
+  state.discover = { loading: true, items: [] };
+  try {
+    state.discover = { items: await gh.discoverBrains() };
+  } catch (error) {
+    state.discover = { items: [], error: error.message };
+  }
+  if (state.view === "people") renderView();
+}
+
+function openBrain(fullName) {
+  location.href = `${location.pathname}?brain=${encodeURIComponent(fullName)}`;
+}
+
+function proofList(title, items, empty, meta = () => "") {
+  return `<section class="proof-col"><h3>${title} <span class="muted">${items.length}</span></h3>${
+    items.length
+      ? `<ul>${items.slice(0, 5).map((n) => `<li><span class="dot t-${n.type}"></span>${esc(n.title)}${meta(n)}</li>`).join("")}</ul>`
+      : `<p class="muted">${empty}</p>`
+  }</section>`;
+}
+
+function profileBlock() {
+  const p = state.profile;
+  if (!p) return "";
+  if (p.loading && !p.user) return `<div class="profile-card skeleton"><div class="avatar-lg"></div><div><h2>Looking up @${esc(p.login)}…</h2></div></div>`;
+  if (p.error && !p.user) return `<div class="notice">${icon("search")}<div>${esc(p.error)}</div></div>`;
+  const { user, brains, proof, proofRepo } = p;
+  const facts = [user.location, user.since ? `on GitHub since ${user.since}` : ""].filter(Boolean).map(esc).join(" · ");
+  const first = brains[0];
+  return `
+    <article class="profile-card">
+      <img class="avatar-lg" src="${esc(user.avatar)}" alt="" width="96" height="96">
+      <div class="profile-main">
+        <h2>${esc(user.name)}</h2>
+        <p class="handle">@${esc(user.login)}${facts ? ` · ${facts}` : ""}</p>
+        ${user.bio ? `<p class="bio">${esc(user.bio)}</p>` : ""}
+        <div class="actions">
+          ${first ? `<button class="btn primary" data-action="open-brain" data-repo="${esc(first.fullName)}">Open brain</button>` : ""}
+          ${first ? `<a class="btn" href="${esc(gh.joinRequestUrl(first.owner, first.name))}" target="_blank" rel="noopener">Ask to join</a>` : ""}
+          <a class="btn ghost" href="${esc(user.url)}" target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>
+          ${user.blog ? `<a class="btn ghost" href="${esc(user.blog.startsWith("http") ? user.blog : "https://" + user.blog)}" target="_blank" rel="noopener">${icon("external", "sm")} Website</a>` : ""}
+        </div>
+      </div>
+    </article>
+    ${
+      proof
+        ? `<div class="proof">
+            <p class="proof-note">Proof of work from <strong>${esc(proofRepo.fullName)}</strong>. Read from their files, not self-reported.</p>
+            <div class="proof-grid">
+              ${proofList("Working on", proof.now, "Nothing in progress.")}
+              ${proofList("Shipped", proof.shipped, "Nothing shipped yet.")}
+              ${proofList("Decisions", proof.decisions, "No decisions recorded.")}
+              ${proofList("Open to collaborate", proof.open, "No ideas flagged ready or #help-wanted.")}
+            </div>
+          </div>`
+        : brains.length
+          ? `<p class="muted">Reading their brain…</p>`
+          : `<div class="notice">${icon("lock")}<div><strong>@${esc(user.login)} hasn't published a brain yet.</strong><br>A brain becomes visible here when its repo has the <code>${gh.BRAIN_TOPIC}</code> topic. Nothing private is ever shown.</div></div>`
+    }
+    ${
+      brains.length
+        ? `<h3 class="section-title">Published brains</h3><div class="repo-list">${brains.map(repoRow).join("")}</div>`
+        : ""
+    }`;
+}
+
+function repoRow(repo) {
+  const updated = repo.pushedAt ? relativeTime(Date.parse(repo.pushedAt)) : "";
+  return `
+    <div class="repo-row">
+      ${repo.avatar ? `<img src="${esc(repo.avatar)}" alt="" width="36" height="36" loading="lazy">` : ""}
+      <div class="repo-main">
+        <button class="link-button" data-action="open-brain" data-repo="${esc(repo.fullName)}">${esc(repo.fullName)}</button>
+        <p>${esc(repo.description || "No description.")}</p>
+      </div>
+      <span class="muted repo-meta">${updated}</span>
+      <div class="repo-actions">
+        <button class="btn sm ghost" data-action="open-profile" data-login="${esc(repo.owner)}">Profile</button>
+        <button class="btn sm" data-action="open-brain" data-repo="${esc(repo.fullName)}">Open</button>
+      </div>
+    </div>`;
+}
+
+function peopleView() {
+  loadDiscover();
+  const d = state.discover;
+  // Don't repeat the looked-up person's own brains in the "others" list.
+  const profileLogin = state.profile?.user?.login?.toLowerCase();
+  const others = d?.items?.filter((repo) => repo.owner.toLowerCase() !== profileLogin) || [];
+  const discoverHtml = !d || d.loading
+    ? `<p class="muted">Loading published brains…</p>`
+    : d.error
+      ? `<div class="notice">${icon("search")}<div>${esc(d.error)}</div></div>`
+      : others.length
+        ? `<div class="repo-list">${others.map(repoRow).join("")}</div>`
+        : `<p class="muted">${profileLogin ? "No one else has published a brain yet." : "No published brains yet. Be the first."}</p>`;
+  const publishHint = state.info.mode === "server" || state.info.mode === "folder"
+    ? `<section class="publish"><h3>Publish your brain</h3><p>Push your repo to GitHub as public and add one topic. Only repos you mark this way ever appear here.</p><code>gh repo edit OWNER/${esc(state.info.project)} --add-topic ${gh.BRAIN_TOPIC}</code></section>`
+    : `<section class="publish"><h3>Publish your brain</h3><p>Keep your <code>brain/</code> folder in a public GitHub repo and add the <code>${gh.BRAIN_TOPIC}</code> topic. Only repos you mark this way ever appear here.</p></section>`;
+  return `
+    ${pageHead("People", "Look up anyone on GitHub and see what they're thinking about, building and deciding. Their brain is plain files in their repo, shown read-only.")}
+    <form class="people-search" id="people-form" autocomplete="off">
+      <label for="people-query" class="sr-only">GitHub username or link</label>
+      ${icon("search")}
+      <input id="people-query" name="query" placeholder="Paste a GitHub profile or repo link, or type a username" value="${esc(state.peopleQuery)}">
+      <button class="btn primary" type="submit">Look up</button>
+    </form>
+    ${profileBlock()}
+    <h3 class="section-title">Recently published by others</h3>
+    ${discoverHtml}
+    ${publishHint}`;
+}
+
+// ------------------------------------------------------------ the cairn: one stone per finished task
+
+function cairnSvg(count) {
+  const shown = Math.min(count, 8);
+  const tones = ["#c9bfac", "#b7ab95", "#d3cab9", "#a99c84", "#c2b6a1", "#9f927b", "#cdc3b1", "#b2a58e"];
+  let y = 156;
+  const stones = [];
+  for (let i = 0; i < shown; i++) {
+    const width = 112 - i * 11;
+    const height = 30 - i * 2;
+    const cx = 80 + (((i * 37) % 13) - 6);
+    const tilt = ((i * 53) % 11) - 5;
+    y -= height * 0.8;
+    const cy = y.toFixed(1);
+    stones.push(
+      `<g transform="rotate(${tilt} ${cx} ${cy})">` +
+        `<ellipse cx="${cx}" cy="${cy}" rx="${width / 2}" ry="${height / 2}" fill="${tones[i]}" stroke="var(--ink)" stroke-opacity=".28"/>` +
+        `<ellipse cx="${cx - width * 0.12}" cy="${(y - height * 0.18).toFixed(1)}" rx="${width * 0.26}" ry="${height * 0.16}" fill="#fff" fill-opacity=".28"/>` +
+      `</g>`,
+    );
+  }
+  const nextWidth = 112 - shown * 11;
+  const ghost = shown < 8
+    ? `<ellipse cx="80" cy="${(y - (30 - shown * 2) * 0.8).toFixed(1)}" rx="${nextWidth / 2}" ry="${(30 - shown * 2) / 2}" fill="none" stroke="var(--accent)" stroke-dasharray="3 4" stroke-opacity=".8"/>`
+    : "";
+  return `<svg class="cairn-art" viewBox="0 0 160 168" aria-hidden="true"><line x1="6" y1="160" x2="154" y2="160" stroke="var(--line-strong)"/>${stones.join("")}${ghost}</svg>`;
+}
+
 // ============================================================ boards: drag and drop
 
 function wireBoard() {
@@ -859,6 +1100,12 @@ async function moveNote(path, status) {
   await saveNote(path, { status });
   if (note.type === "idea") markGuide("moved");
   render();
+  if (note.type === "task" && status === "done") {
+    // The one celebrated moment: finishing work adds a stone to the cairn on Today.
+    const stones = state.notes.filter((n) => n.type === "task" && n.status === "done").length;
+    toast(`Done: “${note.title}”. That's ${stones} ${stones === 1 ? "stone" : "stones"} on the cairn.`);
+    return;
+  }
   toast(`“${note.title}” → ${STATUS_LABEL[status] || status}`);
 }
 
@@ -916,7 +1163,9 @@ function renderDrawer() {
   const backs = core.backlinks(state.notes, note.path).map(noteByPath).filter(Boolean);
   const created = typeof note.meta.created === "string" ? note.meta.created : "";
   const source = typeof note.meta.source === "string" ? note.meta.source : "";
-  const isIdea = note.type === "idea";
+  const isIdea = note.type === "idea" && !readOnly();
+  if (readOnly()) state.editorMode = "preview";
+  const lockedAttr = readOnly() ? "disabled" : "";
   const layer = document.createElement("div");
   layer.id = "drawer-layer";
   layer.innerHTML = `
@@ -925,19 +1174,19 @@ function renderDrawer() {
       <div class="drawer-head">
         ${typePill(note.type)}
         <span class="path" title="brain/${esc(note.path)}">brain/${esc(note.path)}</span>
-        <span class="save-state" id="save-state">Saved</span>
+        <span class="save-state" id="save-state">${readOnly() ? "Read-only" : "Saved"}</span>
         <button class="btn ghost sm icon-only" data-action="close-drawer" aria-label="Close">${icon("x")}</button>
       </div>
       <div class="drawer-body">
         ${state.spark && isIdea ? `<div class="spark-card">${icon("zap")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Added to the note below. Answer it in a line or two.</span></div></div>` : ""}
-        <input class="title-input" id="ed-title" value="${esc(note.title)}" aria-label="Title" placeholder="Untitled">
+        <input class="title-input" id="ed-title" value="${esc(note.title)}" aria-label="Title" placeholder="Untitled" ${lockedAttr}>
         <div class="props">
-          ${statuses.length ? `<label for="ed-status">Status</label><div><select id="ed-status" class="select">${statuses.map((s) => `<option value="${s}" ${s === note.status ? "selected" : ""}>${STATUS_LABEL[s]}</option>`).join("")}</select></div>` : ""}
-          <label for="ed-tags">Tags</label><input id="ed-tags" class="input" value="${esc(note.tags.join(", "))}" placeholder="comma, separated">
+          ${statuses.length ? `<label for="ed-status">Status</label><div><select id="ed-status" class="select" ${lockedAttr}>${statuses.map((s) => `<option value="${s}" ${s === note.status ? "selected" : ""}>${STATUS_LABEL[s]}</option>`).join("")}</select></div>` : ""}
+          <label for="ed-tags">Tags</label><input id="ed-tags" class="input" value="${esc(note.tags.join(", "))}" placeholder="comma, separated" ${lockedAttr}>
           ${source ? `<label>Code</label><div><span class="source-chip">${icon("code", "sm")}${esc(source)}</span></div>` : ""}
           ${created ? `<label>Created</label><span class="muted">${esc(created)}</span>` : ""}
         </div>
-        <div class="editor-tabs">
+        <div class="editor-tabs" ${readOnly() ? "hidden" : ""}>
           <div class="segmented" role="tablist" aria-label="Editor mode">
             <button class="${state.editorMode === "write" ? "on" : ""}" data-editor-mode="write" role="tab">Write</button>
             <button class="${state.editorMode === "preview" ? "on" : ""}" data-editor-mode="preview" role="tab">Preview</button>
@@ -1348,6 +1597,11 @@ function wireGlobal() {
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
+    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random"];
+    if (readOnly() && mutating.includes(action)) {
+      toast("This brain is read-only. Ask to join to contribute.");
+      return;
+    }
     const actions = {
       "toggle-nav": () => $("#app").classList.toggle("nav-open"),
       palette: openPalette,
@@ -1387,6 +1641,11 @@ function wireGlobal() {
       commit: commitBrain,
       "switch-brain": switchBrain,
       "map-reset": () => renderView(),
+      "open-brain": () => openBrain(actionEl.dataset.repo),
+      "open-profile": () => lookupProfile(actionEl.dataset.login),
+      "leave-brain": () => {
+        location.href = location.pathname;
+      },
       "load-sample": async () => {
         state.store.reset(DemoStore.sample());
         await loadAll();
@@ -1422,6 +1681,10 @@ function wireGlobal() {
   });
 
   document.addEventListener("submit", async (event) => {
+    if (event.target.id === "people-form") {
+      event.preventDefault();
+      return lookupProfile(event.target.query.value);
+    }
     const quick = event.target.closest("[data-quick]");
     if (!quick) return;
     event.preventDefault();
@@ -1451,7 +1714,7 @@ function wireGlobal() {
   $("#capture-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const value = captureInput.value.trim();
-    if (!value) return;
+    if (!value || readOnly()) return;
     captureInput.value = "";
     captureInput.dispatchEvent(new Event("input"));
     try {
@@ -1497,13 +1760,37 @@ function wireGlobal() {
 
 // ============================================================ welcome + boot
 
+class VisitorStore extends DemoStore {
+  constructor() {
+    super();
+    this.files = {};
+  }
+
+  save() {}
+
+  async info() {
+    return { mode: "visitor", project: "Explore", label: "Exploring · nothing saved", canGit: false, canScan: false };
+  }
+
+  async todos() {
+    return [];
+  }
+}
+
+function exploreTarget(raw) {
+  const parsed = gh.parseGithubInput(raw);
+  if (!parsed) return null;
+  return parsed.repo ? `?brain=${encodeURIComponent(parsed.owner + "/" + parsed.repo)}` : `?u=${encodeURIComponent(parsed.owner)}`;
+}
+
+
 function showWelcome(remembered) {
   const welcome = $("#welcome");
   const folderSupported = FolderStore.supported();
   welcome.innerHTML = `
     <div class="welcome-inner">
       <div class="brand">${LOGO}<span>Cairn</span></div>
-      <h1>A second brain that lives inside your repo</h1>
+      <h1>A second brain that lives <em>inside your repo</em></h1>
       <p class="lede">Capture ideas, brainstorm, record decisions and move tasks, all as plain Markdown in a <code>brain/</code> folder next to your code. Works alongside Obsidian, VS Code and any AI assistant.</p>
       <div class="choices">
         <section class="card choice">
@@ -1528,6 +1815,14 @@ function showWelcome(remembered) {
           <button class="btn" data-copy-cmd>${icon("copy")} Copy commands</button>
         </section>
       </div>
+      <form class="explore-box" id="explore-form" autocomplete="off">
+        <label for="explore-input">Or look someone up</label>
+        <div class="explore-row">
+          ${icon("search")}
+          <input id="explore-input" name="who" placeholder="github.com/username, username/repo or just a username">
+          <button class="btn" type="submit">Explore</button>
+        </div>
+      </form>
       <div class="welcome-points">
         <div><strong>Plain files</strong>Markdown with a tiny header. Delete Cairn and your brain still reads fine on GitHub.</div>
         <div><strong>Knows your code</strong>Turns TODO comments into tasks and keeps the file and line.</div>
@@ -1537,6 +1832,12 @@ function showWelcome(remembered) {
       <p class="welcome-foot"><a href="${REPO_URL}" target="_blank" rel="noopener">Source on GitHub</a> · <a href="https://juw12.github.io/p/cairn/" target="_blank" rel="noopener">About Cairn</a></p>
     </div>`;
   welcome.hidden = false;
+  $("#explore-form", welcome).onsubmit = (event) => {
+    event.preventDefault();
+    const target = exploreTarget(event.target.who.value);
+    if (!target) return toast("That doesn't look like a GitHub username or link.", { error: true });
+    location.href = location.pathname + target;
+  };
   welcome.onclick = async (event) => {
     const copyButton = event.target.closest("[data-copy-cmd]");
     if (copyButton) return copyText(`git clone ${REPO_URL}\npython -m cairn --root ~/your-repo`, "Commands copied");
@@ -1570,7 +1871,9 @@ async function start(store) {
   $("#app").hidden = false;
   $("#project-name").textContent = state.info.project;
   $("#project-mode").textContent = state.info.label;
-  document.title = `${state.info.project} · Cairn`;
+  document.title = readOnly() ? `@${state.info.owner}/${state.info.project} · Cairn` : `${state.info.project} · Cairn`;
+  document.body.classList.toggle("readonly", readOnly());
+  $("#capture-form").hidden = readOnly() || state.info.mode === "visitor";
   renderSidebarFoot();
   setView(location.hash.replace("#/", "") || "home", { push: false });
   refreshTodos();
@@ -1588,8 +1891,32 @@ async function boot() {
   wireGlobal();
 
   const params = new URLSearchParams(location.search);
+  const brainParam = params.get("brain");
+  if (brainParam) {
+    const parsed = gh.parseGithubInput(brainParam);
+    try {
+      if (!parsed || !parsed.repo) throw new Error("Use owner/repo, for example juw12/cairn.");
+      const repo = await gh.fetchRepo(parsed.owner, parsed.repo);
+      const files = await gh.loadBrainFiles(repo.owner, repo.name, repo.branch);
+      return start(new GitHubStore(repo, files));
+    } catch (error) {
+      toast(error.message || "Couldn't open that brain.", { error: true });
+      await start(new VisitorStore());
+      return setView("people");
+    }
+  }
   const server = await ServerStore.detect();
-  if (server) return start(server);
+  const userParam = params.get("u");
+  if (server) {
+    await start(server);
+    if (userParam) lookupProfile(userParam);
+    return;
+  }
+  if (userParam) {
+    const mode = localStorage.getItem("cairn.mode");
+    await start(mode === "demo" ? new DemoStore() : new VisitorStore());
+    return lookupProfile(userParam);
+  }
   if (params.has("empty")) {
     const store = new DemoStore();
     store.reset(DemoStore.empty());
@@ -1604,6 +1931,21 @@ async function boot() {
   if (mode === "demo") return start(new DemoStore());
   showWelcome(mode === "folder" ? await FolderStore.remembered() : null);
 }
+
+// Broken avatars (offline, blocked CDN) fall back to a quiet neutral disc instead of a torn-image icon.
+const AVATAR_FALLBACK =
+  "data:image/svg+xml," +
+  encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="#d8d2c4"/></svg>');
+document.addEventListener(
+  "error",
+  (event) => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement) || image.dataset.fallback) return;
+    image.dataset.fallback = "1";
+    image.src = AVATAR_FALLBACK;
+  },
+  true,
+);
 
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});

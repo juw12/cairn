@@ -44,3 +44,26 @@ Still below 10, and why:
   because headless browsers can't use the folder picker. It shares the store interface with the tested adapters,
   but treat it as manually verified only.
 - Scores are self-judged; a separate reviewer would make them more trustworthy.
+
+## Round: network step 1 + redesign (self-judged)
+
+Goal from the user: explore other people's brains via GitHub, and a UI that doesn't look AI-generated,
+grounded in psychology. Design rationale lives in `plan/DESIGN.md`.
+
+Changes
+- People view: look up any GitHub user or repo link; profile shows proof of work read from their
+  brain files (working on, shipped, decisions, open to collaborate). Discovery via the `cairn-brain` topic.
+- Read-only brain mode (`?brain=owner/repo`): banner with Ask to join (prefilled issue), no create
+  buttons or drag, drawer is preview-only, action guard as a second line of defence.
+- Redesign: warm paper, ink, one signal colour, Instrument Serif + Geist (bundled, OFL), hairline rules,
+  editorial Today page with a cairn that grows a stone per finished task.
+- Cairn dogfoods itself: `brain/` in this repo is a real brain.
+
+Checks
+- 39 tests pass (14 browser e2e incl. profile, unknown user, bad input, read-only brain, explore box).
+- Screenshots reviewed: profile, read-only board, welcome, dark home. Fixed: duplicate "Published
+  brains" section, create buttons on read-only pages, cramped command block on welcome.
+
+Not verified
+- Live GitHub API behaviour beyond the mocked responses (rate limits, very large repos).
+- Real users: the "five people publish a brain" task is the actual test of the network idea.

@@ -305,3 +305,43 @@ export class DemoStore {
     return DEMO_TODOS;
   }
 }
+
+// ------------------------------------------------------------ someone's public brain on GitHub (read-only)
+
+export class GitHubStore {
+  constructor(repo, files) {
+    this.repo = repo;
+    this.files = files;
+  }
+
+  async info() {
+    return {
+      mode: "github",
+      project: this.repo.name,
+      label: `@${this.repo.owner} · read-only`,
+      canGit: false,
+      canScan: false,
+      readOnly: true,
+      owner: this.repo.owner,
+      repoName: this.repo.name,
+      url: this.repo.url,
+      avatar: this.repo.avatar,
+    };
+  }
+
+  async list() {
+    return this.files.map((file) => ({ ...file }));
+  }
+
+  async write() {
+    throw new Error("This brain is read-only. Ask to join to contribute.");
+  }
+
+  async remove() {
+    throw new Error("This brain is read-only.");
+  }
+
+  async todos() {
+    return [];
+  }
+}
