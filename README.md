@@ -1,0 +1,182 @@
+<!-- HERO:START -->
+<p align="center">
+  <a href="https://juw12.github.io/cairn/"><img src="docs/media/banner.jpg" alt="Cairn: a second brain that lives inside your repo." width="100%"></a>
+</p>
+
+<p align="center">
+  <b>A second brain that lives inside your repo.</b><br>
+  Capture ideas, brainstorm, record decisions and move tasks, all as plain Markdown next to your code.
+</p>
+
+<p align="center">
+  <a href="https://juw12.github.io/cairn/?demo=1"><b>Try it live</b></a> ·
+  <a href="#see-it-in-action">See it in action</a> ·
+  <a href="#highlights">Highlights</a> ·
+  <a href="https://juw12.github.io/p/cairn/">Landing page</a> ·
+  <a href="https://github.com/juw12">More by juw12</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/juw12/cairn/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/juw12/cairn/tests.yml?branch=main&label=tests" alt="Tests"></a>
+  <a href="https://github.com/juw12/cairn"><img src="https://img.shields.io/github/last-commit/juw12/cairn?label=updated&color=0f766e" alt="Last updated"></a>
+  <a href="https://juw12.github.io/cairn/?demo=1"><img src="https://img.shields.io/badge/demo-live-2ea44f" alt="Live demo"></a>
+  <img src="https://img.shields.io/badge/Web-24292f" alt="Web">
+  <img src="https://img.shields.io/badge/Python_CLI-24292f" alt="Python CLI">
+  <img src="https://img.shields.io/badge/zero_dependencies-24292f" alt="Zero dependencies">
+  <img src="https://img.shields.io/badge/license-MIT-0f766e" alt="MIT license">
+</p>
+
+<a id="highlights"></a>
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <b>Plain files, no lock-in</b><br>
+      Everything is Markdown in a <code>brain/</code> folder. Delete Cairn and it still reads fine on GitHub, in Obsidian or in VS Code.
+    </td>
+    <td width="33%" valign="top">
+      <b>Knows your code</b><br>
+      Turns <code>TODO</code>/<code>FIXME</code> comments into tasks that remember the file and line, and commits the brain in one click.
+    </td>
+    <td width="33%" valign="top">
+      <b>Made for AI assistants too</b><br>
+      One click writes <code>brain/CONTEXT.md</code>, a project brief Copilot, Claude, Cursor or ChatGPT can read. No API keys.
+    </td>
+  </tr>
+</table>
+
+## See it in action
+
+<p align="center">
+  <a href="https://juw12.github.io/cairn/?demo=1"><img src="docs/media/demo.png" alt="Cairn ideas wall" width="820"></a><br>
+  <sub>Open the interactive demo at <a href="https://juw12.github.io/cairn/?demo=1">juw12.github.io/cairn</a></sub>
+</p>
+<!-- HERO:END -->
+
+## About
+
+**Your project's thinking is scattered.** Ideas sit in Notion, tasks in GitHub Issues, decisions
+in Slack threads, TODOs in code comments, and the "why" lives in someone's head. Obsidian and
+Notion are great at notes, but neither knows anything about your repo.
+
+Cairn puts one calm place **inside the project**, built around how project work actually moves:
+
+```
+capture  →  brainstorm  →  decide  →  do  →  remember
+  bar        ideas wall    decision    board    notes, journal,
+  + CLI      + sparks      log                  map, context pack
+```
+
+| Screen | What it does |
+|---|---|
+| **Quick capture** | One bar on every screen. `todo: ship v1 #release`, `decision: use SQLite`, `log: fixed the bug` or just text (an idea). It shows where the note will go before you press Enter. |
+| **Ideas wall** | Raw → Exploring → Ready → Parked. Drag ideas right as they firm up. **Spark** drops a thinking prompt into an idea; **Promote to task** creates a linked task. |
+| **Board** | To do → Doing → Done with drag and drop, checklists and progress bars. |
+| **Decisions** | Lightweight decision records (context, options, decision, consequences), numbered and reviewed in PRs like code. |
+| **Notes, Journal, Map** | Markdown editor with preview, `[[wikilinks]]`, backlinks, tags, a page per day and a graph of how everything connects. |
+| **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
+| **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
+| **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture. |
+
+## Use it
+
+There are three ways to run it. All of them read and write the same plain files.
+
+**1. Local app (full features).** Python 3.10+, no dependencies:
+
+```bash
+git clone https://github.com/juw12/cairn
+cd your-project
+python -m cairn --root .          # run from the cairn folder, or `pip install ./cairn` and run `cairn`
+```
+
+It opens `http://127.0.0.1:4777` with code scanning and one-click **Commit brain** (commits only `brain/`; push with your usual git tool).
+
+**2. In the browser, on your real repo.** Open [juw12.github.io/cairn](https://juw12.github.io/cairn/), choose
+**Open a repo folder**, and pick your project. Chrome and Edge on desktop can read and write the folder directly
+(File System Access API). Nothing is uploaded.
+
+**3. Demo.** [Try the sample project](https://juw12.github.io/cairn/?demo=1) (an offline hiking app). It's saved only in your browser.
+
+### Command line
+
+```bash
+cairn init                               # create brain/ (never overwrites)
+cairn add "todo: ship v1 #release"       # capture from the terminal
+cairn add "decision: use SQLite"         # → brain/decisions/0001-use-sqlite.md
+cairn list --type task --status doing
+cairn todos                              # TODO/FIXME/HACK comments in the code
+cairn context                            # write brain/CONTEXT.md
+cairn serve --port 4777                  # the app (default command)
+```
+
+## The data format
+
+```
+your-repo/
+  brain/
+    ideas/      offline-maps.md
+    tasks/      ship-v1.md
+    decisions/  0001-use-pmtiles.md
+    notes/      architecture.md
+    journal/    2026-11-05.md
+    CONTEXT.md  (generated)
+    README.md   (explains the folder to people who don't use Cairn)
+```
+
+```markdown
+---
+title: Ship v1
+type: task            # idea | task | decision | note | journal
+status: doing         # idea: raw/exploring/ready/parked · task: todo/doing/done · decision: proposed/accepted/superseded
+tags: [release, web]
+created: 2026-11-05
+source: src/app.py:42 # optional: where in the code this came from
+---
+Plain Markdown. Link other notes with [[offline-maps]].
+```
+
+* File names are the links, so `[[offline-maps]]` resolves in **Obsidian** and **Foam** too. Open `brain/` as an Obsidian vault if you like.
+* Fields Cairn doesn't know (aliases, other plugins' data) are preserved when it saves.
+* If a note changed in another editor since you opened it, Cairn loads the newer version instead of overwriting it.
+
+### Make your AI assistant use it
+
+Add one line to `AGENTS.md`, `CLAUDE.md` or `.github/copilot-instructions.md`:
+
+```
+Read brain/CONTEXT.md before starting. Decisions in brain/decisions/ marked "accepted" are binding.
+```
+
+## Why
+
+| Tool | Great at | Missing for "a brain inside the project" |
+|---|---|---|
+| Notion | Databases, dashboards | Lives in its cloud: not diffable, not reviewable, invisible to tools that read the repo |
+| Obsidian | Linking local Markdown | Knows nothing about the repo: no code TODOs, no git, no project flow without plugin setup |
+| Foam (VS Code) | Wikilinks in the editor | Editor-locked; no board or brainstorm flow |
+| GitHub Issues/Projects | Tracking work | Heavy for half-formed ideas; needs network; not a thinking tool |
+
+Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, decisions and next steps
+**with the code**, in a format all of those tools (and your AI assistant) can read.
+
+## Privacy and security
+
+* No account, no telemetry, no external requests. Fonts and icons are bundled.
+* The local server binds to `127.0.0.1` only, checks the `Host` header and requires a custom header on every API call, so other websites can't reach it.
+* It reads and writes only `.md` files inside the brain folder; paths that escape it are refused (tested).
+
+## Development
+
+```bash
+python -m unittest discover -s tests          # 34 tests: core, API, CLI, Python↔JS parity, browser e2e
+pip install playwright && playwright install chromium   # for the parity and e2e tests
+python scripts/make_media.py                  # regenerate the banner and screenshot
+```
+
+The web app in `docs/` is plain HTML, CSS and ES modules with no build step. `cairn/core.py` and
+`docs/core.js` implement the same rules and are checked against each other by `tests/test_parity.py`.
+How it was planned and scored: [`PLAN.md`](PLAN.md), [`plan/rubric.md`](plan/rubric.md), [`plan/refine_log.md`](plan/refine_log.md).
+
+## License
+
+[MIT](LICENSE) © Juwen Lie. An independent personal project.

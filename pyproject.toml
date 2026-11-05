@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cairn-brain"
+version = "1.0.0"
+description = "A second brain that lives inside your repo: ideas, tasks, decisions and notes as plain Markdown."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Juwen Lie" }]
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["second-brain", "notes", "markdown", "kanban", "adr", "obsidian", "git"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Environment :: Web Environment",
+  "Topic :: Office/Business :: Groupware",
+]
+
+[project.urls]
+Homepage = "https://juw12.github.io/p/cairn/"
+App = "https://juw12.github.io/cairn/"
+Source = "https://github.com/juw12/cairn"
+
+[project.scripts]
+cairn = "cairn.cli:main"
+
+[tool.setuptools]
+packages = ["cairn", "cairn.web"]
+
+[tool.setuptools.package-dir]
+cairn = "cairn"
+"cairn.web" = "docs"
+
+[tool.setuptools.package-data]
+"cairn.web" = ["*.html", "*.js", "*.css", "*.webmanifest", "icons/*", "media/*"]

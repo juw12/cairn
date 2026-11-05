@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cairn · a second brain that lives inside your repo</title>
+<meta name="description" content="Capture, brainstorm, decide and ship, stored as plain Markdown next to your code. Works with Obsidian, VS Code and any AI assistant.">
+<meta name="theme-color" content="#0f766e">
+<meta property="og:title" content="Cairn: a second brain that lives inside your repo">
+<meta property="og:description" content="Capture, brainstorm, decide and ship, stored as plain Markdown next to your code.">
+<meta property="og:image" content="https://juw12.github.io/cairn/media/banner.jpg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+<script>
+  // Apply the theme before first paint to avoid a flash.
+  (function () {
+    var saved = localStorage.getItem("cairn.theme");
+    var dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  })();
+</script>
+</head>
+<body>
+<div id="welcome" class="welcome" hidden></div>
+
+<div id="app" class="app" hidden>
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+    <div class="brand" id="brand"></div>
+    <button class="project-chip" id="project-chip" data-action="switch-brain" title="Switch brain">
+      <strong id="project-name">project</strong>
+      <span id="project-mode">…</span>
+    </button>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot" id="sidebar-foot"></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="btn ghost icon-only menu-btn" data-action="toggle-nav" aria-label="Open menu" id="menu-btn"></button>
+      <form class="capture" id="capture-form" autocomplete="off">
+        <label for="capture-input" class="sr-only">Quick capture</label>
+        <span id="capture-icon"></span>
+        <input id="capture-input" name="capture" placeholder="Capture anything… try “todo: ship v1 #release” or “decision: use SQLite”" enterkeyhint="done">
+        <span class="hint" id="capture-hint"><kbd>C</kbd> to focus · <kbd>Enter</kbd> to save</span>
+        <span class="capture-type pill" id="capture-type" hidden></span>
+      </form>
+      <button class="btn" data-action="palette" id="search-btn" aria-label="Search and commands (Ctrl+K)"></button>
+    </header>
+    <main class="view" id="view" tabindex="-1"></main>
+  </div>
+</div>
+
+<div id="layer"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
