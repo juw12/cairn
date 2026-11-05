@@ -311,7 +311,8 @@ button.tag:hover, .tag.on { background: var(--accent-soft); color: var(--accent-
 /* ------------------------------------------------------------ lists */
 
 .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.segmented { display: inline-flex; padding: 3px; gap: 2px; background: var(--sunken); border-radius: 9px; }
+.segmented { display: inline-flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; padding: 3px; gap: 2px; background: var(--sunken); border-radius: 9px; }
+.segmented button { flex: none; }
 .segmented button { height: 28px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); font-weight: 500; font-size: 13px; }
 .segmented button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 .search-field { position: relative; flex: 1; min-width: 180px; max-width: 320px; }
@@ -492,6 +493,8 @@ button.tag:hover, .tag.on { background: var(--accent-soft); color: var(--accent-
   .column { min-height: 0; }
   .move-select { display: block; height: 28px; font-size: 12px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); }
   .choices, .welcome-points { grid-template-columns: minmax(0, 1fr); }
+  .search-field { flex: 1 1 100%; max-width: none; min-width: 0; }
+  .toolbar > * { min-width: 0; }
   .capture .hint { display: none; }
   .capture input { padding-right: 12px; }
   .list-row { grid-template-columns: 22px minmax(0, 1fr) auto; }
