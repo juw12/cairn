@@ -193,6 +193,14 @@ class EndToEndTests(unittest.TestCase):
         page.click("#people-form button[type=submit]")
         page.wait_for_function("() => document.querySelector('#view').innerText.includes(\"doesn't look like\")")
 
+    def test_typing_survives_background_render(self):
+        page = self.open()
+        page.click('#nav [data-go="people"]')
+        page.fill("#people-query", "juw12")
+        page.evaluate("window.cairn.rerender()")
+        self.assertEqual(page.input_value("#people-query"), "juw12")
+        self.assertEqual(self.errors, [])
+
     def test_read_only_brain(self):
         page = self.open("?brain=juw12/cairn")
         page.wait_for_selector(".ro-banner")

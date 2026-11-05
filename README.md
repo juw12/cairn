@@ -183,7 +183,7 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 ## Development
 
 ```bash
-python -m unittest discover -s tests          # 39 tests: core, API, CLI, Python↔JS parity, browser e2e
+python -m unittest discover -s tests          # 40 tests: core, API, CLI, Python↔JS parity, browser e2e
 pip install playwright && playwright install chromium   # for the parity and e2e tests
 python scripts/make_media.py                  # regenerate the banner and screenshot
 ```

@@ -383,7 +383,16 @@ function setView(view, { push = true } = {}) {
 function renderView() {
   const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView, people: peopleView };
   const view = $("#view");
+  // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing.
+  const typing = $("#people-query");
+  const hadFocus = typing && document.activeElement === typing;
+  if (typing) state.peopleQuery = typing.value;
   view.innerHTML = readOnlyBanner() + (renderers[state.view] || home)();
+  if (hadFocus) {
+    const restored = $("#people-query");
+    restored?.focus();
+    restored?.setSelectionRange(restored.value.length, restored.value.length);
+  }
   afterRender();
 }
 
@@ -1951,5 +1960,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
-window.cairn = { state, core };
+window.cairn = { state, core, rerender: () => renderView() };
 boot();

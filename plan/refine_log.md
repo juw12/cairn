@@ -60,9 +60,10 @@ Changes
 - Cairn dogfoods itself: `brain/` in this repo is a real brain.
 
 Checks
-- 39 tests pass (14 browser e2e incl. profile, unknown user, bad input, read-only brain, explore box).
+- 40 tests pass (15 browser e2e incl. profile, unknown user, bad input, read-only brain, explore box).
 - Screenshots reviewed: profile, read-only board, welcome, dark home. Fixed: duplicate "Published
-  brains" section, create buttons on read-only pages, cramped command block on welcome.
+  brains" section, create buttons on read-only pages, cramped command block on welcome. CI caught a real race: the discover list re-rendered the
+  People view and wiped what the user was typing; fixed and covered by a regression test.
 
 Not verified
 - Live GitHub API behaviour beyond the mocked responses (rate limits, very large repos).
