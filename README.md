@@ -111,6 +111,25 @@ This repo dogfoods it: see [@juw12's profile](https://juw12.github.io/cairn/?u=j
 other people's brains are always read-only. Unsigned GitHub API calls are limited to 60 per hour per IP, so
 results are cached for 10 minutes.
 
+### Edit your brain from any device
+
+Sign in with GitHub on the web app and your brain repo becomes editable from your phone, a borrowed laptop or
+any browser. Every save is a commit to `brain/` in your repo; there is still no Cairn server or database.
+
+1. Open [juw12.github.io/cairn](https://juw12.github.io/cairn/) → **Sign in with GitHub**.
+2. Paste a token. The narrowest is a [fine-grained token](https://github.com/settings/personal-access-tokens/new)
+   limited to your brain repo with *Contents: Read and write*. A [classic token with `public_repo`](https://github.com/settings/tokens/new?scopes=public_repo&description=Cairn)
+   also lets you create new brains from the People page.
+3. Edit as usual. Typing is batched, so a burst of edits becomes one commit.
+
+If the same note was changed somewhere else, Cairn shows the newer version and keeps yours next to it
+(*Use my version*, *Copy my text* or *Keep the newer one*). Failed saves (offline, expired sign-in) keep your text
+the same way. Repos you can't push to stay read-only.
+
+One-click **Continue with GitHub** (device flow, no token to copy) needs a tiny Cloudflare Worker because GitHub's
+OAuth endpoints don't allow browser calls. It holds no secret and forwards only those two requests:
+see [`worker/README.md`](worker/README.md).
+
 ### Command line
 
 ```bash
@@ -175,15 +194,16 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 
 ## Privacy and security
 
-* No account and no telemetry. Fonts (SIL OFL) and icons are bundled.
-* The only external requests are to `api.github.com` and `raw.githubusercontent.com`, and only when you look someone up or open a published brain. Your own brain never leaves your machine.
+* No Cairn account and no telemetry. Fonts (SIL OFL) and icons are bundled.
+* The only external requests are to `api.github.com` and `raw.githubusercontent.com`, and only when you look someone up, open a published brain or sign in. A local brain never leaves your machine.
+* Signing in is optional. Your token is kept in this tab only (`sessionStorage`) unless you tick *Remember on this device*; it is sent only to `api.github.com` (tested), and *Sign out* deletes it. With the optional Worker, the device-flow token passes through your own Worker once on its way back to the browser.
 * The local server binds to `127.0.0.1` only, checks the `Host` header and requires a custom header on every API call, so other websites can't reach it.
 * It reads and writes only `.md` files inside the brain folder; paths that escape it are refused (tested).
 
 ## Development
 
 ```bash
-python -m unittest discover -s tests          # 40 tests: core, API, CLI, Python↔JS parity, browser e2e
+python -m unittest discover -s tests          # 54 tests: core, API, CLI, parity, e2e, sign-in, Worker
 pip install playwright && playwright install chromium   # for the parity and e2e tests
 python scripts/make_media.py                  # regenerate the banner and screenshot
 ```

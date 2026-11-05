@@ -2,6 +2,7 @@ import * as core from "./core.js";
 import { renderMarkdown, toggleTask, escapeHtml as esc } from "./md.js";
 import { ServerStore, FolderStore, DemoStore, GitHubStore, ConflictError } from "./store.js";
 import * as gh from "./github.js";
+import * as auth from "./auth.js";
 
 // ============================================================ constants
 
@@ -101,6 +102,7 @@ const VIEWS = [
 ];
 
 const REPO_URL = "https://github.com/juw12/cairn";
+const LAST_BRAIN_KEY = "cairn.lastBrain";
 
 // ============================================================ state
 
@@ -222,13 +224,17 @@ function saveNote(path, changes) {
       return noteByPath(path);
     } catch (error) {
       if (error instanceof ConflictError) {
+        // Show the newer version, and hold on to ours so nothing typed is lost.
+        state.held = { path, text, kind: "conflict" };
         upsertFile(path, error.text, error.mtime);
-        toast("This note changed in another editor, so Cairn loaded the newer version.", { error: true });
+        toast("This note changed somewhere else. Both versions are kept; pick one in the note.");
         if (state.open === path) renderDrawer();
         render();
         return null;
       }
-      toast(error.message || "Could not save", { error: true });
+      state.held = { path, text, kind: "failed", message: error.message || "Could not save" };
+      toast(`${error.message || "Could not save"} Your text is kept in the note.`, { error: true });
+      if (state.open === path) renderDrawer();
       throw error;
     }
   };
@@ -240,7 +246,12 @@ function saveNote(path, changes) {
 async function deleteNote(path) {
   const file = fileByPath(path);
   if (!file) return;
-  await state.store.remove(path);
+  try {
+    await state.store.remove(path);
+  } catch (error) {
+    toast(error.message || "Couldn't delete that note.", { error: true });
+    return;
+  }
   upsertFile(path, null);
   scheduleGitRefresh();
   closeDrawer();
@@ -361,6 +372,16 @@ function renderSidebarFoot() {
         <button class="btn sm ${changes ? "primary" : ""}" style="width:100%;margin-top:8px" data-action="commit" ${changes ? "" : "disabled"}>${icon("git", "sm")} Commit brain</button>
       </div>`);
   }
+  const me = auth.session();
+  parts.push(
+    me
+      ? `<div class="account-row">
+          <img src="${esc(me.avatar)}" alt="" width="22" height="22">
+          <span class="who" title="Signed in with GitHub${me.remember ? ", remembered on this device" : " for this tab"}">@${esc(me.login)}</span>
+          <button class="btn sm ghost" data-action="sign-out">Sign out</button>
+        </div>`
+      : `<button class="btn sm account-signin" data-action="sign-in">${icon("github", "sm")} Sign in to edit from any device</button>`,
+  );
   parts.push(`
     <div class="foot-row">
       <button class="btn sm ghost" data-action="theme" aria-label="Toggle theme">${icon(theme === "dark" ? "sun" : "moon", "sm")} ${theme === "dark" ? "Light" : "Dark"}</button>
@@ -916,8 +937,8 @@ async function lookupProfile(raw) {
     state.profile = { user, brains, proof: null };
     renderView();
     if (brains.length) {
-      const files = await gh.loadBrainFiles(brains[0].owner, brains[0].name, brains[0].branch);
-      state.profile.proof = proofOfWork(brainNotes(files));
+      const loaded = await gh.loadBrainFiles(brains[0].owner, brains[0].name, brains[0].branch);
+      state.profile.proof = proofOfWork(brainNotes(loaded.files));
       state.profile.proofRepo = brains[0];
     }
   } catch (error) {
@@ -1011,6 +1032,207 @@ function repoRow(repo) {
     </div>`;
 }
 
+// ------------------------------------------------------------ sign in
+
+function openSignIn() {
+  if ($("#signin-dialog")) return;
+  const deviceReady = Boolean(auth.authUrl());
+  const wrap = document.createElement("div");
+  wrap.className = "modal-wrap";
+  wrap.id = "signin-dialog";
+  wrap.innerHTML = `
+    <div class="modal signin" role="dialog" aria-modal="true" aria-labelledby="signin-title">
+      <h2 id="signin-title">Sign in with GitHub</h2>
+      <p>Edit your brain from any device. Your notes stay in your own GitHub repo; Cairn has no server and no database.</p>
+      <ul class="signin-facts">
+        <li><strong>Access:</strong> read and write your <em>public</em> repos (GitHub calls this <code>public_repo</code>). Cairn only touches <code>brain/</code> folders.</li>
+        <li><strong>Where it lives:</strong> in this browser only, sent only to <code>api.github.com</code>.</li>
+        <li><strong>Undo:</strong> sign out any time, or revoke access on GitHub.</li>
+      </ul>
+      ${deviceReady ? `
+        <button type="button" class="btn primary wide" data-signin="device">${icon("github", "sm")} Continue with GitHub</button>
+        <p class="hint">You approve on github.com. The sign-in passes once through Cairn's tiny relay, which keeps nothing; after that Cairn talks only to GitHub.</p>
+        <div class="device-step" id="device-step" hidden></div>
+        <div class="or"><span>or paste a token</span></div>` : ""}
+      <form id="token-form" class="token-form" autocomplete="off">
+        <label for="token-input">Personal access token</label>
+        <input id="token-input" class="input" type="password" spellcheck="false" placeholder="github_pat_… or ghp_…">
+        <p class="hint">Make one on GitHub: a <a href="${auth.TOKEN_LINKS.fineGrained}" target="_blank" rel="noopener">fine-grained token</a> is the narrowest (choose only your brain repo, Contents: Read and write). A <a href="${auth.TOKEN_LINKS.classic}" target="_blank" rel="noopener">classic token with public_repo</a> also lets you create new brains from here.</p>
+        <label class="check"><input type="checkbox" id="signin-remember"> Remember on this device</label>
+        <p class="hint" id="remember-hint">Off: forgotten when you close this tab. Turn it on only on your own device.</p>
+        <p class="form-error" id="signin-error" role="alert" hidden></p>
+        <div class="actions">
+          <button type="button" class="btn ghost" data-cancel>Cancel</button>
+          <button type="submit" class="btn ${deviceReady ? "" : "primary"}" id="token-submit">Sign in with token</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(wrap);
+  const controller = new AbortController();
+  const close = () => {
+    controller.abort();
+    wrap.remove();
+  };
+  const showError = (message) => {
+    const el = $("#signin-error", wrap);
+    el.textContent = message;
+    el.hidden = !message;
+  };
+  const remember = () => $("#signin-remember", wrap).checked;
+  $("#signin-remember", wrap).addEventListener("change", (e) => {
+    $("#remember-hint", wrap).textContent = e.target.checked
+      ? "On: kept in this browser until you sign out. Use only on your own device."
+      : "Off: forgotten when you close this tab. Turn it on only on your own device.";
+  });
+  wrap.addEventListener("click", (e) => {
+    if (e.target === wrap || e.target.closest("[data-cancel]")) close();
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  });
+  $("#token-form", wrap).addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const button = $("#token-submit", wrap);
+    button.disabled = true;
+    button.textContent = "Checking…";
+    showError("");
+    try {
+      const me = await auth.signInWithToken($("#token-input", wrap).value, { remember: remember() });
+      close();
+      afterSignIn(me);
+    } catch (error) {
+      showError(error.message);
+      button.disabled = false;
+      button.textContent = "Sign in with token";
+    }
+  });
+  $("[data-signin=device]", wrap)?.addEventListener("click", async (e) => {
+    const step = $("#device-step", wrap);
+    e.currentTarget.disabled = true;
+    showError("");
+    try {
+      const flow = await auth.startDeviceFlow();
+      step.hidden = false;
+      step.innerHTML = `
+        <p>Enter this code on GitHub:</p>
+        <div class="device-code" id="device-code">${esc(flow.userCode)}</div>
+        <a class="btn primary wide" id="device-open" href="${esc(flow.verificationUri)}" target="_blank" rel="noopener">${icon("copy", "sm")} Copy code and open GitHub</a>
+        <p class="muted waiting">Waiting for you to approve on GitHub…</p>`;
+      $("#device-open", wrap).addEventListener("click", () => navigator.clipboard?.writeText(flow.userCode).catch(() => {}));
+      const me = await auth.finishDeviceFlow(flow, { remember: remember(), signal: controller.signal, pollMs: window.CAIRN_TEST_POLL_MS });
+      close();
+      afterSignIn(me);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      showError(error.message);
+      step.hidden = true;
+      e.currentTarget.disabled = false;
+    }
+  });
+  setTimeout(() => (deviceReady ? $("[data-signin=device]", wrap) : $("#token-input", wrap))?.focus(), 0);
+}
+
+function afterSignIn(me) {
+  toast(`Signed in as @${me.login}`);
+  state.mine = null;
+  // A brain you were reading may now be editable; otherwise show your brains.
+  if (state.info?.mode === "github") return location.reload();
+  location.href = `${location.pathname}?u=${encodeURIComponent(me.login)}`;
+}
+
+async function afterSignOut() {
+  state.mine = null;
+  if (state.store instanceof GitHubStore && state.store.writable) {
+    // Keep what's on screen, but stop offering edits that can't be saved.
+    await flushPending().catch(() => {});
+    state.store.writable = false;
+    state.info = await state.store.info();
+    applyInfo();
+    if (state.open) renderDrawer();
+    render();
+    return;
+  }
+  renderSidebarFoot();
+  if (state.view === "people") renderView();
+}
+
+async function loadMine() {
+  if (state.mine || !auth.signedIn()) return;
+  state.mine = { loading: true, items: [] };
+  try {
+    state.mine = { items: await gh.myBrains() };
+  } catch (error) {
+    state.mine = { items: [], error: error.message };
+  }
+  if (state.view === "people") renderView();
+}
+
+function myBrainsBlock() {
+  const me = auth.session();
+  if (!me) {
+    return `
+      <section class="signin-cta">
+        <div><h3>Edit your own brain from any device</h3><p>Sign in with GitHub. Your notes stay in your repo; each save is a commit.</p></div>
+        <button class="btn primary" data-action="sign-in">${icon("github", "sm")} Sign in</button>
+      </section>`;
+  }
+  loadMine();
+  const mine = state.mine;
+  const list = !mine || mine.loading
+    ? `<p class="muted">Looking for your brains…</p>`
+    : mine.error
+      ? `<div class="notice">${icon("search")}<div>${esc(mine.error)}</div></div>`
+      : mine.items.length
+        ? `<div class="repo-list">${mine.items.map(repoRow).join("")}</div>`
+        : `<p class="muted">No brains yet. A brain is a repo with the <code>${gh.BRAIN_TOPIC}</code> topic. Create one below.</p>`;
+  return `
+    <section class="my-brains">
+      <h3 class="section-title">Your brains</h3>
+      ${list}
+      <form class="create-brain" id="create-brain-form" autocomplete="off">
+        <label for="new-brain-name">New brain</label>
+        <span class="prefix">github.com/${esc(me.login)}/</span>
+        <input id="new-brain-name" class="input" value="${mine?.items?.length ? "" : "brain"}" placeholder="repo-name" spellcheck="false">
+        <button class="btn" type="submit" data-action="create-brain">${icon("plus", "sm")} Create</button>
+      </form>
+      <p class="hint">Creates a public repo with the <code>${gh.BRAIN_TOPIC}</code> topic and a starter idea and task. Anyone can read it; only you can edit it.</p>
+    </section>`;
+}
+
+async function createMyBrain() {
+  const input = $("#new-brain-name");
+  const name = (input?.value || "").trim();
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(name)) {
+    toast("Use letters, numbers, dots, dashes or underscores for the repo name.", { error: true });
+    input?.focus();
+    return;
+  }
+  const button = $("#create-brain-form button");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Creating…";
+  }
+  try {
+    const repo = await gh.createBrain(name, "My Cairn brain: ideas, tasks and decisions in plain Markdown.", today());
+    toast(`Created ${repo.fullName}`);
+    openBrain(repo.fullName);
+  } catch (error) {
+    const message = error.conflict
+      ? `You already have a repo called "${name}". Pick another name.`
+      : /refused/.test(error.message || "")
+        ? "Your token can't create repos. Use a classic token with public_repo, or create the repo on GitHub and add the cairn-brain topic."
+        : error.message;
+    toast(message || "Couldn't create the brain.", { error: true });
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = `${icon("plus", "sm")} Create`;
+    }
+  }
+}
+
 function peopleView() {
   loadDiscover();
   const d = state.discover;
@@ -1035,6 +1257,7 @@ function peopleView() {
       <input id="people-query" name="query" placeholder="Paste a GitHub profile or repo link, or type a username" value="${esc(state.peopleQuery)}">
       <button class="btn primary" type="submit">Look up</button>
     </form>
+    ${myBrainsBlock()}
     ${profileBlock()}
     <h3 class="section-title">Recently published by others</h3>
     ${discoverHtml}
@@ -1143,7 +1366,7 @@ function queueChange(changes) {
   Object.assign(pending.changes, changes);
   setSaveState("Saving…", true);
   clearTimeout(pendingTimer);
-  pendingTimer = setTimeout(flushPending, 450);
+  pendingTimer = setTimeout(flushPending, state.info?.saveDelay || 450);
 }
 
 function flushPending() {
@@ -1151,10 +1374,12 @@ function flushPending() {
   if (!pending) return Promise.resolve();
   const { path, changes } = pending;
   pending = null;
-  return saveNote(path, changes).then(() => {
-    setSaveState("Saved");
-    renderView();
-  });
+  return saveNote(path, changes)
+    .then((saved) => {
+      if (saved) setSaveState(state.info?.mode === "github" ? "Saved to GitHub" : "Saved");
+      renderView();
+    })
+    .catch(() => setSaveState("Not saved"));
 }
 
 function setSaveState(text, saving = false) {
@@ -1162,6 +1387,36 @@ function setSaveState(text, saving = false) {
   if (!el) return;
   el.textContent = text;
   el.classList.toggle("saving", saving);
+}
+
+function heldBanner(note) {
+  const held = state.held;
+  if (!held || held.path !== note.path) return "";
+  const lead = held.kind === "conflict"
+    ? "<strong>This note changed somewhere else.</strong> You're looking at the newer version. Your edit is kept here."
+    : `<strong>Not saved.</strong> ${esc(held.message || "")} Your text is kept here.`;
+  return `
+    <div class="held-card" role="alert">
+      <p>${lead}</p>
+      <details><summary>Show your version</summary><pre>${esc(held.text)}</pre></details>
+      <div class="held-actions">
+        ${readOnly() ? "" : `<button class="btn sm primary" data-action="held-use">${held.kind === "conflict" ? "Use my version" : "Try again"}</button>`}
+        <button class="btn sm" data-action="held-copy">${icon("copy", "sm")} Copy my text</button>
+        <button class="btn sm ghost" data-action="held-discard">${held.kind === "conflict" ? "Keep the newer one" : "Discard"}</button>
+      </div>
+    </div>`;
+}
+
+async function useHeld() {
+  const held = state.held;
+  if (!held) return;
+  const file = fileByPath(held.path);
+  const { mtime } = await state.store.write(held.path, held.text, file ? file.mtime : null);
+  state.held = null;
+  upsertFile(held.path, held.text, mtime);
+  if (state.open === held.path) renderDrawer();
+  render();
+  toast(state.info?.mode === "github" ? "Saved your version to GitHub" : "Saved your version");
 }
 
 function renderDrawer() {
@@ -1187,6 +1442,7 @@ function renderDrawer() {
         <button class="btn ghost sm icon-only" data-action="close-drawer" aria-label="Close">${icon("x")}</button>
       </div>
       <div class="drawer-body">
+        ${heldBanner(note)}
         ${state.spark && isIdea ? `<div class="spark-card">${icon("zap")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Added to the note below. Answer it in a line or two.</span></div></div>` : ""}
         <input class="title-input" id="ed-title" value="${esc(note.title)}" aria-label="Title" placeholder="Untitled" ${lockedAttr}>
         <div class="props">
@@ -1241,7 +1497,12 @@ function renderDrawer() {
     await saveNote(note.path, { body: toggleTask(current.body, Number(box.dataset.task)) });
     renderView();
   });
-  setTimeout(() => (state.spark && body ? body.focus() : $("#ed-title", layer)?.focus({ preventScroll: true })), 30);
+  setTimeout(() => {
+    // Never steal focus from a field the person already clicked into (fast typists, slow phones).
+    if (layer.contains(document.activeElement) && document.activeElement !== layer) return;
+    if (state.spark && body) body.focus();
+    else $("#ed-title", layer)?.focus({ preventScroll: true });
+  }, 30);
   if (state.spark && body) {
     body.selectionStart = body.selectionEnd = body.value.length;
     body.scrollTop = body.scrollHeight;
@@ -1651,6 +1912,19 @@ function wireGlobal() {
       "switch-brain": switchBrain,
       "map-reset": () => renderView(),
       "open-brain": () => openBrain(actionEl.dataset.repo),
+      "sign-in": openSignIn,
+      "sign-out": () => {
+        auth.signOut();
+        toast("Signed out. Your token was removed from this browser.");
+        afterSignOut();
+      },
+      "create-brain": createMyBrain,
+      "held-use": useHeld,
+      "held-copy": () => copyText(state.held?.text || "", "Your text was copied"),
+      "held-discard": () => {
+        state.held = null;
+        renderDrawer();
+      },
       "open-profile": () => lookupProfile(actionEl.dataset.login),
       "leave-brain": () => {
         location.href = location.pathname;
@@ -1693,6 +1967,10 @@ function wireGlobal() {
     if (event.target.id === "people-form") {
       event.preventDefault();
       return lookupProfile(event.target.query.value);
+    }
+    if (event.target.id === "create-brain-form") {
+      event.preventDefault();
+      return createMyBrain();
     }
     const quick = event.target.closest("[data-quick]");
     if (!quick) return;
@@ -1793,6 +2071,25 @@ function exploreTarget(raw) {
 }
 
 
+function welcomeAccount() {
+  const me = auth.session();
+  const last = localStorage.getItem(LAST_BRAIN_KEY);
+  if (me) {
+    return `
+      <div class="welcome-account">
+        <img src="${esc(me.avatar)}" alt="" width="28" height="28">
+        <span>Signed in as <strong>@${esc(me.login)}</strong></span>
+        ${last ? `<button class="btn primary" data-action="open-brain" data-repo="${esc(last)}">${icon("arrow", "sm")} Continue in ${esc(last)}</button>` : ""}
+        <a class="btn" href="?u=${encodeURIComponent(me.login)}">Your brains</a>
+      </div>`;
+  }
+  return `
+    <div class="welcome-account">
+      <span>Keep your brain on GitHub and edit it from your phone, laptop or any browser.</span>
+      <button class="btn" data-action="sign-in">${icon("github", "sm")} Sign in with GitHub</button>
+    </div>`;
+}
+
 function showWelcome(remembered) {
   const welcome = $("#welcome");
   const folderSupported = FolderStore.supported();
@@ -1824,6 +2121,7 @@ function showWelcome(remembered) {
           <button class="btn" data-copy-cmd>${icon("copy")} Copy commands</button>
         </section>
       </div>
+      ${welcomeAccount()}
       <form class="explore-box" id="explore-form" autocomplete="off">
         <label for="explore-input">Or look someone up</label>
         <div class="explore-row">
@@ -1870,6 +2168,15 @@ function showWelcome(remembered) {
   };
 }
 
+function applyInfo() {
+  $("#project-name").textContent = state.info.project;
+  $("#project-mode").textContent = state.info.label;
+  document.title = state.info.owner ? `${state.info.owner}/${state.info.project} · Cairn` : `${state.info.project} · Cairn`;
+  document.body.classList.toggle("readonly", readOnly());
+  $("#capture-form").hidden = readOnly() || state.info.mode === "visitor";
+  renderSidebarFoot();
+}
+
 async function start(store) {
   state.store = store;
   state.info = await store.info();
@@ -1878,12 +2185,7 @@ async function start(store) {
   await loadAll();
   $("#welcome").hidden = true;
   $("#app").hidden = false;
-  $("#project-name").textContent = state.info.project;
-  $("#project-mode").textContent = state.info.label;
-  document.title = readOnly() ? `@${state.info.owner}/${state.info.project} · Cairn` : `${state.info.project} · Cairn`;
-  document.body.classList.toggle("readonly", readOnly());
-  $("#capture-form").hidden = readOnly() || state.info.mode === "visitor";
-  renderSidebarFoot();
+  applyInfo();
   setView(location.hash.replace("#/", "") || "home", { push: false });
   refreshTodos();
   refreshGit();
@@ -1906,8 +2208,10 @@ async function boot() {
     try {
       if (!parsed || !parsed.repo) throw new Error("Use owner/repo, for example juw12/cairn.");
       const repo = await gh.fetchRepo(parsed.owner, parsed.repo);
-      const files = await gh.loadBrainFiles(repo.owner, repo.name, repo.branch);
-      return start(new GitHubStore(repo, files));
+      const loaded = await gh.loadBrainFiles(repo.owner, repo.name, repo.branch);
+      const writable = auth.signedIn() && repo.canPush;
+      if (writable) localStorage.setItem(LAST_BRAIN_KEY, repo.fullName);
+      return start(new GitHubStore(repo, loaded, { writable }));
     } catch (error) {
       toast(error.message || "Couldn't open that brain.", { error: true });
       await start(new VisitorStore());
@@ -1940,6 +2244,13 @@ async function boot() {
   if (mode === "demo") return start(new DemoStore());
   showWelcome(mode === "folder" ? await FolderStore.remembered() : null);
 }
+
+// A 401 anywhere ends the session; say so plainly and downgrade to read-only.
+window.addEventListener("cairn:signed-out", (event) => {
+  const reason = event.detail?.reason;
+  if (reason) toast(reason, { error: true });
+  if (state.store) afterSignOut();
+});
 
 // Broken avatars (offline, blocked CDN) fall back to a quiet neutral disc instead of a torn-image icon.
 const AVATAR_FALLBACK =

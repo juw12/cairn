@@ -68,3 +68,32 @@ Checks
 Not verified
 - Live GitHub API behaviour beyond the mocked responses (rate limits, very large repos).
 - Real users: the "five people publish a brain" task is the actual test of the network idea.
+
+---
+
+## Step 2: sign in with GitHub and edit from any device (rubric: `plan/rubric_signin.md`, self-judged)
+
+| Round | Change | Gates | Judge score | Pairwise | Kept | Note |
+|---|---|---|---|---|---|---|
+| 0 | Baseline: feature absent (read-only brains only) | G1 only | 2.6 | n/a | n/a | Nothing to sign in to; edits impossible off the local machine |
+| 1 | `auth.js`, GitHub Contents API store, sign-in dialog, account row, held-text card, create-brain form, Worker + tests | G1-G8 pass (53 tests) | 8.0 | better than v0 | yes | Screenshots: dialog facts list inherited the mono list style and was clipped on mobile; conflict toast red; no offline test; no README docs |
+| 2 | Dialog list fixed (sans, unclipped), calm conflict toast, offline save test, honest relay note, README sign-in + privacy sections, brain notes updated | G1-G8 pass (54 tests) | 8.7 | better than round 1 | yes | Meets target (>= 8.5); stopped |
+
+Round 2 scores (evidence):
+- S1 Usefulness 8.5: sign in, land in your brain or create one from People, capture/move/edit saved as commits; burst
+  edits become one commit (test_sign_in_then_create_edit_move_delete_on_github). Not 10: one-click sign-in needs the
+  Worker deployed; until then you paste a token.
+- S2 Trust 9: dialog lists access, where the token lives and how to undo; recommends a fine-grained token; visible
+  @login + Sign out; token per tab unless "Remember"; relay note under the device button.
+- S3 Robustness 9: conflict, 401, offline (test_offline_save_keeps_text_and_retries), failed saves keep text, batching.
+  Rate-limit message exists but is not covered by a test.
+- S4 Code 8.5: `auth.js` / `github.js` / `GitHubStore` / `worker/` split; the store keeps the same interface as the
+  other adapters. `app.js` keeps growing.
+- S5 Design 8.5: same paper/ink/one-accent language; states shown as "Saving…", "Saved to GitHub", held card.
+- S6 Verification 8.5: every gate has a test plus edge cases (no push, revoked token, offline, focus regression).
+
+Weighted: \(0.25(8.5) + 0.2(9) + 0.2(9) + 0.15(8.5) + 0.1(8.5) + 0.1(8.5) = 8.7\).
+
+Not verified
+- Real GitHub writes with a real token (all writes tested against a stateful mock of the same API calls).
+- The Worker on Cloudflare and a real OAuth App (needs the owner's accounts); only its logic is tested.

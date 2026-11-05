@@ -1,6 +1,11 @@
-// Read-only GitHub access for Explore and Profiles. No token needed: public data only.
-// API calls are cached in sessionStorage (10 min) to stay well inside the 60 requests/hour
-// anonymous limit; file contents come from raw.githubusercontent.com, which has no API limit.
+// GitHub access for Explore, Profiles and signed-in editing.
+// Signed out: public data only. API reads are cached in sessionStorage (10 min) to stay inside the
+// 60 requests/hour anonymous limit, and file contents come from raw.githubusercontent.com.
+// Signed in: the same reads go through authFetch (5,000 requests/hour), file contents come from the
+// Git blobs API (content is addressed by its sha, so it is never stale), and writes use the
+// Contents API with the file's current sha, so GitHub refuses to overwrite a newer version.
+
+import { authFetch, session } from "./auth.js";
 
 const API = "https://api.github.com";
 const RAW = "https://raw.githubusercontent.com";
@@ -26,24 +31,15 @@ export function parseGithubInput(text) {
 }
 
 async function getJson(url) {
-  const key = `cairn.gh:${url}`;
+  // Cache per identity: a signed-in answer can include your permissions on a repo.
+  const key = `cairn.gh:${session()?.login || ""}:${url}`;
   try {
     const cached = JSON.parse(sessionStorage.getItem(key) || "null");
     if (cached && Date.now() - cached.at < CACHE_MS) return cached.data;
   } catch {
     /* ignore a broken cache entry */
   }
-  let response;
-  try {
-    response = await fetch(url, { headers: { Accept: "application/vnd.github+json" } });
-  } catch {
-    throw new GitHubError("Can't reach GitHub. Check your connection and try again.");
-  }
-  if (response.status === 404) throw new GitHubError("Not found on GitHub.");
-  if (response.status === 403 || response.status === 429) {
-    throw new GitHubError("GitHub's hourly limit for anonymous lookups was reached. Try again in a few minutes.");
-  }
-  if (!response.ok) throw new GitHubError(`GitHub answered ${response.status}.`);
+  const response = await request(url);
   const data = await response.json();
   try {
     sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data }));
@@ -51,6 +47,35 @@ async function getJson(url) {
     /* storage full: skip caching */
   }
   return data;
+}
+
+// One place that turns HTTP failures into sentences a person can act on.
+async function request(url, options = {}) {
+  let response;
+  try {
+    response = await authFetch(url, options);
+  } catch (error) {
+    throw new GitHubError(error.message || "Can't reach GitHub. Check your connection and try again.");
+  }
+  if (response.ok) return response;
+  if (response.status === 404) throw new GitHubError("Not found on GitHub.");
+  if (response.status === 403 || response.status === 429) {
+    const limited = response.headers.get("x-ratelimit-remaining") === "0" || response.status === 429;
+    if (limited) {
+      throw new GitHubError(
+        session()
+          ? "GitHub's hourly limit was reached. Wait a few minutes; nothing you typed is lost."
+          : "GitHub's hourly limit for anonymous lookups was reached. Sign in or try again in a few minutes.",
+      );
+    }
+    throw new GitHubError("GitHub refused that. Your sign-in may not have permission to change this repo.");
+  }
+  if (response.status === 409 || response.status === 422) {
+    const error = new GitHubError("This changed on GitHub since you opened it.");
+    error.conflict = true;
+    throw error;
+  }
+  throw new GitHubError(`GitHub answered ${response.status}. Try again in a moment.`);
 }
 
 function slimRepo(repo) {
@@ -64,6 +89,10 @@ function slimRepo(repo) {
     branch: repo.default_branch || "main",
     stars: repo.stargazers_count || 0,
     pushedAt: repo.pushed_at || repo.updated_at || "",
+    topics: repo.topics || [],
+    isPrivate: Boolean(repo.private),
+    // Only present on signed-in requests; true when you may commit to this repo.
+    canPush: repo.permissions?.push === true,
   };
 }
 
@@ -98,21 +127,118 @@ export async function fetchRepo(owner, repo) {
   return slimRepo(await getJson(`${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`));
 }
 
-// All Markdown files of a repo's brain folder: [{ path (relative to the brain), text, mtime }]
+// ------------------------------------------------------------ text <-> base64 (UTF-8 safe)
+
+export function encodeBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+export function decodeBase64(data) {
+  const binary = atob(String(data || "").replace(/\s/g, ""));
+  return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
+}
+
+const encodePath = (path) => path.split("/").map(encodeURIComponent).join("/");
+
+// All Markdown files of a repo's brain folder:
+//   { root: "brain/", files: [{ path (relative to the brain), text, mtime, sha }] }
 export async function loadBrainFiles(owner, repo, branch) {
-  const tree = await getJson(`${API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
-  const paths = (tree.tree || []).filter((item) => item.type === "blob").map((item) => item.path);
+  // Never cached: after an edit the tree must show the new shas.
+  const treeUrl = `${API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
+  const tree = await (await request(treeUrl, { cache: "no-store" })).json();
+  const blobs = (tree.tree || []).filter((item) => item.type === "blob");
+  const paths = blobs.map((item) => item.path);
   const root = ["brain/", ".brain/"].find((prefix) => paths.some((p) => p.startsWith(prefix)));
   if (!root) throw new GitHubError(`${owner}/${repo} has no brain/ folder yet.`);
-  const wanted = paths.filter((p) => p.startsWith(root) && p.endsWith(".md")).slice(0, MAX_FILES);
+  const wanted = blobs.filter((item) => item.path.startsWith(root) && item.path.endsWith(".md")).slice(0, MAX_FILES);
+  const signedIn = Boolean(session());
   const files = await Promise.all(
-    wanted.map(async (path) => {
-      const response = await fetch(`${RAW}/${owner}/${repo}/${encodeURIComponent(branch)}/${path.split("/").map(encodeURIComponent).join("/")}`);
-      if (!response.ok) return null;
-      return { path: path.slice(root.length), text: await response.text(), mtime: 0 };
+    wanted.map(async (item) => {
+      let text;
+      if (signedIn) {
+        const blob = await (await request(`${API}/repos/${owner}/${repo}/git/blobs/${item.sha}`)).json();
+        text = decodeBase64(blob.content);
+      } else {
+        const response = await fetch(`${RAW}/${owner}/${repo}/${encodeURIComponent(branch)}/${encodePath(item.path)}`);
+        if (!response.ok) return null;
+        text = await response.text();
+      }
+      return { path: item.path.slice(root.length), text, mtime: 0, sha: item.sha || null };
     }),
   );
-  return files.filter(Boolean);
+  return { root, files: files.filter(Boolean) };
+}
+
+// ------------------------------------------------------------ writes (signed in only)
+
+// Latest text and sha of one file, or null if it doesn't exist.
+export async function readFile(repo, fullPath) {
+  try {
+    const url = `${API}/repos/${repo.owner}/${repo.name}/contents/${encodePath(fullPath)}?ref=${encodeURIComponent(repo.branch)}`;
+    const data = await (await request(url, { cache: "no-store" })).json();
+    return { text: decodeBase64(data.content), sha: data.sha };
+  } catch (error) {
+    if (error.message === "Not found on GitHub.") return null;
+    throw error;
+  }
+}
+
+// Create (sha = null) or update (sha = the version you edited). Returns the new sha.
+export async function writeFile(repo, fullPath, text, sha, message) {
+  const body = { message, content: encodeBase64(text), branch: repo.branch };
+  if (sha) body.sha = sha;
+  const url = `${API}/repos/${repo.owner}/${repo.name}/contents/${encodePath(fullPath)}`;
+  const data = await (await request(url, { method: "PUT", body: JSON.stringify(body) })).json();
+  return data.content?.sha || null;
+}
+
+export async function deleteFile(repo, fullPath, sha, message) {
+  const url = `${API}/repos/${repo.owner}/${repo.name}/contents/${encodePath(fullPath)}`;
+  await request(url, { method: "DELETE", body: JSON.stringify({ message, sha, branch: repo.branch }) });
+}
+
+// Brains you can edit: your repos (and ones you collaborate on) with the cairn-brain topic.
+export async function myBrains() {
+  const url = `${API}/user/repos?affiliation=owner,collaborator&sort=pushed&per_page=100`;
+  const repos = await (await request(url, { cache: "no-store" })).json();
+  return repos.filter((repo) => (repo.topics || []).includes(BRAIN_TOPIC)).map(slimRepo);
+}
+
+const STARTER = (owner, today) => [
+  [
+    "brain/README.md",
+    `# ${owner}'s brain\n\nPlain Markdown kept by [Cairn](https://juw12.github.io/cairn/). Ideas, tasks, decisions and notes live in the folders next to this file.\n`,
+  ],
+  [
+    "brain/ideas/what-should-this-brain-be-for.md",
+    `---\ntitle: What should this brain be for?\ntype: idea\nstatus: raw\ntags: [start]\ncreated: ${today}\n---\nWrite one sentence about the project or question this brain is for.\n`,
+  ],
+  [
+    "brain/tasks/capture-three-ideas.md",
+    `---\ntitle: Capture three ideas\ntype: task\nstatus: todo\ntags: [start]\ncreated: ${today}\n---\n- [ ] One from today\n- [ ] One you keep coming back to\n- [ ] One that scares you a little\n`,
+  ],
+];
+
+// A new public repo with the cairn-brain topic and a small starter brain. Returns the slim repo.
+export async function createBrain(name, description, today) {
+  const created = await (
+    await request(`${API}/user/repos`, {
+      method: "POST",
+      body: JSON.stringify({ name, description, private: false, auto_init: true, has_wiki: false }),
+    })
+  ).json();
+  const repo = slimRepo(created);
+  await request(`${API}/repos/${repo.owner}/${repo.name}/topics`, {
+    method: "PUT",
+    body: JSON.stringify({ names: [BRAIN_TOPIC] }),
+  });
+  for (const [path, text] of STARTER(repo.owner, today)) {
+    await writeFile(repo, path, text, null, `cairn: start ${path}`);
+  }
+  return { ...repo, canPush: true, topics: [BRAIN_TOPIC] };
 }
 
 export function joinRequestUrl(owner, repo, from = "") {

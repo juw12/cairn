@@ -1,5 +1,5 @@
 // Storage adapters. Every adapter speaks the same small interface:
-//   info()                       -> { mode, project, label, canGit, canScan }
+//   info()                       -> { mode, project, label, canGit, canScan, readOnly?, saveDelay? }
 //   list()                       -> [{ path, text, mtime }]
 //   write(path, text, mtime)     -> { mtime }   (mtime null = create; throws ConflictError)
 //   remove(path)
@@ -8,6 +8,7 @@
 
 import { scanTodos } from "./core.js";
 import { DEMO_FILES, DEMO_TODOS } from "./demo.js";
+import * as gh from "./github.js";
 
 export class ConflictError extends Error {
   constructor(text, mtime) {
@@ -309,36 +310,78 @@ export class DemoStore {
 // ------------------------------------------------------------ someone's public brain on GitHub (read-only)
 
 export class GitHubStore {
-  constructor(repo, files) {
+  // repo: slim repo from github.js. loaded: { root: "brain/", files: [{ path, text, mtime, sha }] }.
+  // Writable only when you are signed in AND GitHub says you may push to the repo.
+  constructor(repo, loaded, { writable = false } = {}) {
     this.repo = repo;
-    this.files = files;
+    this.root = loaded.root || "brain/";
+    this.files = loaded.files || [];
+    this.writable = Boolean(writable);
+    // The sha of the version we last saw for each file: GitHub refuses a save based on an older one.
+    this.shas = new Map(this.files.map((file) => [file.path, file.sha || null]));
   }
 
   async info() {
+    const { owner, name, url, avatar, branch } = this.repo;
     return {
       mode: "github",
-      project: this.repo.name,
-      label: `@${this.repo.owner} · read-only`,
+      project: name,
+      label: this.writable ? `${owner}/${name} · saves to GitHub` : `@${owner} · read-only`,
       canGit: false,
       canScan: false,
-      readOnly: true,
-      owner: this.repo.owner,
-      repoName: this.repo.name,
-      url: this.repo.url,
-      avatar: this.repo.avatar,
+      readOnly: !this.writable,
+      owner,
+      repoName: name,
+      url,
+      avatar,
+      branch,
+      // Every save is a commit, so wait for a real pause in typing before saving.
+      saveDelay: this.writable ? 1500 : 450,
     };
   }
 
   async list() {
-    return this.files.map((file) => ({ ...file }));
+    return this.files.map(({ path, text, mtime }) => ({ path, text, mtime }));
   }
 
-  async write() {
-    throw new Error("This brain is read-only. Ask to join to contribute.");
+  assertWritable() {
+    if (!this.writable) throw new Error("This brain is read-only. Ask to join to contribute.");
   }
 
-  async remove() {
-    throw new Error("This brain is read-only.");
+  async write(path, text) {
+    this.assertWritable();
+    const fullPath = this.root + path;
+    const sha = this.shas.get(path) || null;
+    try {
+      const next = await gh.writeFile(this.repo, fullPath, text, sha, `cairn: ${sha ? "update" : "add"} ${path}`);
+      this.shas.set(path, next);
+      return { mtime: Date.now() };
+    } catch (error) {
+      if (!error.conflict) throw error;
+      // Someone (or another device) changed it first. Show their version; the app keeps ours.
+      const latest = await gh.readFile(this.repo, fullPath);
+      if (latest) {
+        this.shas.set(path, latest.sha);
+        throw new ConflictError(latest.text, Date.now());
+      }
+      // It was deleted on GitHub meanwhile: saving recreates it.
+      const next = await gh.writeFile(this.repo, fullPath, text, null, `cairn: add ${path}`);
+      this.shas.set(path, next);
+      return { mtime: Date.now() };
+    }
+  }
+
+  async remove(path) {
+    this.assertWritable();
+    const sha = this.shas.get(path);
+    if (!sha) return;
+    try {
+      await gh.deleteFile(this.repo, this.root + path, sha, `cairn: delete ${path}`);
+    } catch (error) {
+      if (!error.conflict) throw error;
+      throw new Error("This note changed on GitHub since you opened it, so it wasn't deleted. Reload to see the newer version.");
+    }
+    this.shas.delete(path);
   }
 
   async todos() {

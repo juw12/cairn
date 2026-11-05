@@ -1,0 +1,7 @@
+name = "cairn-auth"
+main = "cairn-auth.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Set GITHUB_CLIENT_ID in the dashboard (or here). It is public, not a secret.
+ALLOWED_ORIGINS = "https://juw12.github.io"

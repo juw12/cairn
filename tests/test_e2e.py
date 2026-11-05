@@ -107,6 +107,18 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("Edited body", self.note_text(page, "ideas/voice-notes-on-trail.md"))
         self.assertEqual(self.errors, [])
 
+    def test_typing_right_after_opening_stays_in_the_body(self):
+        page = self.open()
+        self.go(page, "ideas")
+        page.click('.item-card[data-drag="ideas/voice-notes-on-trail.md"]')
+        # Click into the body immediately, before the drawer's own focus timer fires.
+        page.click("#ed-body")
+        page.keyboard.type("quick words")
+        page.wait_for_timeout(120)
+        self.assertEqual(page.input_value("#ed-title"), "Voice notes pinned to the map")
+        self.assertIn("quick words", page.input_value("#ed-body"))
+        self.assertEqual(self.errors, [])
+
     def test_palette_finds_body_text(self):
         page = self.open()
         page.keyboard.press("Control+k")
@@ -178,7 +190,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("Explore: look up people and open their brains", proof)  # shipped
         self.assertIn("GitHub is the backend", proof)  # accepted decision
         self.assertIn("AI agents as brain members", proof)  # ready + help-wanted
-        self.assertNotIn("Sign in with GitHub", proof)  # todo tasks are not claimed as work
+        self.assertNotIn("Join-request inbox", proof)  # todo tasks are not claimed as work
         self.assertGreaterEqual(page.locator(".repo-row").count(), 1)
         self.assertEqual(self.errors, [])
 
