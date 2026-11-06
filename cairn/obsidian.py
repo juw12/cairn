@@ -188,6 +188,11 @@ class ObsidianSync:
 
         vault_files = scan(vault)
         brain_files = scan(target)
+        if not folder:
+            # Whole-brain mode: brain/README.md and the generated CONTEXT.md belong to Cairn, not the vault.
+            for name in core.SPECIAL_FILES:
+                vault_files.pop(name, None)
+                brain_files.pop(name, None)
         if manifest and not vault_files:
             raise SyncError("The vault looks empty, so nothing was changed. Check the vault path.")
         if manifest and not brain_files:

@@ -205,6 +205,13 @@ async function browserSync(vault, saved, { pullOnly = false, auto = false } = {}
     const text = normalize(file.text);
     brainFiles[file.path.slice(prefix.length)] = { hash: hashText(text), mtime: file.mtime || 0, text };
   }
+  if (!prefix) {
+    // Whole-brain mode: brain/README.md and the generated CONTEXT.md belong to Cairn, not the vault.
+    for (const name of core.SPECIAL_FILES) {
+      delete vaultFiles[name];
+      delete brainFiles[name];
+    }
+  }
   const hasManifest = Object.keys(manifest).length > 0;
   if (hasManifest && !Object.keys(vaultFiles).length) throw new Error("The vault looks empty, so nothing was changed. Check you picked the right folder.");
   if (hasManifest && !Object.keys(brainFiles).length && !pullOnly) throw new Error(`brain/${prefix} looks empty, so nothing was changed. Unlink and link again to re-import.`);

@@ -142,6 +142,9 @@ over, new notes appear on the other side.
 
 * **Local app:** paste the vault path; it syncs every 20 s while Cairn is open. `cairn obsidian --watch 10` keeps
   syncing with the app closed.
+* **Whole brain instead of a subfolder:** `cairn obsidian ~/vault --folder .` mirrors the vault into `brain/`
+  itself (Cairn's own `README.md` and `CONTEXT.md` stay out of the vault). `--folder ""` works too, except in
+  PowerShell, which drops empty arguments. Add `--dry-run` first to see what would be copied.
 * **Browser, Chrome/Edge:** pick the vault folder; two-way sync while the tab is open, nothing uploaded.
 * **Other browsers:** one-way import; import again to bring in changes.
 

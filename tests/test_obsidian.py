@@ -139,6 +139,19 @@ class SyncTests(unittest.TestCase):
             self.assertEqual((root / "Offline Maps (conflict 2026-11-07).md").read_text(encoding="utf-8"), "vault version\n")
         self.assertEqual(self.sync.sync()["changes"], 0)
 
+    def test_whole_brain_mode_keeps_cairn_files_out_of_the_vault(self):
+        (self.vault / "README.md").write_text("vault readme\n", encoding="utf-8")
+        self.sync.link(str(self.vault), "")
+        report = self.sync.sync()
+        self.assertIn("Offline Maps.md", report["pulled"])
+        self.assertNotIn("README.md", report["pulled"] + report["pushed"])
+        self.assertEqual((self.vault / "README.md").read_text(encoding="utf-8"), "vault readme\n")
+        self.assertNotEqual((self.brain.dir / "README.md").read_text(encoding="utf-8"), "vault readme\n")
+        # A note created in Cairn's own folders reaches the vault.
+        (self.brain.dir / "ideas" / "new-idea.md").write_text("---\ntitle: New idea\n---\n", encoding="utf-8")
+        self.assertEqual(self.sync.sync()["pushed"], ["ideas/new-idea.md"])
+        self.assertTrue((self.vault / "ideas" / "new-idea.md").exists())
+
     def test_empty_vault_never_wipes_the_brain(self):
         self.sync.link(str(self.vault))
         self.sync.sync()
