@@ -81,6 +81,12 @@ def cmd_serve(brain: Brain, args) -> int:
     return 0
 
 
+def cmd_desktop(brain: Brain, args) -> int:
+    from . import desktop
+
+    return desktop.main(["--hidden"] if args.hidden else [])
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cairn",
@@ -94,6 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser = sub.add_parser("serve", help="open the app (default)")
     serve_parser.add_argument("--port", type=int, default=4777)
     serve_parser.add_argument("--no-browser", action="store_true")
+    desktop_parser = sub.add_parser("desktop", help="open Cairn as a desktop app (own window, lives in the tray)")
+    desktop_parser.add_argument("--hidden", action="store_true", help="start in the tray")
     sub.add_parser("init", help="create the brain/ folder layout")
     add_parser = sub.add_parser("add", help='capture: cairn add "todo: ship v1 #release"')
     add_parser.add_argument("text", nargs="+")
@@ -119,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         "todos": cmd_todos,
         "context": cmd_context,
         "serve": cmd_serve,
+        "desktop": cmd_desktop,
         None: cmd_serve,
     }
     if args.command is None:

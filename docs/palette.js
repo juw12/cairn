@@ -4,7 +4,7 @@ import { escapeHtml as esc } from "./md.js";
 import { $, TYPE_META, byRecent, icon } from "./ui.js";
 import { VIEWS, refreshTodos, state } from "./state.js";
 import { openNote } from "./drawer.js";
-import { capture, commitBrain, newNote, openToday, saveContext, switchBrain, toggleTheme } from "./actions.js";
+import { capture, commitBrain, newNote, openSettings, openToday, saveContext, switchBrain, syncBrain, toggleTheme } from "./actions.js";
 import { setView } from "./app.js";
 
 function commands() {
@@ -21,6 +21,8 @@ function commands() {
     { label: "Switch brain", kind: "App", icon: "folder", run: switchBrain },
   );
   if (state.info?.canGit) list.push({ label: "Commit brain", kind: "Project", icon: "git", run: commitBrain });
+  if (state.info?.canGit && state.git?.remote) list.push({ label: "Sync with GitHub", kind: "Project", icon: "refresh", run: syncBrain });
+  if (state.info?.desktop) list.push({ label: "Settings", kind: "App", icon: "gear", run: openSettings });
   return list;
 }
 

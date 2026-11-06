@@ -4,7 +4,8 @@
 //   write(path, text, mtime)     -> { mtime }   (mtime null = create; throws ConflictError)
 //   remove(path)
 //   todos()                      -> [{ path, line, tag, text }]
-//   gitStatus() / gitCommit(msg) -> server only
+//   gitStatus() / gitCommit(msg) / gitSync() -> server only
+//   desktop() / desktopAction(action, payload) -> the desktop app only (info.desktop)
 
 import { scanTodos } from "./core.js";
 import { DEMO_FILES, DEMO_TODOS } from "./demo.js";
@@ -58,6 +59,8 @@ export class ServerStore {
       label: `Local · ${this.meta.brainDir}/`,
       canGit: Boolean(this.meta.git),
       canScan: true,
+      desktop: Boolean(this.meta.desktop),
+      path: this.meta.path || null,
     };
   }
 
@@ -87,6 +90,18 @@ export class ServerStore {
 
   async gitCommit(message) {
     return this.request("POST", "api/git/commit", { message });
+  }
+
+  async gitSync(message = "") {
+    return this.request("POST", "api/git/sync", { message });
+  }
+
+  async desktop() {
+    return this.request("GET", "api/desktop");
+  }
+
+  async desktopAction(action, payload = {}) {
+    return this.request("POST", "api/desktop", { ...payload, action });
   }
 }
 

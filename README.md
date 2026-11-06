@@ -80,9 +80,23 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 
 ## Use it
 
-There are three ways to run it. All of them read and write the same plain files.
+There are four ways to run it. All of them read and write the same plain files.
 
-**1. Local app (full features).** Python 3.10+, no dependencies:
+**0. Desktop app for Windows (easiest).** [Download `Cairn-Setup.cmd`](https://juw12.github.io/cairn/Cairn-Setup.cmd)
+and double-click it, or paste this in PowerShell: `irm https://juw12.github.io/cairn/install.ps1 | iex`.
+No admin rights needed. It installs whatever is missing (Python, Git, the window and tray libraries), then opens
+Cairn in its own window. After that, everything happens inside the app:
+
+- **Your notes open by themselves.** The first time, Cairn opens the Obsidian vault you used last (or a fresh
+  brain in `Documents\Cairn`). **Switch brain** opens another folder, **gets a repo from GitHub** (private
+  ones too; GitHub's own sign-in window appears once), or starts a new brain.
+- **One Sync button.** It saves your edits, gets everyone else's and sends yours (commit + pull + push). It also
+  runs on its own every 10 minutes. If two people changed the same lines, nothing is lost: your edits stay
+  committed locally and Cairn tells you.
+- **Always there.** Closing the window keeps Cairn in the tray; it starts with Windows and updates itself.
+  **Settings** turns each of these on or off and checks for updates.
+
+**1. Local app from the terminal.** Python 3.10+, no dependencies:
 
 ```bash
 git clone https://github.com/juw12/cairn

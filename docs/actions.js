@@ -2,8 +2,9 @@
 
 import * as core from "./core.js";
 import { FolderStore, ConflictError } from "./store.js";
-import { $, TYPE_META, ask, plural, toast, today } from "./ui.js";
-import { createNote, fileByPath, markGuide, noteByPath, refreshGit, saveNote, scheduleGitRefresh, state, upsertFile } from "./state.js";
+import { escapeHtml as esc } from "./md.js";
+import { $, TYPE_META, ask, icon, plural, toast, today } from "./ui.js";
+import { createNote, fileByPath, loadAll, markGuide, noteByPath, refreshGit, saveNote, scheduleGitRefresh, state, upsertFile } from "./state.js";
 import { sourceKey } from "./views.js";
 import { closeDrawer, openNote } from "./drawer.js";
 import { showWelcome } from "./welcome.js";
@@ -135,6 +136,7 @@ export function toggleTheme() {
 }
 
 export async function switchBrain() {
+  if (state.info.desktop) return openBrainDialog();
   if (state.info.mode === "server") {
     await ask({
       title: "This brain is served locally",
@@ -148,4 +150,181 @@ export async function switchBrain() {
   localStorage.removeItem("cairn.mode");
   $("#app").hidden = true;
   showWelcome(await FolderStore.remembered());
+}
+
+// ============================================================ sync (commit + pull + push in one go)
+
+export async function reloadBrain() {
+  await loadAll();
+  render();
+  refreshGit();
+}
+
+export async function syncBrain() {
+  if (state.syncing) return;
+  state.syncing = true;
+  renderSidebarFoot();
+  try {
+    const result = await state.store.gitSync();
+    const done = [];
+    if (result.committed) done.push("saved your edits");
+    if (result.pulled) done.push(`got ${plural(result.pulled, "update")}`);
+    if (result.pushed) done.push(`sent ${plural(result.pushed, "commit")}`);
+    if (!result.remote) {
+      toast(result.committed
+        ? `Saved your edits (commit ${result.committed}). This folder isn't linked to GitHub, so there's nothing to send.`
+        : "Nothing to sync: this folder isn't linked to GitHub.");
+    } else {
+      toast(done.length ? `Synced: ${done.join(", ")}.` : "Already up to date.");
+    }
+    if (result.pulled) await reloadBrain();
+  } catch (error) {
+    toast(error.message, { error: true });
+  }
+  state.syncing = false;
+  refreshGit();
+}
+
+// ============================================================ desktop app: open a brain, settings
+
+function modal(html, wire) {
+  const wrap = document.createElement("div");
+  wrap.className = "modal-wrap";
+  wrap.innerHTML = html;
+  const close = () => wrap.remove();
+  wrap.addEventListener("click", (e) => {
+    if (e.target === wrap || e.target.closest("[data-cancel]")) close();
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  });
+  document.body.appendChild(wrap);
+  wire(wrap, close);
+  setTimeout(() => $("button, input", wrap)?.focus(), 20);
+  return wrap;
+}
+
+async function desktopAction(action, payload, busyMessage) {
+  if (busyMessage) toast(busyMessage);
+  try {
+    const result = await state.store.desktopAction(action, payload);
+    if (result.reload) location.reload();
+    return result;
+  } catch (error) {
+    toast(error.message, { error: true });
+    return null;
+  }
+}
+
+export async function openBrainDialog() {
+  let places = [];
+  try {
+    places = (await state.store.desktop()).places || [];  // already without the brain that's open
+  } catch {
+    /* the list is a convenience */
+  }
+  modal(`
+    <div class="modal open-brain" role="dialog" aria-modal="true" aria-labelledby="open-brain-title">
+      <h2 id="open-brain-title">Open a brain</h2>
+      <p>Any folder of Markdown notes works, including an Obsidian vault. Cairn remembers your choice.</p>
+      <div class="pick-list">
+        <button class="pick" data-open="pick">${icon("folder")}<span><strong>Choose a folder…</strong><small>A vault or project already on this computer</small></span></button>
+        <button class="pick" data-open="clone">${icon("github")}<span><strong>Get one from GitHub…</strong><small>Downloads it and keeps it in sync</small></span></button>
+        <button class="pick" data-open="new">${icon("plus")}<span><strong>Start a new brain</strong><small>An empty brain in Documents\\Cairn</small></span></button>
+      </div>
+      ${places.length ? `<div class="nav-label">Recent and Obsidian vaults</div>
+        <div class="pick-list compact">${places.map((p) => `
+          <button class="pick" data-path="${esc(p.path)}">${icon("note")}<span><strong>${esc(p.name)}</strong><small>${esc(p.path)}</small></span></button>`).join("")}
+        </div>` : ""}
+      <div class="actions"><button type="button" class="btn ghost" data-cancel>Close</button></div>
+    </div>`, (wrap, close) => {
+    wrap.addEventListener("click", async (e) => {
+      const pathButton = e.target.closest("[data-path]");
+      const openButton = e.target.closest("[data-open]");
+      if (pathButton) {
+        close();
+        return desktopAction("open", { path: pathButton.dataset.path });
+      }
+      if (!openButton) return;
+      const kind = openButton.dataset.open;
+      close();
+      if (kind === "pick") return desktopAction("pick", {});
+      if (kind === "clone") {
+        const url = await ask({
+          title: "Get a brain from GitHub",
+          text: "Paste the repo's address (or owner/repo). Private repos work too: GitHub asks you to sign in the first time.",
+          placeholder: "https://github.com/you/notes",
+          confirm: "Download",
+        });
+        if (url) desktopAction("clone", { url }, "Downloading… this can take a moment for big vaults.");
+        return;
+      }
+      if (kind === "new") {
+        const name = await ask({ title: "Name your new brain", value: "My brain", confirm: "Create" });
+        if (name) desktopAction("new", { name });
+      }
+    });
+  });
+}
+
+export async function openSettings() {
+  let info;
+  try {
+    info = await state.store.desktop();
+  } catch (error) {
+    toast(error.message, { error: true });
+    return;
+  }
+  modal(`
+    <div class="modal settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <h2 id="settings-title">Settings</h2>
+      <p>Brain: <strong>${esc(state.info.project)}</strong><br><small class="muted">${esc(info.folder || "")}</small></p>
+      <button class="btn sm" data-settings="switch">${icon("folder", "sm")} Open another brain</button>
+      ${info.autostartSupported ? `<label class="check"><input type="checkbox" data-settings="autostart" ${info.autostart ? "checked" : ""}> Start with Windows <span class="muted">(opens quietly in the tray)</span></label>` : ""}
+      <label class="check"><input type="checkbox" data-settings="auto-sync" ${info.autoSync ? "checked" : ""}> Sync automatically every 10 minutes <span class="muted">(when the brain is linked to GitHub)</span></label>
+      <div class="settings-update">
+        <span>Cairn ${esc(info.version)}${info.build ? ` <span class="muted">· ${esc(info.build)}</span>` : ""}</span>
+        ${info.updates ? `<button class="btn sm" data-settings="check-update">${icon("refresh", "sm")} Check for updates</button>` : `<span class="muted">Updates come with your package manager.</span>`}
+      </div>
+      <p class="hint">Closing the window keeps Cairn running in the tray. Quit it from the tray icon.</p>
+      <div class="actions"><button type="button" class="btn primary" data-cancel>Done</button></div>
+    </div>`, (wrap, close) => {
+    wrap.addEventListener("change", async (e) => {
+      const box = e.target.closest("input[data-settings]");
+      if (!box) return;
+      const result = await desktopAction(box.dataset.settings, { on: box.checked });
+      if (!result) box.checked = !box.checked;
+    });
+    wrap.addEventListener("click", async (e) => {
+      const button = e.target.closest("button[data-settings]");
+      if (!button) return;
+      if (button.dataset.settings === "switch") {
+        close();
+        return openBrainDialog();
+      }
+      if (button.dataset.settings === "check-update") {
+        button.disabled = true;
+        button.textContent = "Checking…";
+        const result = await desktopAction("check-update", {});
+        if (result?.available) {
+          button.disabled = false;
+          button.className = "btn sm primary";
+          button.dataset.settings = "update";
+          button.textContent = `Update now (${plural(result.behind, "change")})`;
+        } else {
+          button.textContent = result?.reason || "You're up to date";
+        }
+        return;
+      }
+      if (button.dataset.settings === "update") {
+        button.disabled = true;
+        button.textContent = "Updating…";
+        const result = await desktopAction("update", {});
+        if (result?.restarting) toast("Updated. Cairn is restarting…");
+      }
+    });
+  });
 }

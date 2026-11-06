@@ -1,5 +1,5 @@
 // Network-first service worker: always fresh when online, still opens offline.
-const CACHE = "cairn-v9";
+const CACHE = "cairn-v10";
 const SHELL = [
   "./",
   "index.html",

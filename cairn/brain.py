@@ -22,6 +22,10 @@ CODE_EXTENSIONS = {
 }
 MAX_FILE_BYTES = 1_000_000
 MAX_TODOS = 500
+LOCAL_WRITE_TIMEOUT = 120  # add/commit of a big vault on a machine with busy antivirus
+NETWORK_TIMEOUT = 180  # pull / push / clone; sign-in prompts from Git Credential Manager count too
+# No console window flashing up for every git call when Cairn runs as a windowed app on Windows.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 BRAIN_README = """# brain/
 
@@ -55,6 +59,10 @@ class ConflictError(RuntimeError):
         super().__init__("file changed on disk")
         self.current_text = current_text
         self.current_mtime = current_mtime
+
+
+class SyncError(RuntimeError):
+    """Sync stopped safely (offline, sign-in needed, or edits that clash with the remote)."""
 
 
 def find_brain_dir(root: Path, explicit: str | None = None) -> Path:
@@ -222,10 +230,12 @@ class Brain:
 
     # ------------------------------------------------------------ git
 
-    def _git(self, *args: str) -> subprocess.CompletedProcess:
+    def _git(self, *args: str, timeout: int = 20) -> subprocess.CompletedProcess:
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
         return subprocess.run(
             ["git", "-C", str(self.root), *args],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, env=env, creationflags=NO_WINDOW,
         )
 
     def git_available(self) -> bool:
@@ -236,7 +246,7 @@ class Brain:
 
     def git_status(self) -> dict:
         if not self.git_available():
-            return {"available": False, "branch": "", "changes": []}
+            return {"available": False, "branch": "", "changes": [], "remote": False, "ahead": 0, "behind": 0}
         brain_spec = self._brain_pathspec()
         status = self._git("status", "--porcelain", "-uall", "--", brain_spec)
         branch = self._git("symbolic-ref", "--short", "-q", "HEAD").stdout.strip()
@@ -255,7 +265,51 @@ class Brain:
             except ValueError:
                 pass
             changes.append({"status": line[:2].strip() or "?", "path": path})
-        return {"available": True, "branch": branch, "changes": changes}
+        ahead, behind = self._ahead_behind()
+        return {
+            "available": True,
+            "branch": branch,
+            "changes": changes,
+            "remote": self._remote_name() is not None,
+            "ahead": ahead,
+            "behind": behind,
+        }
+
+    def _remote_name(self) -> str | None:
+        remotes = self._git("remote").stdout.split()
+        if not remotes:
+            return None
+        return "origin" if "origin" in remotes else remotes[0]
+
+    def _upstream(self) -> str | None:
+        result = self._git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+        return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+
+    def _link_upstream(self, remote: str, branch: str, has_commits: bool) -> str | None:
+        """First sync on this device: connect the branch to the same branch on the remote."""
+        fetch = self._git("fetch", remote, timeout=NETWORK_TIMEOUT)
+        if fetch.returncode != 0:
+            raise SyncError(_explain_git_failure(fetch, "fetch"))
+        remote_ref = f"refs/remotes/{remote}/{branch}"
+        if self._git("rev-parse", "--verify", "-q", remote_ref).returncode != 0:
+            return None  # nothing there yet: the first push creates it
+        if not has_commits:
+            pull = self._git("pull", remote, branch, timeout=NETWORK_TIMEOUT)
+            if pull.returncode != 0:
+                raise SyncError(_explain_git_failure(pull, "pull"))
+        self._git("branch", f"--set-upstream-to={remote}/{branch}", branch)
+        return self._upstream()
+
+    def _ahead_behind(self) -> tuple[int, int]:
+        """Commits not yet pushed / not yet pulled, as of the last fetch (no network)."""
+        if not self._upstream():
+            return 0, 0
+        result = self._git("rev-list", "--left-right", "--count", "HEAD...@{u}")
+        try:
+            ahead, behind = (int(n) for n in result.stdout.split())
+            return ahead, behind
+        except ValueError:
+            return 0, 0
 
     def _brain_pathspec(self) -> str:
         try:
@@ -267,13 +321,99 @@ class Brain:
         if not self.git_available():
             raise RuntimeError("this folder is not a git repository")
         spec = self._brain_pathspec()
-        added = self._git("add", "-A", "--", spec)
+        added = self._git("add", "-A", "--", spec, timeout=LOCAL_WRITE_TIMEOUT)
         if added.returncode != 0:
             raise RuntimeError(added.stderr.strip() or "git add failed")
         if not self._git("diff", "--cached", "--name-only", "--", spec).stdout.strip():
             raise RuntimeError("nothing to commit in the brain folder")
-        result = self._git("commit", "-m", message or "brain: update notes", "--", spec)
+        result = self._git("commit", "-m", message or "brain: update notes", "--", spec, timeout=LOCAL_WRITE_TIMEOUT)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git commit failed")
         sha = self._git("rev-parse", "--short", "HEAD").stdout.strip()
         return {"commit": sha, "message": message}
+
+    def git_sync(self, message: str = "") -> dict:
+        """One step to be up to date everywhere: commit brain edits, pull others' edits, push.
+
+        Only the brain folder is committed. Anything else in the working tree is left alone
+        (it is stashed around the pull and put back). On a clash the pull is undone and the
+        repo is left exactly as it was, with the local commit kept.
+        """
+        if not self.git_available():
+            raise SyncError("This folder is not a git repository yet.")
+        committed = None
+        pending = self.git_status()["changes"]
+        if pending:
+            count = len(pending)
+            text = message or f"brain: update {count} note{'s' if count != 1 else ''}"
+            committed = self.git_commit(text)["commit"]
+        remote = self._remote_name()
+        if remote is None:
+            return {"committed": committed, "pulled": 0, "pushed": 0, "remote": False}
+        branch = self._git("symbolic-ref", "--short", "-q", "HEAD").stdout.strip()
+        if not branch:
+            raise SyncError("Not on a branch (detached HEAD); switch to a branch to sync.")
+        before = self._git("rev-parse", "--verify", "-q", "HEAD").stdout.strip()
+        upstream = self._upstream() or self._link_upstream(remote, branch, has_commits=bool(before))
+        if upstream:
+            pull = self._git("pull", "--rebase", "--autostash", timeout=NETWORK_TIMEOUT)
+            if pull.returncode != 0:
+                self._git("rebase", "--abort")
+                raise SyncError(_explain_git_failure(pull, "pull"))
+        after_pull = self._git("rev-parse", "--verify", "-q", "HEAD").stdout.strip()
+        pulled = 0
+        if after_pull and before != after_pull:
+            span = f"{before}..{after_pull}" if before else after_pull
+            pulled = int(self._git("rev-list", "--count", span).stdout.strip() or 0)
+        has_commits = bool(self._git("rev-parse", "--verify", "-q", "HEAD").stdout.strip())
+        ahead, _ = self._ahead_behind() if upstream else ((1, 0) if has_commits else (0, 0))
+        pushed = 0
+        if ahead:
+            push_args = ["push"] if upstream else ["push", "-u", remote, branch]
+            push = self._git(*push_args, timeout=NETWORK_TIMEOUT)
+            if push.returncode != 0:
+                raise SyncError(_explain_git_failure(push, "push"))
+            pushed = ahead
+        return {"committed": committed, "pulled": pulled, "pushed": pushed, "remote": True}
+
+
+def _explain_git_failure(result: subprocess.CompletedProcess, step: str) -> str:
+    text = (result.stderr or result.stdout or "").strip()
+    lowered = text.lower()
+    if "conflict" in lowered or "could not apply" in lowered:
+        return ("Your edits and the remote's edits touch the same lines. Nothing was lost: your "
+                "changes are committed locally. Resolve it in your git tool, then sync again.")
+    if "authentication" in lowered or "terminal prompts disabled" in lowered or "403" in lowered:
+        return "GitHub needs you to sign in. Sync again and approve the GitHub sign-in window."
+    if "could not resolve host" in lowered or "unable to access" in lowered or "timed out" in lowered:
+        return "Couldn't reach the remote (offline?). Your edits are safe and will sync next time."
+    last_line = text.splitlines()[-1] if text else f"git {step} failed"
+    return f"git {step} failed: {last_line}"
+
+
+def clone_repo(url: str, destination: Path) -> Path:
+    """Clone a repo (e.g. a GitHub vault) into destination; returns the folder."""
+    url = url.strip()
+    if not url:
+        raise SyncError("Paste the address of a repo, e.g. https://github.com/you/notes")
+    if "://" not in url and not url.startswith("git@") and url.count("/") == 1:
+        url = f"https://github.com/{url}.git"  # owner/repo shorthand
+    destination = Path(destination)
+    if destination.exists() and any(destination.iterdir()):
+        raise SyncError(f"{destination} already exists and isn't empty.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["git", "clone", url, str(destination)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=NETWORK_TIMEOUT, creationflags=NO_WINDOW,
+    )
+    if result.returncode != 0:
+        raise SyncError(_explain_git_failure(result, "clone"))
+    return destination
+
+
+def repo_folder_name(url: str) -> str:
+    """notes from https://github.com/you/notes.git, you/notes or git@github.com:you/notes.git."""
+    tail = url.strip().rstrip("/").replace(":", "/").split("/")[-1]
+    name = tail[:-4] if tail.endswith(".git") else tail
+    return "".join(ch for ch in name if ch.isalnum() or ch in "-_. ").strip() or "brain"

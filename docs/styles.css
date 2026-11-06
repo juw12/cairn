@@ -692,3 +692,16 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 }
 
 .save-state.unsaved { color: var(--accent); }
+
+/* desktop app: open a brain, settings */
+.pick-list { display: grid; gap: 6px; margin: 4px 0 16px; }
+.pick-list.compact { max-height: 220px; overflow: auto; }
+.pick { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 10px 12px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); cursor: pointer; font: inherit; }
+.pick:hover, .pick:focus-visible { border-color: var(--ink-2); background: var(--surface-2, var(--surface)); }
+.pick svg { flex: none; margin-top: 2px; }
+.pick span { display: grid; gap: 2px; min-width: 0; }
+.pick strong { font-weight: 600; font-size: 14px; }
+.pick small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal.settings .check { margin-top: 12px; flex-wrap: wrap; }
+.settings-update { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 18px 0 6px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.modal .hint { color: var(--muted); font-size: 12.5px; }

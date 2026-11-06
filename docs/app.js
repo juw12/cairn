@@ -11,7 +11,7 @@ import { board, codeView, contextView, decisions, home, ideas, journal, moveNote
 import { mapView, resetMap, wireMap } from "./map.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { addSpark, closeDrawer, flushPending, openNote, promote, renderDrawer, useHeld } from "./drawer.js";
-import { capture, commitBrain, copyText, newNote, openToday, saveContext, switchBrain, todoToTask, toggleTheme } from "./actions.js";
+import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { showWelcome } from "./welcome.js";
 
@@ -61,10 +61,19 @@ export function renderSidebarFoot() {
   const parts = [];
   if (state.info?.canGit && state.git?.available) {
     const changes = state.git.changes.length;
+    const { ahead = 0, behind = 0, remote = false } = state.git;
+    const status = [
+      changes ? plural(changes, "change") : "",
+      ahead ? `↑${ahead}` : "",
+      behind ? `↓${behind}` : "",
+    ].filter(Boolean).join(" · ") || (remote ? "in sync" : "clean");
+    const button = remote
+      ? `<button class="btn sm ${changes || ahead || behind ? "primary" : ""}" style="width:100%;margin-top:8px" data-action="sync" ${state.syncing ? "disabled" : ""} title="Save your edits, get everyone else's and send yours to GitHub">${icon("refresh", "sm")} ${state.syncing ? "Syncing…" : "Sync"}</button>`
+      : `<button class="btn sm ${changes ? "primary" : ""}" style="width:100%;margin-top:8px" data-action="commit" ${changes ? "" : "disabled"}>${icon("git", "sm")} Commit brain</button>`;
     parts.push(`
       <div class="git-card">
-        <div class="row"><span class="branch">${icon("branch", "sm")}${esc(state.git.branch || "git")}</span><span class="muted">${changes ? plural(changes, "change") : "clean"}</span></div>
-        <button class="btn sm ${changes ? "primary" : ""}" style="width:100%;margin-top:8px" data-action="commit" ${changes ? "" : "disabled"}>${icon("git", "sm")} Commit brain</button>
+        <div class="row"><span class="branch">${icon("branch", "sm")}${esc(state.git.branch || "git")}</span><span class="muted">${status}</span></div>
+        ${button}
       </div>`);
   }
   const me = auth.session();
@@ -80,7 +89,9 @@ export function renderSidebarFoot() {
   parts.push(`
     <div class="foot-row">
       <button class="btn sm ghost" data-action="theme" aria-label="Toggle theme">${icon(theme === "dark" ? "sun" : "moon", "sm")} ${theme === "dark" ? "Light" : "Dark"}</button>
-      <a class="btn sm ghost" href="${REPO_URL}" target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>
+      ${state.info?.desktop
+        ? `<button class="btn sm ghost" data-action="settings">${icon("gear", "sm")} Settings</button>`
+        : `<a class="btn sm ghost" href="${REPO_URL}" target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>`}
     </div>`);
   $("#sidebar-foot").innerHTML = parts.join("");
 }
@@ -211,6 +222,8 @@ function wireGlobal() {
       "copy-context": () => copyText(core.contextPack(state.notes, state.info.project, today()), "Context pack copied"),
       "save-context": saveContext,
       commit: commitBrain,
+      sync: syncBrain,
+      settings: openSettings,
       "switch-brain": switchBrain,
       "map-reset": () => resetMap(),
       "open-brain": () => openBrain(actionEl.dataset.repo),
@@ -455,5 +468,6 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
-window.cairn = { state, core, rerender: () => renderView() };
+// reload(): the desktop app calls this after a background sync brought in someone else's edits.
+window.cairn = { state, core, rerender: () => renderView(), reload: () => reloadBrain() };
 boot();
