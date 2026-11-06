@@ -355,7 +355,18 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .map-wrap svg { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none; }
 .map-wrap svg:focus { outline: none; }
 .map-wrap svg.panning { cursor: grabbing; }
-.map-legend { position: absolute; left: 12px; bottom: 12px; right: 120px; display: flex; gap: 6px 14px; flex-wrap: wrap; width: max-content; max-width: calc(100% - 132px); padding: 6px 10px; font-size: 12px; color: var(--muted); background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); border-radius: 6px; pointer-events: none; }
+.map-wrap canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.map-wrap canvas:focus { outline: none; }
+.map-wrap canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.map-wrap canvas.dragging { cursor: grabbing; }
+.map-zoom { align-items: center; }
+.map-zoom .map-mode { margin-right: 4px; }
+.map-zoom .map-mode .seg { height: 26px; min-width: 34px; font-weight: 600; letter-spacing: .02em; }
+.map-zoom .btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.map-hint { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 6px 12px; font-size: 12.5px; color: var(--ink-2); background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--shadow-sm); pointer-events: none; white-space: nowrap; transition: opacity .35s; }
+.map-hint.gone { opacity: 0; }
+.map-wrap.is-3d .map-chip ~ .map-hint, .map-card:not([hidden]) ~ .map-hint { top: auto; bottom: 56px; }
+.map-legend { position: absolute; left: 12px; bottom: 12px; right: 240px; display: flex; gap: 6px 14px; flex-wrap: wrap; width: max-content; max-width: calc(100% - 252px); padding: 6px 10px; font-size: 12px; color: var(--muted); background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); border-radius: 6px; pointer-events: none; }
 .map-legend span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .map-zoom { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 2px; padding: 3px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
 .map-chip { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; max-width: calc(100% - 24px); padding: 6px 10px; font-size: 12.5px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; box-shadow: var(--shadow-sm); }

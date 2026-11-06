@@ -165,6 +165,11 @@ of depth 1 to 3, the shortest path between two notes, keyboard navigation (arrow
 Enter opens, L for local), hubs, orphans and islands at a glance, and *suggested links*: notes that
 mention another note's title without linking it, linked in one click.
 
+Switch the Map between **2D and 3D** with the toggle in its corner (or press 2 / 3). The 3D map lays your
+notes out in space with perspective, depth and lit spheres; drag to turn it a full 360° any way, right-drag
+or Shift-drag to pan, scroll or pinch to zoom, R for auto-rotate. Selection, local maps, paths, filters
+and suggested links work the same in both, and Cairn remembers which one you like.
+
 ### Command line
 
 ```bash

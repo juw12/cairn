@@ -8,6 +8,7 @@ import { $, $$, TYPE_META, emptyState, icon, pageHead, plural, toast } from "./u
 import { noteByPath, readOnly, saveNote, state } from "./state.js";
 import { openNote } from "./drawer.js";
 import { renderView } from "./app.js";
+import { createView3D, reset3D } from "./map3d.js";
 
 // ------------------------------------------------------------ settings and session
 
@@ -22,6 +23,8 @@ const DEFAULTS = {
   arrows: false,
   colour: "auto",
   depth: 1,
+  view: "2d",
+  spin: true,
 };
 const PALETTE = 8;
 const LABEL_FONT = 11.5;
@@ -201,10 +204,11 @@ export function mapView() {
   m.facts = facts;
   const colour = colourer(m);
   m.colour = colour;
-  const edgeSvg = m.edges
+  const is3d = settings.view === "3d";
+  const edgeSvg = is3d ? "" : m.edges
     .map((e) => `<line class="map-edge${e.kind ? ` map-edge-${e.kind}` : ""}${e.both ? " both" : ""}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"/>`)
     .join("");
-  const nodeSvg = m.nodes
+  const nodeSvg = is3d ? "" : m.nodes
     .map((n) => {
       const links = m.degree(n.id);
       const label = n.kind === "note" ? `${n.title}, ${plural(links, "link")}` : n.kind === "ghost" ? `${n.title}, missing note` : `${n.title}, attachment`;
@@ -218,16 +222,23 @@ export function mapView() {
   const sub = `${plural(m.graph.nodes.length, "note")} · ${plural(m.graph.edges.length, "link")} · ${plural(facts.orphans.length, "orphan")} · ${plural(facts.islands, "island")}`;
   return `${pageHead("Map", sub, `<button class="btn" data-action="map-reset">${icon("refresh")} Reset view</button>`)}
     <div class="map-layout">
-      <div class="card map-wrap${session.path ? " pathing" : ""}" id="map-wrap">
-        <svg id="map-svg" aria-label="Note map. Arrow keys move between linked notes, Enter opens, L shows the local map, Escape clears." aria-describedby="map-help">
+      <div class="card map-wrap${session.path ? " pathing" : ""}${is3d ? " is-3d" : ""}" id="map-wrap">
+        ${is3d ? `<canvas id="map-canvas" tabindex="0" role="img" aria-label="3D note map. Drag to turn it any way, right-drag or Shift-drag to pan, scroll to zoom. Arrow keys move between linked notes, Enter opens, Escape clears." aria-describedby="map-help"></canvas>
+        <p id="map-help" class="sr-only">Drag to turn the map in any direction; it keeps turning briefly after a flick. Right-drag or Shift-drag pans, scroll or pinch zooms. Click a dot to select it, double-click or press Enter to open it. Press 2 for the flat map.</p>
+        ${hinted3d() ? "" : `<div class="map-hint" id="map-hint">Drag to turn · Right-drag to pan · Scroll to zoom</div>`}`
+        : `<svg id="map-svg" aria-label="Note map. Arrow keys move between linked notes, Enter opens, L shows the local map, Escape clears." aria-describedby="map-help">
           <defs><marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1L9,5L0,9z"/></marker></defs>
           <g class="map-edges${settings.arrows ? " arrows" : ""}">${edgeSvg}</g><g class="map-suggest"></g><g class="map-nodes">${nodeSvg}</g>
         </svg>
-        <p id="map-help" class="sr-only">Click a dot to select it, double-click or press Enter to open it. Drag dots to rearrange, scroll or pinch to zoom.</p>
+        <p id="map-help" class="sr-only">Click a dot to select it, double-click or press Enter to open it. Drag dots to rearrange, scroll or pinch to zoom. Press 3 for the 3D map.</p>`}
         <div class="map-card" id="map-card" hidden></div>
         ${session.local ? localChip(m) : ""}
         ${hidden && !session.local ? `<div class="map-chip">${plural(m.nodes.filter((n) => n.kind === "note").length, "note")} shown of ${m.graph.nodes.length} <button class="link-btn" data-map="clear-filters">Show all</button></div>` : ""}
-        <div class="map-zoom" role="group" aria-label="Zoom">
+        <div class="map-zoom" role="group" aria-label="View">
+          <span class="segs map-mode" role="group" aria-label="Map view">
+            <button class="seg${is3d ? "" : " on"}" data-map="view" data-view="2d" aria-pressed="${!is3d}" title="Flat map (2)">2D</button><button class="seg${is3d ? " on" : ""}" data-map="view" data-view="3d" aria-pressed="${is3d}" title="3D map you can turn any way (3)">3D</button>
+          </span>
+          ${is3d ? `<button class="btn sm icon-only ghost" data-map="spin" aria-pressed="${settings.spin}" aria-label="Turn slowly by itself" title="Auto-rotate (R)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/></svg></button>` : ""}
           <button class="btn sm icon-only ghost" data-map="zoom-in" aria-label="Zoom in">${icon("plus")}</button>
           <button class="btn sm icon-only ghost" data-map="zoom-out" aria-label="Zoom out"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
           <button class="btn sm icon-only ghost" data-map="fit" aria-label="Fit to screen"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
@@ -325,6 +336,16 @@ function pathResultHtml(m) {
 // ------------------------------------------------------------ drawing
 
 let dom = null;
+let view3d = null;
+const is3d = () => dom?.mode === "3d";
+const HINT_KEY = "cairn.map3d.hinted";
+function hinted3d() {
+  try {
+    return localStorage.getItem(HINT_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
 
 function scale() {
   const rect = dom.svg.getBoundingClientRect();
@@ -336,6 +357,7 @@ function setBox() {
 }
 
 function fit(ids = null) {
+  if (is3d()) return view3d?.fit(ids);
   const m = model;
   const nodes = ids ? m.nodes.filter((n) => ids.includes(n.id)) : m.nodes;
   if (!nodes.length) return;
@@ -370,6 +392,7 @@ function fit(ids = null) {
 }
 
 function draw() {
+  if (is3d()) return;
   const m = model;
   for (const n of m.nodes) dom.nodeEls.get(n.id)?.setAttribute("transform", `translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})`);
   const arrows = settings.arrows;
@@ -397,6 +420,7 @@ function draw() {
 
 // Dashed lines for the selected note's unlinked mentions: links you could make in one click.
 function drawSuggestions() {
+  if (is3d()) return view3d?.redraw();
   const m = model;
   const id = session.selected;
   const lines = !id ? [] : m.mentions.filter((s) => (s.from === id || s.to === id) && m.byId.has(s.from) && m.byId.has(s.to)).slice(0, 30);
@@ -425,6 +449,7 @@ function shortLabel(n) {
 // below, above, right, then left of its dot and never overlaps another label or dot. Labels without
 // room stay hidden until their dot is hovered, focused or selected. Zooming in reveals more.
 function placeLabels() {
+  if (is3d()) return;
   const m = model;
   const k = scale();
   const font = LABEL_FONT / k;
@@ -492,6 +517,7 @@ function neighboursOf(id) {
 }
 
 function highlight(id, cls = "lit") {
+  if (is3d()) return view3d?.redraw();
   $$(`.${cls}`, dom.svg).forEach((el) => el.classList.remove(cls));
   if (!id) return;
   dom.nodeEls.get(id)?.classList.add(cls);
@@ -506,12 +532,17 @@ function highlight(id, cls = "lit") {
 
 function applyFocus() {
   const id = session.hover || session.selected;
+  if (is3d()) {
+    dom.wrap.classList.toggle("focus", Boolean(id) && !session.path);
+    return view3d?.redraw();
+  }
   dom.wrap.classList.toggle("focus", Boolean(id) && !session.path);
   highlight(id);
   if (!frame) scheduleLabels();
 }
 
 function applyPath() {
+  if (is3d()) return view3d?.redraw();
   $$(".on-path", dom.svg).forEach((el) => el.classList.remove("on-path"));
   if (!session.path) return;
   const steps = new Set(session.path.map((id, i) => (i ? `${session.path[i - 1]}\u0000${id}` : "")));
@@ -524,6 +555,14 @@ function applyPath() {
 
 function select(id, { focus = true, centre = false } = {}) {
   session.selected = id && model.byId.has(id) ? id : null;
+  if (is3d()) {
+    if (session.selected && centre) view3d?.focusOn(session.selected);
+    applyFocus();
+    renderCard();
+    const panel3d = $("#map-suggestions");
+    if (panel3d) panel3d.innerHTML = suggestionsHtml(model);
+    return;
+  }
   $$(".selected", dom.svg).forEach((el) => el.classList.remove("selected"));
   for (const [nodeId, el] of dom.nodeEls) el.setAttribute("tabindex", nodeId === session.selected ? "0" : "-1");
   if (!session.selected) {
@@ -543,6 +582,7 @@ function select(id, { focus = true, centre = false } = {}) {
 }
 
 function centreOn(node) {
+  if (is3d()) return view3d?.focusOn(node.id);
   const box = dom.box;
   const visible = node.x > box.x + box.w * 0.15 && node.x < box.x + box.w * 0.85 && node.y > box.y + box.h * 0.15 && node.y < box.y + box.h * 0.85;
   if (visible) return;
@@ -589,9 +629,13 @@ function step(direction) {
     return select(hub, { centre: true });
   }
   const [vx, vy] = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[direction];
+  // In 3D, "right" means right on screen from the current angle.
+  const at = is3d() ? (n) => view3d.screenPos(n.id) || { x: Infinity, y: Infinity } : (n) => n;
+  const origin = at(from);
   const score = (n) => {
-    const dx = n.x - from.x;
-    const dy = n.y - from.y;
+    const p = at(n);
+    const dx = p.x - origin.x;
+    const dy = p.y - origin.y;
     const d = Math.hypot(dx, dy) || 1;
     const cos = (dx * vx + dy * vy) / d;
     return cos < 0.35 ? -Infinity : cos * 2 - d / 600;
@@ -677,6 +721,7 @@ export function resetMap() {
   session.path = null;
   session.pathMessage = "";
   positions.clear();
+  reset3D();
   lastSignature = "";
   renderView();
 }
@@ -726,11 +771,22 @@ const mapActions = {
     saveSettings({ types: settings.types.includes(type) ? settings.types.filter((t) => t !== type) : [...settings.types, type] });
     renderView();
   },
+  view: (el) => setView(el.dataset.view),
+  spin: () => view3d?.setSpin(!view3d.spinning),
   link: (el) => acceptMention(Number(el.dataset.index)),
   fix: (el) => fixLink(Number(el.dataset.index)),
 };
 
+function setView(view) {
+  if (view !== "2d" && view !== "3d") return;
+  if (view === settings.view) return;
+  saveSettings({ view });
+  renderView();
+  (view === "3d" ? $("#map-canvas") : $('#map-svg .map-dot[tabindex="0"]'))?.focus({ preventScroll: true });
+}
+
 function zoomBy(factor, cx = null, cy = null) {
+  if (is3d()) return view3d?.zoom(factor);
   const box = dom.box;
   const mx = cx ?? box.x + box.w / 2;
   const my = cy ?? box.y + box.h / 2;
@@ -749,7 +805,7 @@ function scheduleLabels() {
 
 let frame = null;
 function animate() {
-  if (frame) return;
+  if (frame || is3d()) return;
   dom.wrap.classList.add("moving");
   const loop = () => {
     if (!dom || !model) {
@@ -773,11 +829,62 @@ function animate() {
 // ------------------------------------------------------------ wiring
 
 export function wireMap() {
-  const svg = $("#map-svg");
-  if (!svg || !model) return;
+  view3d?.destroy();
+  view3d = null;
   if (frame) cancelAnimationFrame(frame);
   frame = null;
   const wrap = $("#map-wrap");
+  if (!wrap || !model) return;
+  if (settings.view === "3d" && $("#map-canvas")) wire3d(wrap);
+  else wire2d(wrap);
+  wirePanel(wrap);
+}
+
+function wire3d(wrap) {
+  const canvas = $("#map-canvas");
+  dom = { mode: "3d", wrap, card: $("#map-card"), nodeEls: new Map(), edgeEls: [] };
+  view3d = createView3D({
+    canvas,
+    model,
+    session,
+    colourOf: (n) => model.colour.of(n),
+    label: shortLabel,
+    arrows: settings.arrows,
+    spin: settings.spin,
+    onSelect: (id) => select(id, { focus: false }),
+    onOpen: (id) => {
+      if (model.byId.get(id)?.kind === "note") openNote(id);
+    },
+    onHover: (id) => {
+      session.hover = id;
+      applyFocus();
+    },
+    onSpinChange: (on) => {
+      saveSettings({ spin: on });
+      $('[data-map="spin"]')?.setAttribute("aria-pressed", String(on));
+    },
+    onInteract: dismissHint,
+  });
+  if (window.cairn) window.cairn.map3d = view3d;
+  select(session.selected, { focus: false });
+}
+
+function dismissHint() {
+  const hint = $("#map-hint");
+  if (!hint) return;
+  hint.classList.add("gone");
+  setTimeout(() => hint.remove(), 400);
+  try {
+    localStorage.setItem(HINT_KEY, "1");
+  } catch {
+    // Private mode: the hint simply shows again next time.
+  }
+}
+
+function wire2d(wrap) {
+  const svg = $("#map-svg");
+  if (!svg) return;
+  if (window.cairn) window.cairn.map3d = null;
   const nodeEls = new Map($$(".map-dot", svg).map((el) => [el.dataset.node, el]));
   const edgeEls = $$(".map-edge", svg).map((line) => [line, model.byId.get(line.dataset.a), model.byId.get(line.dataset.b)]);
   dom = { svg, wrap, nodeEls, edgeEls, suggest: $(".map-suggest", svg), card: $("#map-card"), box: { x: -400, y: -300, w: 800, h: 600 } };
@@ -903,11 +1010,24 @@ export function wireMap() {
     const el = event.target.closest(".map-node");
     if (el) openNote(el.dataset.node);
   });
+}
 
+// Keyboard, toolbar, side panel: the same in 2D and 3D.
+function wirePanel(wrap) {
   wrap.addEventListener("keydown", (event) => {
     if (event.target.closest("input, select, textarea, button:not(.map-dot)")) return;
     const key = event.key;
-    if (key.startsWith("Arrow")) {
+    if (is3d() && event.shiftKey && key.startsWith("Arrow")) {
+      // Shift+arrows turn the 3D map 15° at a time.
+      event.preventDefault();
+      const turn = Math.PI / 12;
+      const [yaw, pitch] = { ArrowLeft: [turn, 0], ArrowRight: [-turn, 0], ArrowUp: [0, -turn], ArrowDown: [0, turn] }[key];
+      view3d.rotateBy(yaw, pitch);
+    } else if (key === "2" || key === "3") {
+      setView(`${key}d`);
+    } else if (is3d() && key.toLowerCase() === "r" && !event.ctrlKey && !event.metaKey) {
+      view3d.setSpin(!view3d.spinning);
+    } else if (key.startsWith("Arrow")) {
       event.preventDefault();
       step(key);
     } else if (key === "Enter" || key === " ") {
@@ -972,11 +1092,13 @@ export function wireMap() {
     const row = event.target.closest(".suggestion[data-a]");
     if (!row) return;
     session.hover = row.dataset.a;
+    session.alsoLit = row.dataset.b;
     applyFocus();
     dom.nodeEls.get(row.dataset.b)?.classList.add("lit");
   });
   $("#map-suggestions")?.addEventListener("pointerleave", () => {
     session.hover = null;
+    session.alsoLit = null;
     applyFocus();
   });
 }
