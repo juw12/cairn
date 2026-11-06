@@ -285,6 +285,74 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("from Obsidian", page.inner_text(".sync-report"))
         self.assertEqual(self.errors, [])
 
+    def test_map_alt_drag_links_missing_notes_and_growth(self):
+        page = self.open(query="?demo=1#/map", wait="#map-svg text")
+        # Two notes with no link between them, both on screen.
+        pair = page.evaluate(r"""() => {
+            const { state, core } = window.cairn;
+            const g = core.buildGraph(state.notes);
+            const linked = new Set(g.edges.flatMap((e) => [e.source + '|' + e.target, e.target + '|' + e.source]));
+            const ids = g.nodes.map((n) => n.id).filter((id) => document.querySelector(`#map-svg .map-node[data-node="${id}"]`));
+            for (const a of ids) for (const b of ids) if (a !== b && !linked.has(a + '|' + b)) return [a, b];
+            return null;
+        }""")
+        self.assertIsNotNone(pair)
+        source, target = pair
+
+        def centre(node_id):
+            box = page.locator(f'#map-svg .map-node[data-node="{node_id}"] circle').bounding_box()
+            return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+        (ax, ay), (bx, by) = centre(source), centre(target)
+        page.keyboard.down("Alt")
+        page.mouse.move(ax, ay)
+        page.mouse.down()
+        page.mouse.move((ax + bx) / 2, (ay + by) / 2, steps=6)
+        page.mouse.move(bx, by, steps=6)
+        page.mouse.up()
+        page.keyboard.up("Alt")
+        page.wait_for_function(
+            r"""([a, b]) => {
+                const { state, core } = window.cairn;
+                return core.buildGraph(state.notes).edges.some((e) => (e.source === a && e.target === b) || (e.source === b && e.target === a));
+            }""",
+            arg=[source, target],
+        )
+        self.assertIn("Linked", page.inner_text(".toast"))
+
+        # Missing notes: link to a note that doesn't exist, show missing notes, double-click to create it.
+        page.evaluate(r"""async () => {
+            const { state, core } = window.cairn;
+            const f = state.files.find((x) => x.path === 'notes/architecture.md');
+            const text = f.text.replace(/\s*$/, '') + '\n\nSee [[trail-snacks]].\n';
+            const { mtime } = await state.store.write(f.path, text, f.mtime);
+            f.text = text;
+            f.mtime = mtime;
+            const i = state.notes.findIndex((n) => n.path === f.path);
+            state.notes[i] = core.noteFromFile(f.path, text, mtime);
+            window.cairn.rerender();
+        }""")
+        page.wait_for_selector('[data-map="show-missing"]')
+        page.click('[data-map="show-missing"]')
+        page.wait_for_selector("#map-svg .map-ghost")
+        ghost = page.evaluate("document.querySelector('#map-svg .map-ghost').dataset.node")
+        page.locator(f'#map-svg .map-ghost[data-node="{ghost}"]').dispatch_event("dblclick")
+        page.wait_for_function(
+            "(id) => !document.querySelector(`#map-svg .map-ghost[data-node=\"${id}\"]`)",
+            arg=ghost,
+        )
+        unresolved = page.evaluate("window.cairn.core.buildGraph(window.cairn.state.notes).unresolved.map((u) => '?' + u.target.toLowerCase())")
+        self.assertNotIn(ghost, unresolved)
+        self.assertEqual(ghost, "?trail-snacks")
+        created = page.evaluate("window.cairn.state.notes.find((n) => n.path === 'notes/trail-snacks.md')?.title")
+        self.assertEqual(created, "Trail snacks")
+
+        # Growth time-lapse: everything starts hidden, then the whole map is back.
+        page.click('[data-map="grow"]')
+        page.wait_for_selector("#map-growth:not([hidden])")
+        page.wait_for_function("() => !document.querySelector('#map-svg .future')", timeout=15000)
+        self.assertEqual(self.errors, [])
+
     def test_map_select_keyboard_local_and_path(self):
         page = self.open(query="?demo=1#/map", wait="#map-svg text")
         page.evaluate("localStorage.removeItem('cairn.map')")

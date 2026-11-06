@@ -399,6 +399,15 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .map-wrap.pathing .map-dot:not(.on-path) { opacity: .18; }
 .map-wrap.pathing .map-edge:not(.on-path) { opacity: .08; }
 .map-edge.on-path { stroke: var(--accent); stroke-width: 3px; }
+.map-link-draft { stroke: var(--accent); stroke-width: 2px; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.map-wrap.linking svg { cursor: crosshair; }
+.map-dot.link-target circle { stroke: var(--accent); stroke-width: 4px; }
+.map-dot, .map-edge { transition: opacity .35s ease; }
+.map-dot.future, .map-edge.future { opacity: 0 !important; }
+.map-growth { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; box-shadow: var(--shadow-sm); pointer-events: none; }
+.map-growth[hidden] { display: none; }
+.map-tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
+.map-tools-row kbd { font-family: var(--mono); font-size: 11px; padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; }
 .map-dot.on-path circle { stroke: var(--accent); stroke-width: 3px; }
 .map-side { display: flex; flex-direction: column; gap: 0; max-height: calc(100vh - 240px); min-height: 460px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .map-section { padding: 14px 16px; border-bottom: 1px solid var(--line); min-width: 0; }

@@ -5,7 +5,7 @@ import * as core from "./core.js";
 import * as G from "./graph.js";
 import { escapeHtml as esc } from "./md.js";
 import { $, $$, TYPE_META, emptyState, icon, pageHead, plural, toast } from "./ui.js";
-import { noteByPath, readOnly, saveNote, state } from "./state.js";
+import { createNote, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { openNote } from "./drawer.js";
 import { renderView } from "./app.js";
 
@@ -221,9 +221,10 @@ export function mapView() {
       <div class="card map-wrap${session.path ? " pathing" : ""}" id="map-wrap">
         <svg id="map-svg" aria-label="Note map. Arrow keys move between linked notes, Enter opens, L shows the local map, Escape clears." aria-describedby="map-help">
           <defs><marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1L9,5L0,9z"/></marker></defs>
-          <g class="map-edges${settings.arrows ? " arrows" : ""}">${edgeSvg}</g><g class="map-suggest"></g><g class="map-nodes">${nodeSvg}</g>
+          <g class="map-edges${settings.arrows ? " arrows" : ""}">${edgeSvg}</g><g class="map-suggest"></g><g class="map-nodes">${nodeSvg}</g><line class="map-link-draft" id="map-link-draft" visibility="hidden"/>
         </svg>
-        <p id="map-help" class="sr-only">Click a dot to select it, double-click or press Enter to open it. Drag dots to rearrange, scroll or pinch to zoom.</p>
+        <p id="map-help" class="sr-only">Click a dot to select it, double-click or press Enter to open it. Drag dots to rearrange, scroll or pinch to zoom. Alt-drag one note onto another to link them.</p>
+        <div class="map-growth" id="map-growth" aria-live="polite" hidden></div>
         <div class="map-card" id="map-card" hidden></div>
         ${session.local ? localChip(m) : ""}
         ${hidden && !session.local ? `<div class="map-chip">${plural(m.nodes.filter((n) => n.kind === "note").length, "note")} shown of ${m.graph.nodes.length} <button class="link-btn" data-map="clear-filters">Show all</button></div>` : ""}
@@ -276,8 +277,12 @@ function sidePanel(m) {
         <div><dt>Hubs</dt><dd><ul class="hubs">${hubs || '<li class="muted">No links yet</li>'}</ul></dd></div>
         <div><dt>Orphans</dt><dd>${f.orphans.length ? `<button class="link-btn" data-map="orphans">${f.orphans.length} with no links</button>` : "None"}</dd></div>
         <div><dt>Islands</dt><dd>${f.islands ? `${f.islands} groups, largest ${f.largest} notes` : "None"}</dd></div>
-        <div><dt>Missing</dt><dd>${f.unresolved ? `${plural(f.unresolved, "link")} to notes that don't exist` : "None"}</dd></div>
+        <div><dt>Missing</dt><dd>${f.unresolved ? `${plural(f.unresolved, "link")} to notes that don't exist${settings.unresolved ? "" : ` <button class="link-btn" data-map="show-missing">Show</button>`}` : "None"}</dd></div>
       </dl>
+      <div class="map-tools-row">
+        <button class="btn sm" data-map="grow" id="map-grow">${icon("play")} Watch it grow</button>
+        ${readOnly() ? "" : '<span class="muted small">Tip: <kbd>Alt</kbd>-drag a note onto another to link them.</span>'}
+      </div>
     </section>
     <section class="map-section" id="map-suggestions">${suggestionsHtml(m)}</section>
     <section class="map-section">
@@ -563,7 +568,8 @@ function renderCard() {
     const fix = model.graph.unresolved.find((u) => node.kind === "ghost" && u.target.toLowerCase() === node.title.toLowerCase() && u.suggestion);
     card.innerHTML = `<div class="map-card-head"><strong>${esc(node.title)}</strong><button class="btn sm icon-only ghost" data-map="deselect" aria-label="Clear selection">${icon("x")}</button></div>
       <p class="muted">${node.kind === "ghost" ? "Linked to, but this note doesn't exist yet." : "An attachment (image or file) embedded in a note."}</p>
-      ${fix ? `<p>Probably means <button class="row-link" data-map-select="${esc(fix.suggestion)}">${esc(noteByPath(fix.suggestion)?.title || fix.suggestion)}</button>.</p>` : ""}`;
+      ${fix ? `<p>Probably means <button class="row-link" data-map-select="${esc(fix.suggestion)}">${esc(noteByPath(fix.suggestion)?.title || fix.suggestion)}</button>.</p>` : ""}
+      ${node.kind === "ghost" && !readOnly() ? `<div class="map-card-actions"><button class="btn primary sm" data-map="create">Create this note</button></div>` : ""}`;
     return;
   }
   const note = noteByPath(id);
@@ -647,6 +653,144 @@ async function fixLink(index) {
   });
 }
 
+// Alt-drag one note onto another: writes [[link]] at the end of the first note (undoable).
+async function linkNotes(fromId, toId) {
+  const from = noteByPath(fromId);
+  const to = noteByPath(toId);
+  if (!from || !to || fromId === toId || readOnly()) return;
+  const index = core.linkIndex(state.notes);
+  if (core.noteLinks(from).some(({ target }) => core.resolveTarget(index, target, fromId) === toId)) {
+    toast(`“${from.title}” already links to “${to.title}”.`);
+    return;
+  }
+  const before = from.body;
+  const body = `${before.replace(/\s*$/, "")}\n\n[[${G.linkTextFor(state.notes, fromId, toId)}]]\n`;
+  const saved = await saveNote(fromId, { body });
+  if (!saved) return;
+  session.selected = fromId;
+  renderView();
+  toast(`Linked “${from.title}” → “${to.title}”.`, {
+    action: {
+      label: "Undo",
+      run: async () => {
+        await saveNote(fromId, { body: before });
+        renderView();
+      },
+    },
+  });
+}
+
+// A missing note made real, named the way the link names it so every link to it resolves at once.
+// Cairn-style brains get a regular Cairn note; vaults get a plain Markdown file, like Obsidian makes.
+async function createMissing(id) {
+  const node = id && model.byId.get(id);
+  if (!node || node.kind !== "ghost" || readOnly()) return;
+  const link = model.graph.unresolved.find((u) => `?${u.target.toLowerCase()}` === id);
+  const target = (link?.target || node.title).replace(/\.md$/i, "").replace(/^\/+/, "").trim();
+  if (!target) return;
+  const cairnStyle = state.files.some((f) => /^(ideas|tasks|decisions|notes|journal)\//.test(f.path));
+  let path;
+  if (cairnStyle && !target.includes("/")) {
+    // [[elevation-profile-chart]] becomes "Elevation profile chart" in notes/elevation-profile-chart.md.
+    const title = /^[a-z0-9]+(-[a-z0-9]+)+$/.test(target) ? target.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase()) : target;
+    path = (await createNote({ type: "note", title }))?.path;
+  } else {
+    path = `${target}.md`;
+    if (state.files.some((f) => f.path.toLowerCase() === path.toLowerCase())) {
+      toast(`${path} already exists.`, { error: true });
+      return;
+    }
+    const text = `# ${target.split("/").pop()}\n`;
+    const { mtime } = await state.store.write(path, text, null);
+    upsertFile(path, text, mtime);
+  }
+  if (!path) return;
+  const spot = positions.get(id);
+  if (spot) positions.set(path, spot);
+  session.selected = path;
+  renderView();
+  toast(`Created ${path}.`, { action: { label: "Open", run: () => openNote(path) } });
+}
+
+// ------------------------------------------------------------ growth time-lapse
+
+// When a note was born: its created/date property, a date in its file name, or when it was last saved.
+function noteTime(id) {
+  const note = noteByPath(id);
+  const meta = note?.meta || {};
+  for (const key of ["created", "date"]) {
+    const value = typeof meta[key] === "string" ? Date.parse(meta[key]) : NaN;
+    if (!Number.isNaN(value)) return value;
+  }
+  const day = /(\d{4}-\d{2}-\d{2})/.exec(id.split("/").pop());
+  const fromName = day ? Date.parse(day[1]) : NaN;
+  return Number.isNaN(fromName) ? note?.mtime || 0 : fromName;
+}
+
+let growth = null;
+
+function stopGrowth() {
+  if (!growth) return;
+  clearInterval(growth.timer);
+  growth = null;
+  if (!dom) return;
+  $$(".future", dom.svg).forEach((el) => el.classList.remove("future"));
+  dom.wrap.classList.remove("growing");
+  const caption = $("#map-growth");
+  if (caption) caption.hidden = true;
+  const button = $("#map-grow");
+  if (button) button.innerHTML = `${icon("play")} Watch it grow`;
+}
+
+// Replays the map in the order notes were written: dots and links appear as the brain grew.
+function toggleGrowth() {
+  if (growth) return stopGrowth();
+  const order = model.nodes
+    .filter((n) => n.kind === "note")
+    .map((n) => ({ id: n.id, time: noteTime(n.id) }))
+    .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  if (order.length < 2) return;
+  select(null, { focus: false });
+  const notes = new Set(order.map((o) => o.id));
+  const shown = new Set();
+  for (const el of dom.nodeEls.values()) el.classList.add("future");
+  for (const [line] of dom.edgeEls) line.classList.add("future");
+  dom.wrap.classList.add("growing");
+  const caption = $("#map-growth");
+  caption.hidden = false;
+  $("#map-grow").innerHTML = `${icon("pause")} Stop`;
+  const steps = Math.min(order.length, 90);
+  let revealed = 0;
+  let step = 0;
+  growth = {
+    timer: setInterval(() => {
+      step += 1;
+      const until = Math.ceil((step / steps) * order.length);
+      for (; revealed < until; revealed += 1) {
+        shown.add(order[revealed].id);
+        dom.nodeEls.get(order[revealed].id)?.classList.remove("future");
+      }
+      for (const [line] of dom.edgeEls) {
+        const { a, b } = line.dataset;
+        const aIn = shown.has(a) || !notes.has(a);
+        const bIn = shown.has(b) || !notes.has(b);
+        if (aIn && bIn && (shown.has(a) || shown.has(b))) {
+          line.classList.remove("future");
+          dom.nodeEls.get(a)?.classList.remove("future");
+          dom.nodeEls.get(b)?.classList.remove("future");
+        }
+      }
+      const last = order[revealed - 1];
+      const when = last.time ? new Date(last.time).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "";
+      caption.textContent = `${when} · ${plural(revealed, "note")}`;
+      if (revealed >= order.length) {
+        clearInterval(growth.timer);
+        setTimeout(stopGrowth, 1600);
+      }
+    }, 6500 / steps),
+  };
+}
+
 function resolveTitle(text) {
   const wanted = text.trim().toLowerCase();
   if (!wanted) return null;
@@ -727,6 +871,12 @@ const mapActions = {
     renderView();
   },
   link: (el) => acceptMention(Number(el.dataset.index)),
+  create: () => createMissing(session.selected),
+  grow: () => toggleGrowth(),
+  "show-missing": () => {
+    saveSettings({ unresolved: true });
+    renderView();
+  },
   fix: (el) => fixLink(Number(el.dataset.index)),
 };
 
@@ -777,10 +927,14 @@ export function wireMap() {
   if (!svg || !model) return;
   if (frame) cancelAnimationFrame(frame);
   frame = null;
+  if (growth) {
+    clearInterval(growth.timer);
+    growth = null;
+  }
   const wrap = $("#map-wrap");
   const nodeEls = new Map($$(".map-dot", svg).map((el) => [el.dataset.node, el]));
   const edgeEls = $$(".map-edge", svg).map((line) => [line, model.byId.get(line.dataset.a), model.byId.get(line.dataset.b)]);
-  dom = { svg, wrap, nodeEls, edgeEls, suggest: $(".map-suggest", svg), card: $("#map-card"), box: { x: -400, y: -300, w: 800, h: 600 } };
+  dom = { svg, wrap, nodeEls, edgeEls, suggest: $(".map-suggest", svg), draft: $("#map-link-draft"), card: $("#map-card"), box: { x: -400, y: -300, w: 800, h: 600 } };
   draw();
   fit(session.local ? null : session.path || null);
   applyPath();
@@ -830,6 +984,12 @@ export function wireMap() {
       return;
     }
     const el = event.target.closest(".map-dot");
+    if (el && event.altKey && el.classList.contains("map-node") && !readOnly()) {
+      event.preventDefault();
+      drag = { kind: "link", id: el.dataset.node, x: event.clientX, y: event.clientY, moved: false, over: null };
+      dom.wrap.classList.add("linking");
+      return;
+    }
     drag = el
       ? { kind: "node", id: el.dataset.node, x: event.clientX, y: event.clientY, moved: false }
       : { kind: "pan", x: event.clientX, y: event.clientY, box: { ...dom.box }, moved: false };
@@ -852,6 +1012,23 @@ export function wireMap() {
     if (!drag.moved && !moved) return;
     if (!drag.moved) svg.setPointerCapture(event.pointerId);
     drag.moved = true;
+    if (drag.kind === "link") {
+      const from = model.byId.get(drag.id);
+      const p = toWorld(event);
+      dom.draft.setAttribute("x1", from.x.toFixed(1));
+      dom.draft.setAttribute("y1", from.y.toFixed(1));
+      dom.draft.setAttribute("x2", p.x.toFixed(1));
+      dom.draft.setAttribute("y2", p.y.toFixed(1));
+      dom.draft.setAttribute("visibility", "visible");
+      const under = document.elementFromPoint(event.clientX, event.clientY)?.closest(".map-node");
+      const over = under && under.dataset.node !== drag.id ? under.dataset.node : null;
+      if (over !== drag.over) {
+        if (drag.over) dom.nodeEls.get(drag.over)?.classList.remove("link-target");
+        if (over) dom.nodeEls.get(over)?.classList.add("link-target");
+        drag.over = over;
+      }
+      return;
+    }
     if (drag.kind === "pan") {
       const rect = svg.getBoundingClientRect();
       dom.box = { ...drag.box, x: drag.box.x - ((event.clientX - drag.x) / rect.width) * drag.box.w, y: drag.box.y - ((event.clientY - drag.y) / rect.height) * drag.box.h };
@@ -881,6 +1058,14 @@ export function wireMap() {
     if (!drag) return;
     const done = drag;
     drag = null;
+    if (done.kind === "link") {
+      dom.draft.setAttribute("visibility", "hidden");
+      dom.wrap.classList.remove("linking");
+      if (done.over) dom.nodeEls.get(done.over)?.classList.remove("link-target");
+      if (done.over && event.type === "pointerup") linkNotes(done.id, done.over);
+      else if (!done.moved && event.type === "pointerup") select(done.id);
+      return;
+    }
     if (done.kind === "pan") {
       if (done.moved) scheduleLabels();
       else if (event.type === "pointerup") select(null, { focus: false });
@@ -902,6 +1087,8 @@ export function wireMap() {
   svg.addEventListener("dblclick", (event) => {
     const el = event.target.closest(".map-node");
     if (el) openNote(el.dataset.node);
+    const ghost = event.target.closest(".map-ghost");
+    if (ghost) createMissing(ghost.dataset.node);
   });
 
   wrap.addEventListener("keydown", (event) => {

@@ -151,7 +151,10 @@ keep their line endings, so Obsidian and git see clean one-line diffs.
 The Map goes further than Obsidian's graph: filters, colour by type, folder, cluster or tag, local maps
 of depth 1 to 3, the shortest path between two notes, keyboard navigation (arrow keys walk the links,
 Enter opens, L for local), hubs, orphans and islands at a glance, and *suggested links*: notes that
-mention another note's title without linking it, linked in one click.
+mention another note's title without linking it, linked in one click. **Alt-drag** one note onto another to
+write the link, double-click a missing note (a link to a note that doesn't exist yet) to create it, and
+*Watch it grow* replays the map in the order your notes were written. Daily notes named `2026-11-05.md`
+show up in Journal, wherever they live in the vault.
 
 ### Keep a separate brain in sync with a vault
 

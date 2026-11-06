@@ -543,7 +543,7 @@ export function obsidianView() {
     return `${head()}
       <div class="card sync-card linked direct">
         <div class="sync-hero">${icon("vault")}<div><h2>Working directly in your vault</h2>
-        <p class="muted">Cairn opened <strong>${esc(state.info?.name || "your vault")}</strong> as it is. Every note you write or edit here is a file in the vault, so Obsidian sees it straight away: there is nothing to sync.</p></div></div>
+        <p class="muted">Cairn opened <strong>${esc(state.info?.project || "your vault")}</strong> as it is. Every note you write or edit here is a file in the vault, so Obsidian sees it straight away: there is nothing to sync.</p></div></div>
         <p class="hint" style="margin-top:14px">Sync is for the other case: a project with its own <code>brain/</code> folder (or a GitHub repo) that should stay in step with a vault somewhere else.</p>
       </div>${HOW}`;
   }

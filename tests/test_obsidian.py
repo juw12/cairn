@@ -246,7 +246,7 @@ class SyncTests(unittest.TestCase):
                 )
                 page.click('#nav [data-go="map"]')
                 page.wait_for_selector("#map-svg")
-                ids = page.evaluate("window.cairn.map.nodes().map((n) => n.id)")
+                ids = page.evaluate("[...document.querySelectorAll('#map-svg .map-node')].map((n) => n.dataset.node)")
                 self.assertIn("obsidian/Projects/Trail App.md", ids)
                 browser.close()
         finally:
