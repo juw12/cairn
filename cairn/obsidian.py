@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 
 from . import core
-from .brain import SKIP_DIRS, Brain
+from .brain import SKIP_DIRS, Brain, is_vault
 
 STATE_DIR = ".cairn"
 STATE_FILE = "obsidian.json"
@@ -139,6 +139,8 @@ class ObsidianSync:
         vault = state.get("vault") or ""
         return {
             "linked": bool(vault),
+            # Cairn opened an Obsidian vault directly: every edit already is an edit in the vault.
+            "brainIsVault": is_vault(self.brain.dir),
             "vault": vault,
             "vaultName": Path(vault).name if vault else "",
             "vaultFound": bool(vault) and Path(vault).is_dir(),

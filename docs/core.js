@@ -254,65 +254,206 @@ export function noteFromFile(path, text, mtime = 0) {
   return { path, slug: fileName, type, title, status, tags, meta, body, mtime };
 }
 
-// `[[Folder/My Note.md#Heading|alias]]` -> `my-note`: how Obsidian, Foam and Cairn resolve a link.
-export function linkSlug(raw) {
-  let target = raw.split("|")[0].split("#")[0].trim().replace(/\\+$/, "");
-  target = target.replaceAll("\\", "/").split("/").pop();
-  if (target.toLowerCase().endsWith(".md")) target = target.slice(0, -3);
-  return slugify(target);
+// ------------------------------------------------------------ links (Obsidian-compatible)
+
+const WIKI_RE = /(!?)\[\[([^\]\n]+)\]\]/g;
+const MD_LINK_RE = /(!?)\[[^\]\n]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+const FENCE_RE = /```[\s\S]*?```/g;
+const INLINE_CODE_RE = /`[^`\n]*`/g;
+const URL_RE = /^[a-z][a-z0-9+.-]*:/i;
+const EXTENSION_RE = /\.[A-Za-z0-9]{1,5}$/;
+
+function folderOf(path) {
+  const index = path.lastIndexOf("/");
+  return index === -1 ? "" : path.slice(0, index);
+}
+
+function joinPath(folder, target) {
+  const parts = [];
+  for (const part of (folder ? `${folder}/${target}` : target).split("/")) {
+    if (part === "..") parts.pop();
+    else if (part && part !== ".") parts.push(part);
+  }
+  return parts.join("/");
+}
+
+function safeDecode(text) {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+// Every link in a body, in order: [[wiki]], [[folder/note|alias]], [[note#heading]], ![[embed]], [text](path.md).
+// Links inside code are ignored, like Obsidian does.
+export function linkTargets(body) {
+  const text = body.replace(FENCE_RE, "").replace(INLINE_CODE_RE, "");
+  const out = [];
+  for (const match of text.matchAll(WIKI_RE)) {
+    const target = match[2].split("|")[0].split("#")[0].trim();
+    if (target) out.push({ target, embed: match[1] === "!" });
+  }
+  for (const match of text.matchAll(MD_LINK_RE)) {
+    const href = match[2];
+    if (URL_RE.test(href) || href.startsWith("#")) continue;
+    const target = safeDecode(href.split("#")[0]).trim();
+    if (target) out.push({ target, embed: match[1] === "!" });
+  }
+  return out;
 }
 
 export function extractLinks(body) {
   const links = [];
-  for (const match of body.matchAll(LINK_RE)) {
-    const target = linkSlug(match[1]);
-    if (!links.includes(target)) links.push(target);
+  for (const { target, embed } of linkTargets(body)) {
+    if (embed) continue;
+    const name = slugify(target.replace(/\.md$/i, "").split("/").pop());
+    if (!links.includes(name)) links.push(name);
   }
   return links;
 }
 
-// Every name a link can use for this note: file name as is, file name slugified, title slugified.
-export function noteNames(note) {
-  return [note.slug, slugify(note.slug), slugify(note.title)];
+function addTo(map, key, value) {
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(value);
 }
 
-export function buildGraph(notes) {
+export function linkIndex(notes) {
+  const byPath = new Map();
+  const byName = new Map();
   const bySlug = new Map();
+  const byTitle = new Map();
   for (const note of notes) {
-    for (const name of noteNames(note)) if (!bySlug.has(name)) bySlug.set(name, note.path);
+    byPath.set(note.path.toLowerCase(), note.path);
+    const fileName = note.path.split("/").pop().slice(0, -3);
+    addTo(byName, fileName.toLowerCase(), note.path);
+    addTo(bySlug, slugify(fileName), note.path);
+    const titleSlug = slugify(note.title);
+    if (!byTitle.has(titleSlug)) byTitle.set(titleSlug, note.path);
   }
-  const nodes = notes.map((n) => ({ id: n.path, title: n.title, type: n.type }));
+  return { byPath, byName, bySlug, byTitle };
+}
+
+// Same folder wins, then the shallowest path, then alphabetical: how Obsidian picks between duplicate names.
+function closest(paths, folder) {
+  const same = paths.filter((p) => folderOf(p) === folder);
+  if (same.length) return same[0];
+  return [...paths].sort((a, b) => a.split("/").length - b.split("/").length || (a < b ? -1 : a > b ? 1 : 0))[0];
+}
+
+// Resolve a link target written in `from` to a note path, or null (attachment or missing note).
+export function resolveTarget(index, target, from = "") {
+  let name = target.trim().replaceAll("\\", "/");
+  if (!name) return null;
+  const explicitNote = /\.md$/i.test(name);
+  if (explicitNote) name = name.slice(0, -3);
+  const folder = folderOf(from);
+  if (name.includes("/")) {
+    for (const option of [joinPath(folder, name), joinPath("", name)]) {
+      const hit = index.byPath.get(`${option.toLowerCase()}.md`);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const named = index.byName.get(name.toLowerCase());
+  if (named) return closest(named, folder);
+  if (!explicitNote && EXTENSION_RE.test(name)) return null;
+  // Loose matching ([[Offline Sync]] -> offline-sync.md) is Cairn's convention, so it only applies to
+  // Cairn-style kebab-case file names. Obsidian-style names must match exactly, as they do in Obsidian.
+  const loose = looseMatch(index, name, folder);
+  return loose && isSlugName(loose) ? loose : null;
+}
+
+function isSlugName(path) {
+  const fileName = path.split("/").pop().slice(0, -3);
+  return slugify(fileName) === fileName;
+}
+
+function looseMatch(index, name, folder) {
+  const slug = slugify(name);
+  const slugged = index.bySlug.get(slug);
+  if (slugged) return closest(slugged, folder);
+  return index.byTitle.get(slug) || null;
+}
+
+// A link Obsidian cannot resolve but that almost certainly means an existing note (dash, case or spacing
+// differences). The Map offers to rewrite these; they are never counted as real links.
+export function nearMiss(index, target, from = "") {
+  if (resolveTarget(index, target, from) || isAttachment(target)) return null;
+  const name = target.trim().replaceAll("\\", "/").replace(/\.md$/i, "").split("/").pop();
+  return looseMatch(index, name, folderOf(from));
+}
+
+// Links a note makes: its body plus wiki links written in its properties (Obsidian graphs both).
+export function noteLinks(note) {
+  const fromMeta = [];
+  const walk = (value) => {
+    if (typeof value === "string") {
+      for (const match of value.matchAll(WIKI_RE)) {
+        const target = match[2].split("|")[0].split("#")[0].trim();
+        if (target) fromMeta.push({ target, embed: match[1] === "!" });
+      }
+    } else if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === "object" && typeof value.raw === "string") walk(value.raw);
+  };
+  Object.values(note.meta || {}).forEach(walk);
+  return [...fromMeta, ...linkTargets(note.body)];
+}
+
+export function isAttachment(target) {
+  const name = target.trim();
+  return !/\.md$/i.test(name) && EXTENSION_RE.test(name);
+}
+
+// Nodes carry what the Map filters and colours by; edges are undirected pairs that remember direction.
+export function buildGraph(notes) {
+  const index = linkIndex(notes);
+  const nodes = notes.map((n) => ({
+    id: n.path,
+    title: n.title,
+    type: n.type,
+    kind: typeof n.meta.type === "string" && n.meta.type ? n.meta.type : n.type,
+    folder: folderOf(n.path),
+    tags: n.tags,
+    status: n.status,
+  }));
   const edges = [];
-  const seen = new Set();
+  const byPair = new Map();
+  const attachments = [];
+  const unresolved = [];
   for (const note of notes) {
-    for (const target of extractLinks(note.body)) {
-      const targetPath = bySlug.get(target);
-      if (!targetPath || targetPath === note.path) continue;
+    for (const { target, embed } of noteLinks(note)) {
+      const targetPath = resolveTarget(index, target, note.path);
+      if (!targetPath) {
+        if (isAttachment(target)) attachments.push({ from: note.path, target, embed });
+        else unresolved.push({ from: note.path, target, embed, suggestion: nearMiss(index, target, note.path) });
+        continue;
+      }
+      if (targetPath === note.path) continue;
       const key = [note.path, targetPath].sort().join("\u0000");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      edges.push({ source: note.path, target: targetPath });
+      const existing = byPair.get(key);
+      if (existing) {
+        if (existing.source !== note.path) existing.both = true;
+        continue;
+      }
+      const edge = { source: note.path, target: targetPath, both: false };
+      byPair.set(key, edge);
+      edges.push(edge);
     }
   }
-  return { nodes, edges };
+  return { nodes, edges, attachments, unresolved };
 }
 
-export function resolveLink(notes, target) {
-  const slug = linkSlug(target);
-  return (
-    notes.find((n) => n.slug === slug) ||
-    notes.find((n) => slugify(n.slug) === slug) ||
-    notes.find((n) => slugify(n.title) === slug) ||
-    null
-  );
+export function resolveLink(notes, target, from = "") {
+  const path = resolveTarget(linkIndex(notes), target, from);
+  return path ? notes.find((n) => n.path === path) || null : null;
 }
 
 export function backlinks(notes, path) {
-  const target = notes.find((n) => n.path === path);
-  if (!target) return [];
-  const names = new Set(noteNames(target));
+  if (!notes.some((n) => n.path === path)) return [];
+  const index = linkIndex(notes);
   return notes
-    .filter((n) => n.path !== path && extractLinks(n.body).some((link) => names.has(link)))
+    .filter((n) => n.path !== path && noteLinks(n).some(({ target }) => resolveTarget(index, target, n.path) === path))
     .map((n) => n.path);
 }
 
@@ -346,6 +487,92 @@ export function planSync(vault, brain, manifest) {
     plan.push(step);
   }
   return plan;
+}
+
+// ------------------------------------------------------------ lossless edits
+
+function splitLines(text) {
+  return text.split(/(?<=\n)/).filter((line) => line !== "");
+}
+
+function stripEol(line) {
+  return line.replace(/\r?\n$/, "");
+}
+
+function formatProperty(key, value, styleLines, eol) {
+  if (Array.isArray(value)) {
+    const blockItem = styleLines.slice(1).map(stripEol).find((line) => /^\s*-\s/.test(line));
+    if (blockItem && value.length) {
+      const indent = /^(\s*)-/.exec(blockItem)[1];
+      return [`${key}:${eol}`, ...value.map((item) => `${indent}- ${formatListItem(item)}${eol}`)];
+    }
+    return [`${key}: [${value.map(formatListItem).join(", ")}]${eol}`];
+  }
+  if (value === null || value === undefined || value === "") return [`${key}:${eol}`];
+  return [`${key}: ${formatScalar(value)}${eol}`];
+}
+
+// Apply property changes and/or a new body to a note's original text, touching nothing else:
+// unchanged properties keep their exact bytes, a changed one keeps its list style, the body keeps its
+// line endings when it is not edited, and an edited body is written with the file's own line ending.
+export function updateNoteText(original, changes = {}, body = undefined) {
+  const lines = splitLines(original);
+  const eol = original.includes("\r\n") ? "\r\n" : "\n";
+  const hasHeader = lines.length > 0 && stripEol(lines[0]) === "---";
+  let closing = -1;
+  if (hasHeader) {
+    for (let index = 1; index < lines.length; index++) {
+      if (stripEol(lines[index]) === "---") {
+        closing = index;
+        break;
+      }
+    }
+  }
+  const current = parseNote(original).meta;
+  const wanted = Object.entries(changes).filter(([key, value]) => value !== undefined && JSON.stringify(current[key] ?? null) !== JSON.stringify(value));
+  let rawBody = closing === -1 ? original : lines.slice(closing + 1).join("");
+  if (body !== undefined && body !== parseNote(original).body) {
+    rawBody = eol === "\r\n" ? body.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n") : body.replaceAll("\r\n", "\n");
+  }
+  if (!wanted.length && (body === undefined || body === parseNote(original).body)) return original;
+
+  if (closing === -1) {
+    if (!wanted.length) return rawBody;
+    const header = wanted.flatMap(([key, value]) => formatProperty(key, value, [], eol));
+    return `---${eol}${header.join("")}---${eol}${rawBody}`;
+  }
+
+  // Group header lines into property segments exactly the way parseNote reads them.
+  const headerLines = lines.slice(1, closing);
+  const segments = [];
+  for (let index = 0; index < headerLines.length; index++) {
+    const match = KEY_RE.exec(stripEol(headerLines[index]));
+    if (!match) {
+      segments.push({ key: null, lines: [headerLines[index]] });
+      continue;
+    }
+    const segment = { key: match[1], lines: [headerLines[index]] };
+    while (index + 1 < headerLines.length && (/^[ \t]/.test(headerLines[index + 1]) || stripEol(headerLines[index + 1]) === "")) {
+      index += 1;
+      segment.lines.push(headerLines[index]);
+    }
+    segments.push(segment);
+  }
+  for (const [key, value] of wanted) {
+    const segment = segments.find((s) => s.key === key);
+    if (segment) {
+      const trailingBlank = [];
+      while (segment.lines.length > 1 && stripEol(segment.lines[segment.lines.length - 1]) === "") trailingBlank.unshift(segment.lines.pop());
+      segment.lines = [...formatProperty(key, value, segment.lines, eol), ...trailingBlank];
+    } else {
+      segments.push({ key, lines: formatProperty(key, value, [], eol) });
+    }
+  }
+  const lastHeaderLine = segments.length ? segments[segments.length - 1].lines.at(-1) : null;
+  if (lastHeaderLine && !lastHeaderLine.endsWith("\n")) segments[segments.length - 1].lines.push(eol);
+  let closingLine = lines[closing];
+  if (!closingLine.endsWith("\n") && rawBody) closingLine += eol;
+  return lines[0] + segments.flatMap((s) => s.lines).join("") + closingLine + rawBody;
 }
 
 // ------------------------------------------------------------ code inbox

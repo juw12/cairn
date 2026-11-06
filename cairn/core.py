@@ -6,7 +6,9 @@ the CLI and the browser-only app.
 
 from __future__ import annotations
 
+import json
 import re
+from urllib.parse import unquote
 import unicodedata
 
 TYPES = ("idea", "task", "decision", "note", "journal")
@@ -285,56 +287,293 @@ def note_from_file(path: str, text: str, mtime: int = 0) -> dict:
     }
 
 
-def link_slug(raw: str) -> str:
-    """`[[Folder/My Note.md#Heading|alias]]` -> `my-note`: how Obsidian, Foam and Cairn resolve a link."""
-    target = raw.split("|")[0].split("#")[0].strip().rstrip("\\")
-    target = target.replace("\\", "/").split("/")[-1]
-    if target.lower().endswith(".md"):
-        target = target[:-3]
-    return slugify(target)
+# ---------------------------------------------------------------- links (Obsidian-compatible)
+
+_WIKI_RE = re.compile(r"(!?)\[\[([^\]\n]+)\]\]")
+_MD_LINK_RE = re.compile(r"(!?)\[[^\]\n]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+_FENCE_RE = re.compile(r"```.*?```", re.S)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+_URL_RE = re.compile(r"^[a-z][a-z0-9+.-]*:", re.I)
+_EXTENSION_RE = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+_MD_SUFFIX_RE = re.compile(r"\.md$", re.I)
+
+
+def _folder_of(path: str) -> str:
+    return path.rsplit("/", 1)[0] if "/" in path else ""
+
+
+def _join_path(folder: str, target: str) -> str:
+    parts: list[str] = []
+    for part in (f"{folder}/{target}" if folder else target).split("/"):
+        if part == "..":
+            if parts:
+                parts.pop()
+        elif part and part != ".":
+            parts.append(part)
+    return "/".join(parts)
+
+
+def _safe_decode(text: str) -> str:
+    try:
+        return unquote(text, errors="strict")
+    except UnicodeDecodeError:
+        return text
+
+
+def link_targets(body: str) -> list[dict]:
+    """Every link in a body, in order; links inside code are ignored, like Obsidian does."""
+    text = _INLINE_CODE_RE.sub("", _FENCE_RE.sub("", body))
+    out = []
+    for embed, inner in _WIKI_RE.findall(text):
+        target = inner.split("|")[0].split("#")[0].strip()
+        if target:
+            out.append({"target": target, "embed": embed == "!"})
+    for embed, href in _MD_LINK_RE.findall(text):
+        if _URL_RE.match(href) or href.startswith("#"):
+            continue
+        target = _safe_decode(href.split("#")[0]).strip()
+        if target:
+            out.append({"target": target, "embed": embed == "!"})
+    return out
 
 
 def extract_links(body: str) -> list[str]:
     links = []
-    for raw in _LINK_RE.findall(body):
-        target = link_slug(raw)
-        if target not in links:
-            links.append(target)
+    for link in link_targets(body):
+        if link["embed"]:
+            continue
+        name = slugify(_MD_SUFFIX_RE.sub("", link["target"]).split("/")[-1])
+        if name not in links:
+            links.append(name)
     return links
 
 
-def _names(note: dict) -> list[str]:
-    """Every name a link can use for this note: file name as is, file name slugified, title slugified."""
-    return [note["slug"], slugify(note["slug"]), slugify(note["title"])]
+def link_index(notes: list[dict]) -> dict:
+    by_path: dict[str, str] = {}
+    by_name: dict[str, list[str]] = {}
+    by_slug: dict[str, list[str]] = {}
+    by_title: dict[str, str] = {}
+    for note in notes:
+        by_path[note["path"].lower()] = note["path"]
+        file_name = note["path"].rsplit("/", 1)[-1][:-3]
+        by_name.setdefault(file_name.lower(), []).append(note["path"])
+        by_slug.setdefault(slugify(file_name), []).append(note["path"])
+        by_title.setdefault(slugify(note["title"]), note["path"])
+    return {"by_path": by_path, "by_name": by_name, "by_slug": by_slug, "by_title": by_title}
+
+
+def _closest(paths: list[str], folder: str) -> str:
+    same = [p for p in paths if _folder_of(p) == folder]
+    if same:
+        return same[0]
+    return sorted(paths, key=lambda p: (len(p.split("/")), p))[0]
+
+
+def _is_slug_name(path: str) -> bool:
+    file_name = path.rsplit("/", 1)[-1][:-3]
+    return slugify(file_name) == file_name
+
+
+def _loose_match(index: dict, name: str, folder: str) -> str | None:
+    slug = slugify(name)
+    if slug in index["by_slug"]:
+        return _closest(index["by_slug"][slug], folder)
+    return index["by_title"].get(slug)
+
+
+def resolve_target(index: dict, target: str, source: str = "") -> str | None:
+    """Resolve a link written in `source` to a note path, or None (attachment or missing note)."""
+    name = target.strip().replace("\\", "/")
+    if not name:
+        return None
+    explicit_note = bool(_MD_SUFFIX_RE.search(name))
+    if explicit_note:
+        name = name[:-3]
+    folder = _folder_of(source)
+    if "/" in name:
+        for option in (_join_path(folder, name), _join_path("", name)):
+            hit = index["by_path"].get(f"{option.lower()}.md")
+            if hit:
+                return hit
+        return None
+    named = index["by_name"].get(name.lower())
+    if named:
+        return _closest(named, folder)
+    if not explicit_note and _EXTENSION_RE.search(name):
+        return None
+    loose = _loose_match(index, name, folder)
+    return loose if loose and _is_slug_name(loose) else None
+
+
+def is_attachment(target: str) -> bool:
+    name = target.strip()
+    return not _MD_SUFFIX_RE.search(name) and bool(_EXTENSION_RE.search(name))
+
+
+def near_miss(index: dict, target: str, source: str = "") -> str | None:
+    if resolve_target(index, target, source) or is_attachment(target):
+        return None
+    name = _MD_SUFFIX_RE.sub("", target.strip().replace("\\", "/")).split("/")[-1]
+    return _loose_match(index, name, _folder_of(source))
+
+
+def note_links(note: dict) -> list[dict]:
+    """Links a note makes: wiki links in its properties plus its body (Obsidian graphs both)."""
+    from_meta = []
+
+    def walk(value):
+        if isinstance(value, str):
+            for embed, inner in _WIKI_RE.findall(value):
+                target = inner.split("|")[0].split("#")[0].strip()
+                if target:
+                    from_meta.append({"target": target, "embed": embed == "!"})
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, dict) and isinstance(value.get("raw"), str):
+            walk(value["raw"])
+
+    for value in (note.get("meta") or {}).values():
+        walk(value)
+    return from_meta + link_targets(note["body"])
 
 
 def build_graph(notes: list[dict]) -> dict:
-    by_slug = {}
+    index = link_index(notes)
+    nodes = [
+        {
+            "id": n["path"],
+            "title": n["title"],
+            "type": n["type"],
+            "kind": n["meta"]["type"] if isinstance(n["meta"].get("type"), str) and n["meta"]["type"] else n["type"],
+            "folder": _folder_of(n["path"]),
+            "tags": n["tags"],
+            "status": n["status"],
+        }
+        for n in notes
+    ]
+    edges: list[dict] = []
+    by_pair: dict[tuple, dict] = {}
+    attachments: list[dict] = []
+    unresolved: list[dict] = []
     for note in notes:
-        for name in _names(note):
-            by_slug.setdefault(name, note["path"])
-    nodes = [{"id": n["path"], "title": n["title"], "type": n["type"]} for n in notes]
-    edges = []
-    seen = set()
-    for note in notes:
-        for target in extract_links(note["body"]):
-            target_path = by_slug.get(target)
-            if not target_path or target_path == note["path"]:
+        for link in note_links(note):
+            target, embed = link["target"], link["embed"]
+            target_path = resolve_target(index, target, note["path"])
+            if not target_path:
+                if is_attachment(target):
+                    attachments.append({"from": note["path"], "target": target, "embed": embed})
+                else:
+                    unresolved.append({"from": note["path"], "target": target, "embed": embed,
+                                       "suggestion": near_miss(index, target, note["path"])})
+                continue
+            if target_path == note["path"]:
                 continue
             key = tuple(sorted((note["path"], target_path)))
-            if key in seen:
+            existing = by_pair.get(key)
+            if existing:
+                if existing["source"] != note["path"]:
+                    existing["both"] = True
                 continue
-            seen.add(key)
-            edges.append({"source": note["path"], "target": target_path})
-    return {"nodes": nodes, "edges": edges}
+            edge = {"source": note["path"], "target": target_path, "both": False}
+            by_pair[key] = edge
+            edges.append(edge)
+    return {"nodes": nodes, "edges": edges, "attachments": attachments, "unresolved": unresolved}
 
 
 def backlinks(notes: list[dict], path: str) -> list[str]:
-    target = next((n for n in notes if n["path"] == path), None)
-    if not target:
+    if not any(n["path"] == path for n in notes):
         return []
-    names = set(_names(target))
-    return [n["path"] for n in notes if n["path"] != path and names.intersection(extract_links(n["body"]))]
+    index = link_index(notes)
+    return [
+        n["path"]
+        for n in notes
+        if n["path"] != path and any(resolve_target(index, l["target"], n["path"]) == path for l in note_links(n))
+    ]
+
+
+# ---------------------------------------------------------------- lossless edits
+
+
+def _split_lines(text: str) -> list[str]:
+    return [line for line in re.split(r"(?<=\n)", text) if line != ""]
+
+
+def _strip_eol(line: str) -> str:
+    return re.sub(r"\r?\n$", "", line)
+
+
+def _format_property(key: str, value, style_lines: list[str], eol: str) -> list[str]:
+    if isinstance(value, list):
+        block_item = next((_strip_eol(l) for l in style_lines[1:] if re.match(r"^\s*-\s", _strip_eol(l))), None)
+        if block_item and value:
+            indent = re.match(r"^(\s*)-", block_item).group(1)
+            return [f"{key}:{eol}"] + [f"{indent}- {_format_list_item(item)}{eol}" for item in value]
+        return [f"{key}: [{', '.join(_format_list_item(item) for item in value)}]{eol}"]
+    if value is None or value == "":
+        return [f"{key}:{eol}"]
+    return [f"{key}: {_format_scalar(value)}{eol}"]
+
+
+def update_note_text(original: str, changes: dict | None = None, body: str | None = None) -> str:
+    """Apply property changes and/or a new body to a note, touching nothing else (see core.js)."""
+    changes = changes or {}
+    lines = _split_lines(original)
+    eol = "\r\n" if "\r\n" in original else "\n"
+    has_header = bool(lines) and _strip_eol(lines[0]) == "---"
+    closing = -1
+    if has_header:
+        for index in range(1, len(lines)):
+            if _strip_eol(lines[index]) == "---":
+                closing = index
+                break
+    parsed = parse_note(original)
+    current = parsed["meta"]
+    wanted = [(k, v) for k, v in changes.items() if json.dumps(current.get(k)) != json.dumps(v)]
+    raw_body = original if closing == -1 else "".join(lines[closing + 1:])
+    body_changed = body is not None and body != parsed["body"]
+    if body_changed:
+        normalized = body.replace("\r\n", "\n")
+        raw_body = normalized.replace("\n", "\r\n") if eol == "\r\n" else normalized
+    if not wanted and not body_changed:
+        return original
+    if closing == -1:
+        if not wanted:
+            return raw_body
+        header = [line for k, v in wanted for line in _format_property(k, v, [], eol)]
+        return f"---{eol}{''.join(header)}---{eol}{raw_body}"
+    header_lines = lines[1:closing]
+    segments: list[dict] = []
+    index = 0
+    while index < len(header_lines):
+        match = _KEY_RE.match(_strip_eol(header_lines[index]))
+        if not match:
+            segments.append({"key": None, "lines": [header_lines[index]]})
+            index += 1
+            continue
+        segment = {"key": match.group(1), "lines": [header_lines[index]]}
+        while index + 1 < len(header_lines) and (
+            re.match(r"^[ \t]", header_lines[index + 1]) or _strip_eol(header_lines[index + 1]) == ""
+        ):
+            index += 1
+            segment["lines"].append(header_lines[index])
+        segments.append(segment)
+        index += 1
+    for key, value in wanted:
+        segment = next((s for s in segments if s["key"] == key), None)
+        if segment:
+            trailing_blank = []
+            while len(segment["lines"]) > 1 and _strip_eol(segment["lines"][-1]) == "":
+                trailing_blank.insert(0, segment["lines"].pop())
+            segment["lines"] = _format_property(key, value, segment["lines"], eol) + trailing_blank
+        else:
+            segments.append({"key": key, "lines": _format_property(key, value, [], eol)})
+    if segments and not segments[-1]["lines"][-1].endswith("\n"):
+        segments[-1]["lines"].append(eol)
+    closing_line = lines[closing]
+    if not closing_line.endswith("\n") and raw_body:
+        closing_line += eol
+    return lines[0] + "".join(line for s in segments for line in s["lines"]) + closing_line + raw_body
 
 
 # ---------------------------------------------------------------- folder sync (Obsidian)

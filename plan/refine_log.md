@@ -150,3 +150,25 @@ Round 5 scores (evidence, self-judged, no independent judge was run):
 Weighted: \(0.25(10) + 0.2(10) + 0.2(10) + 0.15(10) + 0.1(10) + 0.1(10) = 10\) (self-judged against rubric v1).
 
 Still not verified: a second person signing in on their own account (only the owner has done the real device flow).
+
+
+## Map vs Obsidian + vault sync (rubric_map_obsidian.md)
+
+Gates, measured on a scratch copy of the real 270-note vault (never the vault itself):
+- V1 lossless: 270/270 notes byte-identical on no-op save; property edit changes exactly one line; CRLF kept. PASS
+- V2 links = independent Obsidian-style resolver: 175 = 175 edges, 0 diffs, 101 orphans. PASS
+- V3 Python/JS parity on the whole vault (graph, edits, links, backlinks) + fixture in test_parity. PASS
+- V4 vault opens as brain: folder (.obsidian marker), Python server (root as brain, no README added), GitHub repo root (mock test). PASS
+- V5 real vault untouched: 456 files, identical git status, no file newer than the snapshot. PASS
+- M3 perf in browser: map open 244 ms, settle 300 ticks, 0.35-0.40 ms/tick (target < 3 s, < 8 ms). PASS
+- M4: 73 tests pass (was 58).
+
+M1 parity: search/tag/path filter, type + folder filters, orphans, missing notes (ghost nodes), attachments,
+arrows, colour groups (type/folder/cluster/tag), node size by links, local graph depth 1-3, drag with live forces.
+M2 extras: suggested links (unlinked mentions, one-click lossless [[link]] + undo), near-miss "Fix link",
+shortest path between notes, roving-tabindex keyboard navigation, insights (hubs, orphans, islands, missing),
+labels that never overlap (screen-space greedy placement, more appear as you zoom), stable layout across edits.
+Found and fixed on the way: background re-render wiped text typed into People's "new brain" field.
+
+Self-score against the frozen rubric: 9/10 (all hard gates pass; not done: canvas renderer for 5k+ note vaults,
+editing wiki links inside properties from the Map).

@@ -111,5 +111,68 @@ class ContextPackTests(unittest.TestCase):
             self.assertIn(heading, core.TEMPLATES["decision"])
 
 
+class ObsidianVaultTests(unittest.TestCase):
+    """A synthetic vault with the link styles found in real Obsidian vaults."""
+
+    def setUp(self):
+        files = json.loads((FIXTURES / "vault_brain.json").read_text(encoding="utf-8"))["files"]
+        self.files = files
+        self.notes = [core.note_from_file(p, t) for p, t in files.items()]
+        self.graph = core.build_graph(self.notes)
+
+    def pairs(self):
+        return {(e["source"], e["target"]) for e in self.graph["edges"]}
+
+    def test_paths_aliases_md_links_and_properties_resolve(self):
+        pairs = self.pairs()
+        self.assertIn(("Home.md", "Projects/Alpha.md"), pairs)  # [[Projects/Alpha|alias]]
+        self.assertIn(("Home.md", "Projects/Beta.md"), pairs)  # [[Beta#Plan]]
+        self.assertIn(("Projects/Alpha.md", "Projects/Beta.md"), pairs)  # [Beta](Beta.md)
+        self.assertIn(("Daily/2026-11-01.md", "Projects/Gamma.md"), pairs)  # [[Projects/Gamma.md]]
+        self.assertIn(("Daily/2026-11-01.md", "notes/offline-sync.md"), pairs)  # Cairn kebab-case convention
+        both = {(e["source"], e["target"]) for e in self.graph["edges"] if e["both"]}
+        self.assertIn(("Home.md", "Projects/Alpha.md"), both)  # links: "[[Home]]" in Alpha's properties
+
+    def test_same_folder_wins_for_duplicate_names(self):
+        index = core.link_index(self.notes)
+        self.assertEqual(core.resolve_target(index, "Alpha", "Projects/Beta.md"), "Projects/Alpha.md")
+        self.assertEqual(core.resolve_target(index, "Alpha", "Archive/x.md"), "Archive/Alpha.md")
+
+    def test_code_attachments_missing_and_near_misses(self):
+        targets = [t["target"] for t in core.link_targets(self.files["Projects/Alpha.md"])]
+        self.assertNotIn("not a link", targets)
+        self.assertNotIn("also not", targets)
+        self.assertEqual(self.graph["attachments"], [{"from": "Home.md", "target": "diagram.png", "embed": True}])
+        unresolved = {u["target"]: u["suggestion"] for u in self.graph["unresolved"]}
+        self.assertEqual(unresolved, {"Missing note": None, "Alpha — Notes": "Projects/Alpha - Notes.md"})
+
+    def test_backlinks_follow_the_same_rules(self):
+        self.assertEqual(core.backlinks(self.notes, "Projects/Alpha.md"), ["Home.md", "Projects/Beta.md"])
+
+
+class LosslessEditTests(unittest.TestCase):
+    CRLF = "---\r\ntags:\r\n  - hub\r\n# a comment\r\nstatus: active\r\ncustom: keep me\r\n---\r\n# Home\r\nBody\r\n"
+
+    def test_no_change_is_byte_identical(self):
+        self.assertEqual(core.update_note_text(self.CRLF, {}), self.CRLF)
+        self.assertEqual(core.update_note_text(self.CRLF, {"status": "active"}), self.CRLF)
+
+    def test_one_property_changes_one_line(self):
+        out = core.update_note_text(self.CRLF, {"status": "done"})
+        self.assertEqual(out, self.CRLF.replace("status: active", "status: done"))
+
+    def test_list_style_and_line_endings_are_kept(self):
+        out = core.update_note_text(self.CRLF, {"tags": ["hub", "map"]})
+        self.assertIn("tags:\r\n  - hub\r\n  - map\r\n# a comment", out)
+        out = core.update_note_text(self.CRLF, {}, "# Home\nNew body\n")
+        self.assertTrue(out.startswith(self.CRLF.split("# Home")[0]))
+        self.assertTrue(out.endswith("# Home\r\nNew body\r\n"))
+        self.assertNotIn("\n", out.replace("\r\n", ""))
+
+    def test_note_without_header_only_gets_what_changed(self):
+        self.assertEqual(core.update_note_text("plain\n", {}, "plain\nmore\n"), "plain\nmore\n")
+        self.assertEqual(core.update_note_text("plain\n", {"status": "done"}), "---\nstatus: done\n---\nplain\n")
+
+
 if __name__ == "__main__":
     unittest.main()

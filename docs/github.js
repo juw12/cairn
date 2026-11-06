@@ -11,7 +11,7 @@ const API = "https://api.github.com";
 const RAW = "https://raw.githubusercontent.com";
 const CACHE_MS = 10 * 60 * 1000;
 export const BRAIN_TOPIC = "cairn-brain";
-const MAX_FILES = 300;
+const MAX_FILES = 2000;
 
 export class GitHubError extends Error {}
 
@@ -151,25 +151,42 @@ export async function loadBrainFiles(owner, repo, branch) {
   const tree = await (await request(treeUrl, { cache: "no-store" })).json();
   const blobs = (tree.tree || []).filter((item) => item.type === "blob");
   const paths = blobs.map((item) => item.path);
-  const root = ["brain/", ".brain/"].find((prefix) => paths.some((p) => p.startsWith(prefix)));
-  if (!root) throw new GitHubError(`${owner}/${repo} has no brain/ folder yet.`);
-  const wanted = blobs.filter((item) => item.path.startsWith(root) && item.path.endsWith(".md")).slice(0, MAX_FILES);
+  let root = ["brain/", ".brain/"].find((prefix) => paths.some((p) => p.startsWith(prefix)));
+  // An Obsidian vault (or any repo of notes) is opened as it is: the repo root is the brain.
+  if (!root && paths.some((p) => p.startsWith(".obsidian/") || p.endsWith(".md"))) root = "";
+  if (root === undefined) throw new GitHubError(`${owner}/${repo} has no brain/ folder or notes yet.`);
+  const hidden = (path) => path.split("/").some((part) => part.startsWith(".") && part !== ".brain");
+  const wanted = blobs
+    .filter((item) => item.path.startsWith(root) && item.path.endsWith(".md") && !hidden(item.path))
+    .slice(0, MAX_FILES);
   const signedIn = Boolean(session());
-  const files = await Promise.all(
-    wanted.map(async (item) => {
-      let text;
-      if (signedIn) {
-        const blob = await (await request(`${API}/repos/${owner}/${repo}/git/blobs/${item.sha}`)).json();
-        text = decodeBase64(blob.content);
-      } else {
-        const response = await fetch(`${RAW}/${owner}/${repo}/${encodeURIComponent(branch)}/${encodePath(item.path)}`);
-        if (!response.ok) return null;
-        text = await response.text();
-      }
-      return { path: item.path.slice(root.length), text, mtime: 0, sha: item.sha || null };
-    }),
-  );
+  const files = await mapLimited(wanted, 8, async (item) => {
+    let text;
+    if (signedIn) {
+      const blob = await (await request(`${API}/repos/${owner}/${repo}/git/blobs/${item.sha}`)).json();
+      text = decodeBase64(blob.content);
+    } else {
+      const response = await fetch(`${RAW}/${owner}/${repo}/${encodeURIComponent(branch)}/${encodePath(item.path)}`);
+      if (!response.ok) return null;
+      text = await response.text();
+    }
+    return { path: item.path.slice(root.length), text, mtime: 0, sha: item.sha || null };
+  });
   return { root, files: files.filter(Boolean) };
+}
+
+// Run `task` over `items` with at most `limit` requests in flight (a vault has hundreds of notes).
+async function mapLimited(items, limit, task) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await task(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 // ------------------------------------------------------------ writes (signed in only)

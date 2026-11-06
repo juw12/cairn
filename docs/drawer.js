@@ -128,7 +128,7 @@ export function renderDrawer() {
         </div>
         ${state.editorMode === "write"
           ? `<textarea id="ed-body" class="body-input" aria-label="Note body" placeholder="Write in Markdown. Link other notes with [[file-name]].">${esc(note.body)}</textarea>`
-          : `<div class="prose" id="ed-preview">${note.body.trim() ? renderMarkdown(note.body, (t) => core.resolveLink(state.notes, t)) : '<p class="muted">Nothing written yet.</p>'}</div>`}
+          : `<div class="prose" id="ed-preview">${note.body.trim() ? renderMarkdown(note.body, (t) => core.resolveLink(state.notes, t, note.path)) : '<p class="muted">Nothing written yet.</p>'}</div>`}
         <div class="backlinks">
           <h3>Linked from</h3>
           ${backs.length ? backs.map((n) => rowItem(n, TYPE_META[n.type].label)).join("") : `<div class="empty">Nothing links here yet. Link to it from another note with <code>[[${esc(note.slug)}]]</code>.</div>`}

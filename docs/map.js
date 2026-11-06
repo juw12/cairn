@@ -1,46 +1,31 @@
-// The Map view: a live, explorable graph of every note and link.
-//
-// Beyond a picture of links it is a working surface:
-//   live physics (drag a note and it stays pinned where you drop it), zoom, pan, pinch
-//   hover a note -> neighbours light up, links show direction with moving particles, preview card
-//   click -> inspector with summary, links in and out, open; double-click opens the note
-//   local graph (1-3 hops), find a note, colour by type / folder / cluster / status
-//   Shift-click two notes -> shortest path between them
-//   Alt-drag (or Link mode) from one note onto another -> writes a [[link]] into the first
-//   "unwritten" notes: [[links]] to notes that don't exist yet, one click creates them
-//   tag hubs, orphan filter, a time-lapse of how the brain grew, force sliders
-// Everything is drawn on a canvas so large Obsidian vaults stay smooth; a hidden list of buttons keeps
-// every note reachable by keyboard and screen readers.
+// The Map view: a live, filterable graph of notes and their links, with local graphs, paths between
+// notes, keyboard navigation, insights and one-click link suggestions.
 
 import * as core from "./core.js";
+import * as G from "./graph.js";
 import { escapeHtml as esc } from "./md.js";
-import { $, $$, STATUS_LABEL, TYPE_META, emptyState, icon, pageHead, plural, toast } from "./ui.js";
-import { createNote, noteByPath, readOnly, saveNote, state } from "./state.js";
+import { $, $$, TYPE_META, emptyState, icon, pageHead, plural, toast } from "./ui.js";
+import { noteByPath, readOnly, saveNote, state } from "./state.js";
 import { openNote } from "./drawer.js";
-import { renderNav, renderView } from "./app.js";
-import { Simulation, adjacency, buildMapGraph, clusters, neighbourhood, shortestPath } from "./graph.js";
+import { renderView } from "./app.js";
 
-const SETTINGS_KEY = "cairn.map.v2";
+// ------------------------------------------------------------ settings and session
+
+const SETTINGS_KEY = "cairn.map";
 const DEFAULTS = {
-  colorBy: "type",
-  ghosts: true,
-  tags: false,
+  query: "",
+  types: [],
+  folder: "",
   orphans: true,
-  local: false,
+  unresolved: false,
+  attachments: false,
+  arrows: false,
+  colour: "auto",
   depth: 1,
-  hiddenTypes: [],
-  repel: 1,
-  linkDistance: 1,
-  gravity: 1,
-  labels: 1,
 };
-const STATUS_COLORS = {
-  raw: "--muted", exploring: "--idea", ready: "--journal", parked: "--line-strong",
-  todo: "--task", doing: "--accent", done: "--journal",
-  proposed: "--decision", accepted: "--journal", superseded: "--line-strong",
-};
-const EXTRA_PALETTE = ["#c0567a", "#5f8f3a", "#3f8f9b", "#9c5bb5", "#b8662e", "#4b6cb7", "#8a8a2e", "#a34848"];
-const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+const PALETTE = 8;
+const LABEL_FONT = 11.5;
+const LABEL_CHAR = LABEL_FONT * 0.54;
 
 function loadSettings() {
   try {
@@ -50,1225 +35,973 @@ function loadSettings() {
   }
 }
 
-// Survives re-renders: positions, camera, selection and settings.
-const ui = {
-  settings: loadSettings(),
-  positions: new Map(),
-  camera: null,
-  selected: null,
-  path: [],
-  query: "",
-  linkMode: false,
-  settingsOpen: false,
-};
-let live = null;
-
-function saveSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(ui.settings));
+let settings = loadSettings();
+function saveSettings(changes) {
+  settings = { ...settings, ...changes };
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
-// ============================================================ model
+// What the person is doing on the map; survives re-renders (saving a note, changing a filter).
+const session = { selected: null, local: null, path: null, pathEnds: ["", ""], pathMessage: "" };
+// Where every dot was last time, so filters and edits never reshuffle the map.
+const positions = new Map();
+let lastSignature = "";
+let model = null;
 
-function model() {
-  const s = ui.settings;
-  const graph = buildMapGraph(state.notes, { ghosts: s.ghosts, tags: s.tags });
-  const fullAdj = adjacency(graph);
-  const groups = clusters(graph);
-  const hidden = new Set(s.hiddenTypes);
-  let visible = graph.nodes.filter((n) => {
-    if (n.kind === "note" && hidden.has(n.type)) return false;
-    if (n.kind === "note" && !s.orphans && !fullAdj.get(n.id).size) return false;
-    return true;
+// ------------------------------------------------------------ model
+
+function nodeRadius(degree) {
+  return 5 + Math.sqrt(degree) * 2.6;
+}
+
+function matchesQuery(node, query, degree) {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return tokens.every((token) => {
+    if (token === "is:orphan") return degree === 0;
+    if (token.startsWith("#") || token.startsWith("tag:")) {
+      const tag = token.replace(/^#|^tag:/, "");
+      return node.tags.some((t) => t.toLowerCase().includes(tag));
+    }
+    if (token.startsWith("path:")) return node.id.toLowerCase().includes(token.slice(5));
+    return node.title.toLowerCase().includes(token) || node.id.toLowerCase().includes(token);
   });
-  let ids = new Set(visible.map((n) => n.id));
-  // Ghost and tag nodes only make sense next to a visible note.
-  const edgesVisible = () => graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
-  const attached = new Set(edgesVisible().flatMap((e) => [e.source, e.target]));
-  visible = visible.filter((n) => n.kind === "note" || attached.has(n.id));
-  ids = new Set(visible.map((n) => n.id));
-  if (s.local && ui.selected && ids.has(ui.selected)) {
-    const near = neighbourhood(adjacency({ nodes: visible, edges: edgesVisible() }), ui.selected, s.depth);
+}
+
+function topFolder(node) {
+  return node.folder ? node.folder.split("/")[0] : "";
+}
+
+function colourMode(graph) {
+  if (settings.colour !== "auto") return settings.colour;
+  const typed = graph.nodes.filter((n) => n.type !== "note").length;
+  return typed >= graph.nodes.length * 0.3 || !graph.nodes.some((n) => n.folder) ? "type" : "folder";
+}
+
+function buildModel() {
+  const graph = core.buildGraph(state.notes);
+  const adj = G.adjacency(graph);
+  const degree = (id) => adj.get(id)?.size || 0;
+  const clusters = G.communities(adj);
+  let visible = graph.nodes;
+  if (session.local && !adj.has(session.local)) session.local = null;
+  if (session.selected && !adj.has(session.selected)) session.selected = null;
+  if (session.local) {
+    const near = G.neighbourhood(adj, session.local, settings.depth);
     visible = visible.filter((n) => near.has(n.id));
-    ids = near;
   }
-  const edges = edgesVisible();
-  return { graph, visible, edges, adj: adjacency({ nodes: visible, edges }), fullAdj, groups };
-}
-
-function radius(node) {
-  if (node.kind === "ghost") return 3.6;
-  if (node.kind === "tag") return 4 + Math.sqrt(node.degree) * 0.9;
-  return 4.5 + Math.sqrt(node.degree) * 2.4;
-}
-
-function readColors(el) {
-  const css = getComputedStyle(el);
-  const get = (name) => css.getPropertyValue(name).trim();
-  const vars = {};
-  for (const name of ["--idea", "--task", "--decision", "--note", "--journal", "--accent", "--accent-soft", "--muted", "--line", "--line-strong", "--ink", "--ink-2", "--surface", "--bg"]) {
-    vars[name] = get(name);
+  if (settings.types.length) visible = visible.filter((n) => settings.types.includes(n.type) || n.id === session.local);
+  if (settings.folder) visible = visible.filter((n) => n.folder === settings.folder || n.folder.startsWith(`${settings.folder}/`) || n.id === session.local);
+  if (settings.query.trim()) visible = visible.filter((n) => matchesQuery(n, settings.query, degree(n.id)) || n.id === session.local);
+  if (!settings.orphans) visible = visible.filter((n) => degree(n.id) > 0 || n.id === session.local);
+  const shown = new Set(visible.map((n) => n.id));
+  for (const id of session.path || []) shown.add(id);
+  const nodes = graph.nodes.filter((n) => shown.has(n.id)).map((n) => ({ ...n, kind: "note", r: nodeRadius(degree(n.id)) }));
+  const edges = graph.edges.filter((e) => shown.has(e.source) && shown.has(e.target)).map((e) => ({ ...e }));
+  const extra = (prefix, kind, title, from) => {
+    const id = `${prefix}${title.toLowerCase()}`;
+    if (!nodes.some((n) => n.id === id)) nodes.push({ id, title, kind, type: "note", folder: "", tags: [], r: 4.5 });
+    if (!edges.some((e) => e.source === from && e.target === id)) edges.push({ source: from, target: id, both: false, kind });
+  };
+  if (settings.unresolved) {
+    for (const u of graph.unresolved) if (shown.has(u.from)) extra("?", "ghost", u.target, u.from);
   }
-  vars.palette = [vars["--task"], vars["--idea"], vars["--decision"], vars["--journal"], vars["--accent"], ...EXTRA_PALETTE];
-  vars.font = get("--font") || "system-ui";
-  return vars;
+  if (settings.attachments) {
+    for (const a of graph.attachments) if (shown.has(a.from)) extra("@", "file", a.target.split("/").pop(), a.from);
+  }
+  const mentions = G.unlinkedMentions(state.notes, graph);
+  return { graph, adj, degree, clusters, nodes, edges, mentions, mode: colourMode(graph), byId: new Map(nodes.map((n) => [n.id, n])) };
 }
 
-function categoryOf(node, m) {
-  const by = ui.settings.colorBy;
-  if (node.kind !== "note") return node.kind;
-  if (by === "folder") return node.folder || "(brain root)";
-  if (by === "cluster") return m.groups.get(node.id) ?? -1;
-  if (by === "status") return node.status || "none";
-  return node.type;
+function layout(m) {
+  const signature = `${m.nodes.map((n) => n.id).join("|")}#${m.edges.map((e) => `${e.source}>${e.target}`).join("|")}`;
+  for (const node of m.nodes) {
+    const known = positions.get(node.id);
+    if (known) {
+      node.x = known.x;
+      node.y = known.y;
+      continue;
+    }
+    // New dots start next to a linked neighbour that already has a place.
+    const anchor = m.edges
+      .filter((e) => e.source === node.id || e.target === node.id)
+      .map((e) => positions.get(e.source === node.id ? e.target : e.source))
+      .find(Boolean);
+    if (anchor) {
+      node.x = anchor.x + 18;
+      node.y = anchor.y + 12;
+    }
+  }
+  const known = m.nodes.filter((n) => positions.has(n.id)).length;
+  m.sim = G.createSimulation(m.nodes, m.edges, { alpha: known === m.nodes.length ? 0 : known > m.nodes.length * 0.6 ? 0.4 : 1 });
+  if (signature !== lastSignature || known !== m.nodes.length) {
+    if (m.sim.alpha === 0) m.sim.alpha = 0.3;
+    const start = performance.now();
+    m.ticks = m.sim.run(1500);
+    m.layoutMs = performance.now() - start;
+  }
+  lastSignature = signature;
+  savePositions(m);
 }
 
-function colorFor(node, live) {
-  const c = live.colors;
-  if (node.kind === "ghost") return c["--muted"];
-  if (node.kind === "tag") return c["--ink-2"];
-  const by = ui.settings.colorBy;
-  if (by === "type") return c[`--${node.type}`] || c["--note"];
-  if (by === "status") return c[STATUS_COLORS[node.status]] || c["--note"];
-  const key = categoryOf(node, live.m);
-  if (by === "cluster" && key === -1) return c["--line-strong"];
-  const index = live.categoryIndex.get(key) ?? 0;
-  return c.palette[index % c.palette.length];
+function savePositions(m) {
+  for (const node of m.nodes) positions.set(node.id, { x: node.x, y: node.y });
 }
 
-// ============================================================ view HTML
+// ------------------------------------------------------------ colours and legend
 
-const toggle = (key, label, title) =>
-  `<button class="map-chip" data-map-toggle="${key}" aria-pressed="${Boolean(ui.settings[key])}" title="${esc(title)}">${label}</button>`;
+function folderColours(m) {
+  const counts = new Map();
+  for (const n of m.graph.nodes) counts.set(topFolder(n), (counts.get(topFolder(n)) || 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, PALETTE).map(([name]) => name);
+}
+
+function tagColours(m) {
+  const counts = new Map();
+  for (const n of m.graph.nodes) if (n.tags[0]) counts.set(n.tags[0], (counts.get(n.tags[0]) || 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, PALETTE).map(([name]) => name);
+}
+
+function colourer(m) {
+  if (m.mode === "folder") {
+    const folders = folderColours(m);
+    return {
+      of: (n) => (folders.includes(topFolder(n)) ? `var(--g${folders.indexOf(topFolder(n))})` : "var(--g-other)"),
+      legend: folders.map((f, i) => [`var(--g${i})`, f || "Vault root"]),
+    };
+  }
+  if (m.mode === "cluster") {
+    return {
+      of: (n) => {
+        const rank = m.clusters.get(n.id);
+        return rank === undefined || rank < 0 ? "var(--g-other)" : rank < PALETTE ? `var(--g${rank})` : "var(--g-other)";
+      },
+      legend: Array.from({ length: Math.min(PALETTE, new Set([...m.clusters.values()].filter((r) => r >= 0)).size) }, (_, i) => [`var(--g${i})`, `Cluster ${i + 1}`]),
+    };
+  }
+  if (m.mode === "tag") {
+    const tags = tagColours(m);
+    return {
+      of: (n) => (tags.includes(n.tags[0]) ? `var(--g${tags.indexOf(n.tags[0])})` : "var(--g-other)"),
+      legend: tags.map((t, i) => [`var(--g${i})`, `#${t}`]),
+    };
+  }
+  return { of: (n) => `var(--${n.type})`, legend: core.TYPES.map((t) => [`var(--${t})`, TYPE_META[t].label]) };
+}
+
+// ------------------------------------------------------------ view
 
 export function mapView() {
   if (!state.notes.length) {
     return `${pageHead("Map", "How your ideas, tasks, decisions and notes connect.")}<div class="card">${emptyState("map", "Nothing to map yet", "Notes appear here once you have some. Link them with [[file-name]] to draw connections.")}</div>`;
   }
-  const s = ui.settings;
-  const graph = buildMapGraph(state.notes, { ghosts: true, tags: false });
-  const notes = graph.nodes.filter((n) => n.kind === "note");
-  const links = graph.edges.filter((e) => e.kind === "link").length;
-  const unwritten = graph.nodes.length - notes.length;
-  const sub = `${plural(notes.length, "note")}, ${plural(links, "link")}${unwritten ? ` and ${unwritten} unwritten` : ""}. Drag, zoom and click to explore; double-click to open. <kbd>Shift</kbd>-click two notes for the path between them${readOnly() ? "" : ", <kbd>Alt</kbd>-drag one onto another to link them"}.`;
-  const colorOptions = [["type", "Type"], ["folder", "Folder"], ["cluster", "Cluster"], ["status", "Status"]]
-    .map(([v, l]) => `<option value="${v}" ${s.colorBy === v ? "selected" : ""}>${l}</option>`)
+  model = buildModel();
+  layout(model);
+  const m = model;
+  const facts = G.insights(m.graph, m.adj);
+  m.facts = facts;
+  const colour = colourer(m);
+  m.colour = colour;
+  const edgeSvg = m.edges
+    .map((e) => `<line class="map-edge${e.kind ? ` map-edge-${e.kind}` : ""}${e.both ? " both" : ""}" data-a="${esc(e.source)}" data-b="${esc(e.target)}"/>`)
     .join("");
-  const slider = (key, label, min, max, step) =>
-    `<label class="map-slider"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" value="${s[key]}" data-map-slider="${key}"></label>`;
-  return `${pageHead("Map", sub)}
-    <div class="card map-wrap${ui.linkMode ? " linking" : ""}" id="map-wrap">
-      <canvas id="map-canvas" tabindex="0" role="img" aria-label="Map of ${plural(notes.length, "note")} and ${plural(links, "link")}. Use the list of notes after the map to move between them."></canvas>
-      <div class="map-toolbar">
-        <label class="map-search">${icon("search", "sm")}<input id="map-search" type="search" placeholder="Find a note…" value="${esc(ui.query)}" autocomplete="off" aria-label="Find a note on the map"></label>
-        <label class="map-select"><span>Colour</span><select id="map-color" aria-label="Colour notes by">${colorOptions}</select></label>
-        <div class="map-chips" role="group" aria-label="Show">
-          ${toggle("ghosts", "Unwritten", "Show [[links]] to notes that don't exist yet")}
-          ${toggle("tags", "Tags", "Show tags as hubs")}
-          ${toggle("orphans", "Orphans", "Show notes with no links")}
-          ${toggle("local", "Local", "Only the selected note and its neighbours")}
-          <select id="map-depth" class="map-depth" aria-label="Local graph depth" ${s.local ? "" : "hidden"}>${[1, 2, 3].map((d) => `<option value="${d}" ${s.depth === d ? "selected" : ""}>${d} hop${d > 1 ? "s" : ""}</option>`).join("")}</select>
+  const nodeSvg = m.nodes
+    .map((n) => {
+      const links = m.degree(n.id);
+      const label = n.kind === "note" ? `${n.title}, ${plural(links, "link")}` : n.kind === "ghost" ? `${n.title}, missing note` : `${n.title}, attachment`;
+      const shape = n.kind === "file"
+        ? `<rect x="${-n.r}" y="${-n.r}" width="${n.r * 2}" height="${n.r * 2}" rx="1.5"/>`
+        : `<circle r="${n.r.toFixed(1)}"${n.kind === "note" ? ` style="fill:${colour.of(n)}"` : ""}/>`;
+      return `<g class="map-dot ${n.kind === "note" ? "map-node" : `map-${n.kind}`}" data-node="${esc(n.id)}" tabindex="-1" role="button" aria-label="${esc(label)}">${shape}<text class="quiet"></text></g>`;
+    })
+    .join("");
+  const hidden = m.graph.nodes.length - m.nodes.filter((n) => n.kind === "note").length;
+  const sub = `${plural(m.graph.nodes.length, "note")} · ${plural(m.graph.edges.length, "link")} · ${plural(facts.orphans.length, "orphan")} · ${plural(facts.islands, "island")}`;
+  return `${pageHead("Map", sub, `<button class="btn" data-action="map-reset">${icon("refresh")} Reset view</button>`)}
+    <div class="map-layout">
+      <div class="card map-wrap${session.path ? " pathing" : ""}" id="map-wrap">
+        <svg id="map-svg" aria-label="Note map. Arrow keys move between linked notes, Enter opens, L shows the local map, Escape clears." aria-describedby="map-help">
+          <defs><marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1L9,5L0,9z"/></marker></defs>
+          <g class="map-edges${settings.arrows ? " arrows" : ""}">${edgeSvg}</g><g class="map-suggest"></g><g class="map-nodes">${nodeSvg}</g>
+        </svg>
+        <p id="map-help" class="sr-only">Click a dot to select it, double-click or press Enter to open it. Drag dots to rearrange, scroll or pinch to zoom.</p>
+        <div class="map-card" id="map-card" hidden></div>
+        ${session.local ? localChip(m) : ""}
+        ${hidden && !session.local ? `<div class="map-chip">${plural(m.nodes.filter((n) => n.kind === "note").length, "note")} shown of ${m.graph.nodes.length} <button class="link-btn" data-map="clear-filters">Show all</button></div>` : ""}
+        <div class="map-zoom" role="group" aria-label="Zoom">
+          <button class="btn sm icon-only ghost" data-map="zoom-in" aria-label="Zoom in">${icon("plus")}</button>
+          <button class="btn sm icon-only ghost" data-map="zoom-out" aria-label="Zoom out"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+          <button class="btn sm icon-only ghost" data-map="fit" aria-label="Fit to screen"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
         </div>
+        <div class="map-legend">${colour.legend.slice(0, 6).map(([c, label]) => `<span><i class="dot" style="background:${c}"></i>${esc(label)}</span>`).join("")}</div>
       </div>
-      <div class="map-controls" role="toolbar" aria-label="Map controls">
-        <button class="map-btn" data-map="zoom-in" aria-label="Zoom in" title="Zoom in (+)">${icon("plus", "sm")}</button>
-        <button class="map-btn" data-map="zoom-out" aria-label="Zoom out" title="Zoom out (−)"><svg class="icon sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
-        <button class="map-btn" data-map="fit" aria-label="Fit to screen" title="Fit (0)">${icon("target", "sm")}</button>
-        <button class="map-btn" data-map="play" aria-label="Play how the brain grew" title="Time-lapse: how the brain grew">${icon("play", "sm")}</button>
-        ${readOnly() ? "" : `<button class="map-btn" data-map="link-mode" aria-pressed="${ui.linkMode}" aria-label="Link mode: drag from one note to another" title="Link mode (or hold Alt and drag)">${icon("link", "sm")}</button>`}
-        <button class="map-btn" data-map="settings" aria-pressed="${ui.settingsOpen}" aria-label="Layout settings" title="Layout">${icon("sliders", "sm")}</button>
-        <button class="map-btn" data-map="fullscreen" aria-label="Full screen" title="Full screen">${icon("expand", "sm")}</button>
-      </div>
-      <div class="map-settings" id="map-settings" ${ui.settingsOpen ? "" : "hidden"}>
-        ${slider("repel", "Spread", 0.3, 3, 0.1)}
-        ${slider("linkDistance", "Link length", 0.4, 2.5, 0.1)}
-        ${slider("gravity", "Pull to centre", 0, 3, 0.1)}
-        ${slider("labels", "Labels", 0, 2, 0.1)}
-        <button class="btn sm ghost" data-map="unpin">Release pinned notes</button>
-      </div>
-      <aside class="map-inspector" id="map-inspector" aria-live="polite"></aside>
-      <div class="map-legend" id="map-legend"></div>
-      <div class="map-tip" id="map-tip" hidden></div>
-      <div class="map-caption" id="map-caption" hidden></div>
-      <div class="map-a11y" id="map-a11y" aria-label="Notes on the map"></div>
+      <aside class="map-side" aria-label="Map tools">${sidePanel(m)}</aside>
     </div>`;
 }
 
-// ============================================================ wiring
-
-export function wireMap() {
-  const canvas = $("#map-canvas");
-  const wrap = $("#map-wrap");
-  if (!canvas) return;
-  if (live) live.stop();
-  const m = model();
-  const now = performance.now();
-  let cached = 0;
-  for (const node of m.visible) {
-    const saved = ui.positions.get(node.id);
-    if (saved) {
-      Object.assign(node, saved);
-      cached += 1;
-    }
-  }
-  // New notes start next to a neighbour that already has a place.
-  for (const node of m.visible) {
-    if (Number.isFinite(node.x)) continue;
-    const anchor = [...(m.adj.get(node.id) || [])].map((id) => m.visible.find((n) => n.id === id)).find((n) => n && Number.isFinite(n.x));
-    if (anchor) {
-      node.x = anchor.x + (Math.random() - 0.5) * 40;
-      node.y = anchor.y + (Math.random() - 0.5) * 40;
-    }
-  }
-  const sim = new Simulation(m.visible, m.edges, ui.settings);
-  if (m.visible.length > 800) {
-    // Big vaults: settle in fewer animated frames.
-    sim.alphaMin = 0.01;
-    sim.alphaDecay = 1 - Math.pow(sim.alphaMin, 1 / 220);
-  }
-  const freshLayout = cached < m.visible.length * 0.6;
-  sim.alpha = freshLayout ? 1 : cached === m.visible.length ? 0.12 : 0.5;
-  if (freshLayout || reducedMotion()) {
-    // Settle most of the layout before the first frame so the map opens calm, not exploding.
-    const budget = reducedMotion() ? 320 : Math.max(40, Math.min(260, Math.floor(260000 / Math.max(m.visible.length, 1))));
-    for (let i = 0; i < budget && sim.running; i++) sim.tick();
-  }
-  const byId = new Map(m.visible.map((n) => [n.id, n]));
-  const counts = new Map();
-  for (const n of m.visible) if (n.kind === "note") counts.set(categoryOf(n, m), (counts.get(categoryOf(n, m)) || 0) + 1);
-  const categoryIndex = new Map([...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k], i) => [k, i]));
-
-  live = {
-    canvas, wrap, m, sim, byId, categoryIndex,
-    ctx: canvas.getContext("2d"),
-    colors: readColors(wrap),
-    width: 0, height: 0, dpr: 1,
-    hover: null, drag: null, pan: null, linking: null, pinch: null,
-    pointers: new Map(),
-    raf: 0,
-    born: now,
-    play: null,
-    labels: [],
-    stopped: false,
-    stop() {
-      this.stopped = true;
-      cancelAnimationFrame(this.raf);
-      this.resizeObserver?.disconnect();
-      this.themeObserver?.disconnect();
-    },
-  };
-  if (ui.selected && !byId.has(ui.selected) && !noteByPath(ui.selected)) ui.selected = null;
-  ui.path = ui.path.filter((id) => byId.has(id));
-
-  resize();
-  if (!ui.camera || freshLayout) fit(false);
-  live.resizeObserver = new ResizeObserver(() => {
-    resize();
-    kick();
-  });
-  live.resizeObserver.observe(wrap);
-  live.themeObserver = new MutationObserver(() => {
-    live.colors = readColors(wrap);
-    live.baseKey = null;
-    kick();
-  });
-  live.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-
-  wireControls();
-  wirePointer();
-  renderLegend();
-  renderInspector();
-  renderA11yList();
-  kick();
-  window.cairn = Object.assign(window.cairn || {}, { map: debugApi() });
+function localChip(m) {
+  const center = m.byId.get(session.local);
+  const depths = [1, 2, 3]
+    .map((d) => `<button class="seg${settings.depth === d ? " on" : ""}" data-map="depth" data-depth="${d}" aria-pressed="${settings.depth === d}">${d}</button>`)
+    .join("");
+  return `<div class="map-chip local">Local map of <strong>${esc(center?.title || "")}</strong>
+    <span class="segs" role="group" aria-label="Depth">${depths}</span>
+    <button class="link-btn" data-map="global">Whole map</button></div>`;
 }
 
-function resize() {
-  const rect = live.wrap.getBoundingClientRect();
-  live.dpr = window.devicePixelRatio || 1;
-  live.width = Math.max(rect.width, 1);
-  live.height = Math.max(rect.height, 1);
-  live.canvas.width = Math.round(live.width * live.dpr);
-  live.canvas.height = Math.round(live.height * live.dpr);
-  live.canvas.style.width = `${live.width}px`;
-  live.canvas.style.height = `${live.height}px`;
+function sidePanel(m) {
+  const typeChips = core.TYPES.map((t) => {
+    const on = settings.types.includes(t);
+    return `<button class="chip${on ? " on" : ""}" data-map="type" data-type="${t}" aria-pressed="${on}"><i class="dot t-${t}"></i>${TYPE_META[t].label}</button>`;
+  }).join("");
+  const folders = [...new Set(m.graph.nodes.map((n) => n.folder).filter(Boolean))].sort();
+  const folderOptions = [`<option value="">All folders</option>`, ...folders.map((f) => `<option value="${esc(f)}"${settings.folder === f ? " selected" : ""}>${esc(f)}</option>`)].join("");
+  const check = (key, label) => `<label class="check"><input type="checkbox" data-map-setting="${key}"${settings[key] ? " checked" : ""}> ${label}</label>`;
+  const colourOptions = [["auto", "Automatic"], ["type", "Type"], ["folder", "Folder"], ["cluster", "Cluster"], ["tag", "First tag"]]
+    .map(([value, label]) => `<option value="${value}"${settings.colour === value ? " selected" : ""}>${label}</option>`).join("");
+  const f = m.facts;
+  const hubs = f.hubs.map((h) => `<li><button class="row-link" data-map-select="${esc(h.id)}">${esc(h.title)}</button><span class="hub-count" title="${plural(h.links, "link")}">${h.links}</span></li>`).join("");
+  const titles = m.graph.nodes.map((n) => `<option value="${esc(n.title)}">${esc(n.folder || "")}</option>`).join("");
+  return `
+    <section class="map-section">
+      <h3>Filter</h3>
+      <input id="map-filter" class="input" type="search" placeholder="Words, #tag, path:folder" value="${esc(settings.query)}" aria-label="Filter notes on the map">
+      <div class="chips">${typeChips}</div>
+      <select id="map-folder" class="input" aria-label="Folder">${folderOptions}</select>
+      <div class="checks">${check("orphans", "Orphans")}${check("unresolved", "Missing notes")}${check("attachments", "Attachments")}${check("arrows", "Arrows")}</div>
+      <label class="field-row">Colour by <select id="map-colour" class="input" aria-label="Colour by">${colourOptions}</select></label>
+    </section>
+    <section class="map-section">
+      <h3>Insights</h3>
+      <dl class="facts">
+        <div><dt>Hubs</dt><dd><ul class="hubs">${hubs || '<li class="muted">No links yet</li>'}</ul></dd></div>
+        <div><dt>Orphans</dt><dd>${f.orphans.length ? `<button class="link-btn" data-map="orphans">${f.orphans.length} with no links</button>` : "None"}</dd></div>
+        <div><dt>Islands</dt><dd>${f.islands ? `${f.islands} groups, largest ${f.largest} notes` : "None"}</dd></div>
+        <div><dt>Missing</dt><dd>${f.unresolved ? `${plural(f.unresolved, "link")} to notes that don't exist` : "None"}</dd></div>
+      </dl>
+    </section>
+    <section class="map-section" id="map-suggestions">${suggestionsHtml(m)}</section>
+    <section class="map-section">
+      <h3>Path between notes</h3>
+      <datalist id="map-titles">${titles}</datalist>
+      <form id="map-path" class="path-form">
+        <input class="input" name="from" list="map-titles" placeholder="From" aria-label="Path from" value="${esc(session.pathEnds[0])}">
+        <input class="input" name="to" list="map-titles" placeholder="To" aria-label="Path to" value="${esc(session.pathEnds[1])}">
+        <div class="path-actions"><button class="btn primary" type="submit">Find path</button>${session.path || session.pathMessage ? '<button class="btn" type="button" data-map="clear-path">Clear</button>' : ""}</div>
+      </form>
+      <div id="map-path-result">${pathResultHtml(m)}</div>
+    </section>`;
 }
 
-// ------------------------------------------------------------ camera
-
-const toWorld = (sx, sy) => ({ x: (sx - ui.camera.x) / ui.camera.k, y: (sy - ui.camera.y) / ui.camera.k });
-const toScreen = (x, y) => ({ x: x * ui.camera.k + ui.camera.x, y: y * ui.camera.k + ui.camera.y });
-
-function bounds(nodes) {
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  for (const n of nodes) {
-    x0 = Math.min(x0, n.x);
-    y0 = Math.min(y0, n.y);
-    x1 = Math.max(x1, n.x);
-    y1 = Math.max(y1, n.y);
-  }
-  return Number.isFinite(x0) ? { x0, y0, x1, y1 } : { x0: -100, y0: -100, x1: 100, y1: 100 };
+function suggestionsHtml(m) {
+  const selected = session.selected;
+  const fixes = m.graph.unresolved.filter((u) => u.suggestion && (!selected || u.from === selected || u.suggestion === selected));
+  const mentions = m.mentions.filter((s) => !selected || s.from === selected || s.to === selected);
+  const total = fixes.length + mentions.length;
+  const canEdit = !readOnly();
+  const title = (path) => esc(noteByPath(path)?.title || path);
+  const fixRows = fixes.slice(0, 10).map((u) => {
+    const index = m.graph.unresolved.indexOf(u);
+    return `<li class="suggestion fix"><div><strong>${title(u.from)}</strong> links to “${esc(u.target)}”, which doesn't exist. Did you mean <button class="row-link" data-map-select="${esc(u.suggestion)}">${title(u.suggestion)}</button>?</div>
+      ${canEdit ? `<button class="btn sm" data-map="fix" data-index="${index}">Fix link</button>` : ""}</li>`;
+  }).join("");
+  const mentionRows = mentions.slice(0, 25).map((s) => {
+    const index = m.mentions.indexOf(s);
+    return `<li class="suggestion" data-a="${esc(s.from)}" data-b="${esc(s.to)}"><div><button class="row-link" data-map-select="${esc(s.from)}">${title(s.from)}</button> mentions <button class="row-link" data-map-select="${esc(s.to)}">${title(s.to)}</button>${s.count > 1 ? ` <span class="muted">×${s.count}</span>` : ""}<p class="context">${esc(s.context)}</p></div>
+      ${canEdit ? `<button class="btn sm" data-map="link" data-index="${index}" aria-label="Link ${title(s.from)} to ${title(s.to)}">Link</button>` : ""}</li>`;
+  }).join("");
+  const scope = selected ? ` for ${title(selected)}` : "";
+  const more = total > fixRows.split("<li").length - 1 + (mentionRows.split("<li").length - 1) ? `<p class="muted small">Showing the strongest; select a note to see its own.</p>` : "";
+  return `<h3>Suggested links${scope} <span class="count${total ? "" : " zero"}">${total}</span></h3>
+    ${total ? `<ul class="suggestions">${fixRows}${mentionRows}</ul>${more}` : `<p class="muted">${selected ? "No unlinked mentions for this note." : "Every mention is already linked."}</p>`}`;
 }
 
-function cameraFor(nodes) {
-  const b = bounds(nodes);
-  const inspector = live.width > 760 ? 300 : 0;
-  const w = Math.max(live.width - inspector - 60, 120);
-  const h = Math.max(live.height - 140, 120);
-  const k = Math.min(2.2, Math.max(0.08, Math.min(w / (b.x1 - b.x0 + 80), h / (b.y1 - b.y0 + 80))));
-  return {
-    k,
-    x: (live.width - inspector) / 2 - ((b.x0 + b.x1) / 2) * k,
-    y: live.height / 2 + 18 - ((b.y0 + b.y1) / 2) * k,
-  };
-}
-
-function animateCamera(target, animate = true) {
-  if (!animate || reducedMotion() || !ui.camera) {
-    ui.camera = target;
-    kick();
-    return;
-  }
-  const from = { ...ui.camera };
-  const start = performance.now();
-  live.cameraTween = (t) => {
-    const p = Math.min(1, (t - start) / 320);
-    const e = 1 - Math.pow(1 - p, 3);
-    ui.camera = { k: from.k + (target.k - from.k) * e, x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e };
-    if (p >= 1) live.cameraTween = null;
-  };
-  kick();
-}
-
-function fit(animate = true) {
-  animateCamera(cameraFor(live.m.visible), animate);
-}
-
-function zoomAt(factor, sx = live.width / 2, sy = live.height / 2) {
-  const c = ui.camera;
-  const k = Math.min(6, Math.max(0.06, c.k * factor));
-  const world = toWorld(sx, sy);
-  ui.camera = { k, x: sx - world.x * k, y: sy - world.y * k };
-  kick();
-}
-
-function centerOn(node, animate = true) {
-  if (!node) return;
-  const inspector = live.width > 760 ? 300 : 0;
-  const k = Math.max(ui.camera.k, 0.9);
-  animateCamera({ k, x: (live.width - inspector) / 2 - node.x * k, y: live.height / 2 - node.y * k }, animate);
-}
-
-// ------------------------------------------------------------ frame loop
-
-function kick() {
-  if (!live || live.stopped || live.raf) return;
-  live.raf = requestAnimationFrame(frame);
-}
-
-function frame(t) {
-  live.raf = 0;
-  if (live.stopped || !live.canvas.isConnected) return live.stop();
-  if (live.sim.running) {
-    const ticks = live.m.visible.length > 1200 ? 3 : 2;
-    for (let i = 0; i < ticks && live.sim.running; i++) live.sim.tick();
-    for (const n of live.m.visible) ui.positions.set(n.id, { x: n.x, y: n.y, fx: n.fx ?? null, fy: n.fy ?? null });
-  }
-  live.cameraTween?.(t);
-  const animating = draw(t);
-  if (live.sim.running || live.cameraTween || animating) kick();
+function pathResultHtml(m) {
+  if (session.pathMessage) return `<p class="muted">${esc(session.pathMessage)}</p>`;
+  if (!session.path) return "";
+  const steps = session.path.map((id) => `<li><button class="row-link" data-map-select="${esc(id)}">${esc(m.byId.get(id)?.title || id)}</button></li>`).join("");
+  return `<p class="muted">${plural(session.path.length - 1, "step")}</p><ol class="path-steps">${steps}</ol>`;
 }
 
 // ------------------------------------------------------------ drawing
 
-function focusSet() {
-  const id = live.linking?.target?.id || live.hover?.id || ui.selected;
-  if (ui.path.length > 1) return new Set(ui.path);
-  if (!id || !live.byId.has(id)) return null;
-  return new Set([id, ...(live.m.adj.get(id) || [])]);
+let dom = null;
+
+function scale() {
+  const rect = dom.svg.getBoundingClientRect();
+  return rect.width ? rect.width / dom.box.w : 1;
 }
 
-function matches() {
-  const q = ui.query.trim().toLowerCase();
-  if (!q) return null;
-  return new Set(live.m.visible.filter((n) => n.title.toLowerCase().includes(q)).map((n) => n.id));
+function setBox() {
+  dom.svg.setAttribute("viewBox", `${dom.box.x} ${dom.box.y} ${dom.box.w} ${dom.box.h}`);
 }
 
-function onPath(e) {
-  const i = ui.path.indexOf(e.source.id);
-  const j = ui.path.indexOf(e.target.id);
-  return i !== -1 && j !== -1 && Math.abs(i - j) === 1;
-}
-
-// The scene is painted in two layers. The base layer (every link and dot, undimmed) is cached while the
-// layout is idle, so hovering, selecting and searching a large vault only costs one image copy plus the
-// few highlighted notes on top.
-function paintNodes(ctx, nodes, px, outline, radiusOf = radius) {
-  const { colors } = live;
-  const groups = new Map();
-  const pins = new Path2D();
-  const TAU = Math.PI * 2;
-  const ghosts = [];
+function fit(ids = null) {
+  const m = model;
+  const nodes = ids ? m.nodes.filter((n) => ids.includes(n.id)) : m.nodes;
+  if (!nodes.length) return;
+  const rect = dom.svg.getBoundingClientRect();
+  const width = rect.width || 800;
+  const height = rect.height || 500;
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
   for (const n of nodes) {
-    const r = radiusOf(n);
-    if (r <= 0) continue;
-    if (n.kind === "ghost") {
-      ghosts.push([n, r]);
-      continue;
-    }
-    const color = colorFor(n, live);
-    if (!groups.has(color)) groups.set(color, new Path2D());
-    const path = groups.get(color);
-    path.moveTo(n.x + r, n.y);
-    path.arc(n.x, n.y, r, 0, TAU);
-    if (n.fx != null && n.kind === "note") {
-      const pr = Math.min(r * 0.32, 2.4);
-      pins.moveTo(n.x + pr, n.y);
-      pins.arc(n.x, n.y, pr, 0, TAU);
-    }
+    x1 = Math.min(x1, n.x - n.r);
+    y1 = Math.min(y1, n.y - n.r);
+    x2 = Math.max(x2, n.x + n.r);
+    y2 = Math.max(y2, n.y + n.r);
   }
-  ctx.strokeStyle = colors["--surface"];
-  ctx.lineWidth = 2 * px;
-  for (const [color, path] of groups) {
-    if (outline) ctx.stroke(path);
-    ctx.fillStyle = color;
-    ctx.fill(path);
-  }
-  if (ghosts.length) {
-    const ring = new Path2D();
-    for (const [n, r] of ghosts) {
-      ring.moveTo(n.x + r, n.y);
-      ring.arc(n.x, n.y, r, 0, TAU);
-    }
-    ctx.fillStyle = colors["--surface"];
-    ctx.fill(ring);
-    ctx.setLineDash([2.5 * px, 2 * px]);
-    ctx.strokeStyle = colors["--muted"];
-    ctx.lineWidth = 1.4 * px;
-    ctx.stroke(ring);
-    ctx.setLineDash([]);
-  }
-  ctx.fillStyle = colors["--surface"];
-  ctx.fill(pins);
+  let w = Math.max(x2 - x1, 160);
+  let h = Math.max(y2 - y1, 120);
+  // Leave room for labels around the edge: 70px on screen at the final scale.
+  const k = Math.min(width / w, height / h, 1.4);
+  const padX = 70 / k;
+  const padY = 34 / k;
+  w += padX * 2;
+  h += padY * 2;
+  const aspect = width / height;
+  if (w / h < aspect) w = h * aspect;
+  else h = w / aspect;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  dom.box = { x: cx - w / 2, y: cy - h / 2, w, h };
+  setBox();
 }
 
-function viewBounds(margin = 40) {
-  const a = toWorld(-margin, -margin);
-  const b = toWorld(live.width + margin, live.height + margin);
-  return { x0: a.x, y0: a.y, x1: b.x, y1: b.y };
-}
-
-const outside = (e, v) =>
-  (e.source.x < v.x0 && e.target.x < v.x0) || (e.source.x > v.x1 && e.target.x > v.x1) ||
-  (e.source.y < v.y0 && e.target.y < v.y0) || (e.source.y > v.y1 && e.target.y > v.y1);
-
-function paintBase(ctx, shown, radiusOf) {
-  const { colors, dpr, sim } = live;
-  const cam = ui.camera;
-  const px = 1 / cam.k;
-  const v = viewBounds();
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, live.width, live.height);
-  ctx.setTransform(dpr * cam.k, 0, 0, dpr * cam.k, dpr * cam.x, dpr * cam.y);
-  const quiet = { link: new Path2D(), ghost: new Path2D(), tag: new Path2D() };
-  for (const e of sim.links) {
-    if (outside(e, v) || (shown && (!shown(e.source) || !shown(e.target)))) continue;
-    const path = quiet[e.kind] || quiet.link;
-    path.moveTo(e.source.x, e.source.y);
-    path.lineTo(e.target.x, e.target.y);
-  }
-  ctx.globalAlpha = 0.6;
-  ctx.strokeStyle = colors["--line-strong"];
-  ctx.lineWidth = 1.1 * px;
-  for (const [kind, path] of Object.entries(quiet)) {
-    ctx.setLineDash(kind === "ghost" ? [4 * px, 3 * px] : kind === "tag" ? [1.5 * px, 3 * px] : []);
-    ctx.stroke(path);
-  }
-  ctx.setLineDash([]);
-  ctx.globalAlpha = 1;
-  const visibleNodes = sim.nodes.filter((n) => n.x > v.x0 - 20 && n.x < v.x1 + 20 && n.y > v.y0 - 20 && n.y < v.y1 + 20 && (!shown || shown(n)));
-  paintNodes(ctx, visibleNodes, px, sim.nodes.length <= 400, radiusOf);
-}
-
-function draw(t) {
-  const { ctx, colors, dpr, sim } = live;
-  const cam = ui.camera;
-  const focus = focusSet();
-  const found = matches();
-  const centre = live.linking?.target?.id || live.hover?.id || ui.selected;
-  const motion = !reducedMotion();
-  let animating = false;
-  // Time-lapse: notes appear in the order they were made.
-  let revealed = null;
-  if (live.play) {
-    const p = Math.min(1, (t - live.play.start) / live.play.duration);
-    const count = Math.ceil(p * live.play.order.length);
-    revealed = new Map(live.play.order.slice(0, count).map((n, i) => [n.id, i]));
-    const latest = live.play.order[count - 1];
-    const caption = $("#map-caption");
-    if (caption && latest?.time) caption.textContent = new Date(latest.time).toISOString().slice(0, 10);
-    if (p >= 1) {
-      live.play = null;
-      setTimeout(() => {
-        const cap = $("#map-caption");
-        if (cap) cap.hidden = true;
-      }, 1200);
-    } else animating = true;
-  }
-  const isShown = revealed
-    ? (n) => (n.kind === "note" ? revealed.has(n.id) : [...(live.m.adj.get(n.id) || [])].some((id) => revealed.has(id)))
-    : null;
-  const grow = revealed
-    ? (n) => {
-        const r = radius(n);
-        if (!revealed.has(n.id)) return r;
-        const age = ((t - live.play.start) / live.play.duration) * live.play.order.length - revealed.get(n.id);
-        return r * Math.min(1, 0.3 + Math.max(age, 0) * 0.35);
-      }
-    : radius;
-
-  // Base layer, cached while nothing moves.
-  const idle = !sim.running && !live.drag && !live.cameraTween && !revealed;
-  const key = `${cam.k}|${cam.x}|${cam.y}|${live.width}|${live.height}|${live.colors["--surface"]}`;
-  if (!live.layer) live.layer = document.createElement("canvas");
-  const layer = live.layer;
-  if (layer.width !== live.canvas.width || layer.height !== live.canvas.height) {
-    layer.width = live.canvas.width;
-    layer.height = live.canvas.height;
-    live.baseKey = null;
-  }
-  if (!idle || live.baseKey !== key) {
-    paintBase(layer.getContext("2d"), isShown, grow);
-    live.baseKey = idle ? key : null;
-  }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, live.canvas.width, live.canvas.height);
-  ctx.globalAlpha = focus ? 0.16 : found ? 0.3 : 1;
-  ctx.drawImage(layer, 0, 0);
-  ctx.globalAlpha = 1;
-  ctx.setTransform(dpr * cam.k, 0, 0, dpr * cam.k, dpr * cam.x, dpr * cam.y);
-  const px = 1 / cam.k;
-
-  // Highlighted links: around the hovered/selected note, or along a found path.
-  if (focus) {
-    for (const e of sim.links) {
-      const lit = ui.path.length > 1 ? onPath(e) : e.source.id === centre || e.target.id === centre;
-      if (!lit || (isShown && (!isShown(e.source) || !isShown(e.target)))) continue;
-      ctx.strokeStyle = colors["--accent"];
-      ctx.lineWidth = 1.8 * px;
-      ctx.setLineDash(e.kind === "ghost" ? [4 * px, 3 * px] : e.kind === "tag" ? [1.5 * px, 3 * px] : []);
-      ctx.beginPath();
-      ctx.moveTo(e.source.x, e.source.y);
-      ctx.lineTo(e.target.x, e.target.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      if (e.kind === "tag") continue;
-      drawArrow(e.source, e.target, px);
-      if (e.mutual) drawArrow(e.target, e.source, px);
-      if (motion) {
-        drawParticle(e.source, e.target, t, px);
-        if (e.mutual) drawParticle(e.target, e.source, t + 550, px);
-        animating = true;
+function draw() {
+  const m = model;
+  for (const n of m.nodes) dom.nodeEls.get(n.id)?.setAttribute("transform", `translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})`);
+  const arrows = settings.arrows;
+  for (const [line, a, b] of dom.edgeEls) {
+    let { x: x1, y: y1 } = a;
+    let { x: x2, y: y2 } = b;
+    if (arrows) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const d = Math.hypot(dx, dy) || 1;
+      x2 -= (dx / d) * (b.r + 2);
+      y2 -= (dy / d) * (b.r + 2);
+      if (line.classList.contains("both")) {
+        x1 += (dx / d) * (a.r + 2);
+        y1 += (dy / d) * (a.r + 2);
       }
     }
+    line.setAttribute("x1", x1.toFixed(1));
+    line.setAttribute("y1", y1.toFixed(1));
+    line.setAttribute("x2", x2.toFixed(1));
+    line.setAttribute("y2", y2.toFixed(1));
   }
-
-  // Rubber band while linking.
-  if (live.linking) {
-    const { from, x, y, target } = live.linking;
-    ctx.strokeStyle = colors["--accent"];
-    ctx.lineWidth = 2 * px;
-    ctx.setLineDash([6 * px, 4 * px]);
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(target ? target.x : x, target ? target.y : y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Search halos, then the notes that stay bright on top of the dimmed base.
-  if (found) {
-    const halos = new Path2D();
-    for (const id of found) {
-      const n = live.byId.get(id);
-      if (!n || (isShown && !isShown(n))) continue;
-      const r = grow(n) + 7 * px;
-      halos.moveTo(n.x + r, n.y);
-      halos.arc(n.x, n.y, r, 0, Math.PI * 2);
-    }
-    ctx.fillStyle = colors["--accent-soft"];
-    ctx.fill(halos);
-  }
-  const bright = [];
-  for (const n of sim.nodes) {
-    if (isShown && !isShown(n)) continue;
-    if ((focus && focus.has(n.id) && (!found || found.has(n.id))) || (!focus && found?.has(n.id))) bright.push(n);
-  }
-  if (bright.length) paintNodes(ctx, bright, px, true, grow);
-  const rings = new Path2D();
-  for (const id of new Set([ui.selected, ...ui.path, live.linking?.target?.id])) {
-    const n = id && live.byId.get(id);
-    if (!n) continue;
-    const r = grow(n) + 4 * px;
-    rings.moveTo(n.x + r, n.y);
-    rings.arc(n.x, n.y, r, 0, Math.PI * 2);
-  }
-  ctx.strokeStyle = colors["--accent"];
-  ctx.lineWidth = 2.2 * px;
-  ctx.stroke(rings);
-  drawLabels(focus, found, isShown);
-  return animating;
+  drawSuggestions();
 }
 
-function drawArrow(from, to, px) {
-  const { ctx } = live;
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const d = Math.hypot(dx, dy) || 1;
-  const r = radius(to) + 3 * px;
-  const x = to.x - (dx / d) * r;
-  const y = to.y - (dy / d) * r;
-  const size = 6 * px;
-  const angle = Math.atan2(dy, dx);
-  ctx.fillStyle = live.colors["--accent"];
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x - size * Math.cos(angle - 0.45), y - size * Math.sin(angle - 0.45));
-  ctx.lineTo(x - size * Math.cos(angle + 0.45), y - size * Math.sin(angle + 0.45));
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawParticle(from, to, t, px) {
-  const { ctx } = live;
-  for (const offset of [0, 0.5]) {
-    const p = ((t / 1400) + offset) % 1;
-    ctx.fillStyle = live.colors["--accent"];
-    ctx.globalAlpha = Math.sin(p * Math.PI);
-    ctx.beginPath();
-    ctx.arc(from.x + (to.x - from.x) * p, from.y + (to.y - from.y) * p, 2.2 * px, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-}
-
-// Labels in screen space: important ones first, never on top of each other or of a dot.
-function drawLabels(focus, found, shown) {
-  const { ctx, colors, dpr } = live;
-  const cam = ui.camera;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const fontSize = 12;
-  ctx.font = `${fontSize}px ${colors.font}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  const centre = live.hover?.id || ui.selected;
-  const threshold = 7.5 / (ui.settings.labels || 0.001);
-  const items = [];
-  for (const n of live.sim.nodes) {
-    if (shown && !shown(n)) continue;
-    const s = toScreen(n.x, n.y);
-    if (s.x < -80 || s.y < -40 || s.x > live.width + 80 || s.y > live.height + 40) continue;
-    const r = radius(n) * cam.k;
-    let priority = n.degree + r;
-    if (n.id === centre) priority += 10000;
-    else if (focus?.has(n.id)) priority += 5000;
-    else if (found?.has(n.id)) priority += 4000;
-    else if (focus || found) continue;
-    else if (r < threshold * 0.5 && ui.settings.labels < 1.95) continue;
-    items.push({ n, s, r, priority });
-  }
-  items.sort((a, b) => b.priority - a.priority);
-  // Spatial grid of occupied boxes (dots and placed labels), so collision checks stay cheap.
-  const CELL = 64;
-  const grid = new Map();
-  const cells = (box, visit) => {
-    for (let gx = Math.floor(box[0] / CELL); gx <= Math.floor(box[2] / CELL); gx++) {
-      for (let gy = Math.floor(box[1] / CELL); gy <= Math.floor(box[3] / CELL); gy++) {
-        if (visit(`${gx},${gy}`)) return true;
-      }
-    }
-    return false;
-  };
-  const occupy = (box) => cells(box, (key) => {
-    if (!grid.has(key)) grid.set(key, []);
-    grid.get(key).push(box);
-    return false;
-  });
-  const overlaps = (box) => cells(box, (key) => (grid.get(key) || []).some((b) => box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3]));
-  for (const { s, r } of items) occupy([s.x - r, s.y - r, s.x + r, s.y + r]);
-  const placed = [];
-  for (const { n, s, r, priority } of items.slice(0, 400)) {
-    const title = n.title.length > 34 && priority < 4000 ? `${n.title.slice(0, 33)}…` : n.title;
-    const w = ctx.measureText(title).width;
-    const box = [s.x - w / 2 - 2, s.y + r + 3, s.x + w / 2 + 2, s.y + r + 4 + fontSize];
-    if (overlaps(box)) continue;
-    occupy(box);
-    placed.push({ id: n.id, title, x: s.x, y: s.y + r + 4, box });
-    const dim = (focus && !focus.has(n.id)) || (found && !found.has(n.id));
-    ctx.globalAlpha = dim ? 0.35 : 1;
-    ctx.lineWidth = 4;
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = colors["--surface"];
-    ctx.strokeText(title, s.x, s.y + r + 4);
-    ctx.fillStyle = n.kind === "ghost" ? colors["--muted"] : n.id === centre ? colors["--ink"] : colors["--ink-2"];
-    ctx.font = `${n.id === centre ? 600 : 400} ${fontSize}px ${colors.font}`;
-    ctx.fillText(title, s.x, s.y + r + 4);
-    ctx.font = `${fontSize}px ${colors.font}`;
-  }
-  ctx.globalAlpha = 1;
-  live.labels = placed;
-}
-
-// ------------------------------------------------------------ pointer
-
-function hit(sx, sy) {
-  const w = toWorld(sx, sy);
-  let best = null;
-  let bestD = Infinity;
-  for (const n of live.sim.nodes) {
-    const d = Math.hypot(n.x - w.x, n.y - w.y);
-    const reach = radius(n) + 6 / ui.camera.k;
-    if (d < reach && d < bestD) {
-      best = n;
-      bestD = d;
-    }
-  }
-  return best;
-}
-
-function local(event) {
-  const rect = live.canvas.getBoundingClientRect();
-  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-}
-
-function wirePointer() {
-  const { canvas } = live;
-  canvas.addEventListener("pointerdown", (event) => {
-    canvas.focus({ preventScroll: true });
-    const p = local(event);
-    live.pointers.set(event.pointerId, p);
-    canvas.setPointerCapture(event.pointerId);
-    if (live.pointers.size === 2) {
-      const [a, b] = [...live.pointers.values()];
-      live.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: ui.camera.k };
-      live.drag = live.pan = live.linking = null;
-      return;
-    }
-    const node = hit(p.x, p.y);
-    if (node && node.kind === "note" && !readOnly() && (ui.linkMode || event.altKey)) {
-      const w = toWorld(p.x, p.y);
-      live.linking = { from: node, x: w.x, y: w.y, target: null };
-      hideTip();
-    } else if (node) {
-      live.drag = { node, start: p, moved: false, shift: event.shiftKey };
-    } else {
-      live.pan = { start: p, camera: { ...ui.camera }, moved: false };
-      canvas.classList.add("panning");
-    }
-    kick();
-  });
-  canvas.addEventListener("pointermove", (event) => {
-    const p = local(event);
-    if (live.pointers.has(event.pointerId)) live.pointers.set(event.pointerId, p);
-    if (live.pinch && live.pointers.size === 2) {
-      const [a, b] = [...live.pointers.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      zoomAt((live.pinch.k * (d / live.pinch.d)) / ui.camera.k, (a.x + b.x) / 2, (a.y + b.y) / 2);
-      return;
-    }
-    if (live.linking) {
-      const w = toWorld(p.x, p.y);
-      const over = hit(p.x, p.y);
-      Object.assign(live.linking, { x: w.x, y: w.y, target: over && over !== live.linking.from && over.kind === "note" ? over : null });
-      kick();
-      return;
-    }
-    if (live.drag) {
-      const { node, start } = live.drag;
-      if (!live.drag.moved && Math.hypot(p.x - start.x, p.y - start.y) < 4) return;
-      if (!live.drag.moved) {
-        live.drag.moved = true;
-        live.sim.alphaTarget = 0.25;
-        live.sim.reheat(0.3);
-        hideTip();
-      }
-      const w = toWorld(p.x, p.y);
-      node.fx = w.x;
-      node.fy = w.y;
-      kick();
-      return;
-    }
-    if (live.pan) {
-      const dx = p.x - live.pan.start.x;
-      const dy = p.y - live.pan.start.y;
-      if (Math.hypot(dx, dy) > 3) live.pan.moved = true;
-      ui.camera = { ...live.pan.camera, x: live.pan.camera.x + dx, y: live.pan.camera.y + dy };
-      kick();
-      return;
-    }
-    const over = hit(p.x, p.y);
-    if (over !== live.hover) {
-      live.hover = over;
-      canvas.style.cursor = over ? (ui.linkMode || event.altKey ? "crosshair" : "pointer") : "";
-      kick();
-    }
-    if (over) showTip(over, p);
-    else hideTip();
-  });
-  const end = async (event) => {
-    live.pointers.delete(event.pointerId);
-    if (live.pinch) {
-      if (live.pointers.size < 2) live.pinch = null;
-      return;
-    }
-    canvas.classList.remove("panning");
-    if (live.linking) {
-      const { from, target } = live.linking;
-      live.linking = null;
-      kick();
-      if (target) await linkNotes(from.id, target.id);
-      return;
-    }
-    if (live.drag) {
-      const { node, moved, shift } = live.drag;
-      live.drag = null;
-      live.sim.alphaTarget = 0;
-      if (moved) {
-        ui.positions.set(node.id, { x: node.x, y: node.y, fx: node.fx, fy: node.fy });
-        renderInspector();
-      } else if (event.type === "pointerup") {
-        clickNode(node, shift);
-      }
-      kick();
-      return;
-    }
-    if (live.pan) {
-      const moved = live.pan.moved;
-      live.pan = null;
-      if (!moved && event.type === "pointerup") select(null);
-    }
-  };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", () => {
-    if (!live.drag && !live.pan) {
-      live.hover = null;
-      hideTip();
-      kick();
-    }
-  });
-  canvas.addEventListener("dblclick", (event) => {
-    const p = local(event);
-    const node = hit(p.x, p.y);
-    if (!node) return zoomAt(1.6, p.x, p.y);
-    if (node.kind === "note") openNote(node.id);
-    else if (node.kind === "ghost") createFromGhost(node.id);
-  });
-  canvas.addEventListener("wheel", (event) => {
-    event.preventDefault();
-    const p = local(event);
-    const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0018));
-    zoomAt(factor, p.x, p.y);
-  }, { passive: false });
-  canvas.addEventListener("keydown", (event) => {
-    const keys = {
-      "+": () => zoomAt(1.25),
-      "=": () => zoomAt(1.25),
-      "-": () => zoomAt(0.8),
-      0: () => fit(),
-      Escape: () => (ui.path.length || ui.selected ? select(null) : null),
-      Enter: () => ui.selected && live.byId.get(ui.selected)?.kind === "note" && openNote(ui.selected),
-      ArrowLeft: () => panBy(60, 0),
-      ArrowRight: () => panBy(-60, 0),
-      ArrowUp: () => panBy(0, 60),
-      ArrowDown: () => panBy(0, -60),
-    };
-    if (keys[event.key] && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault();
-      event.stopPropagation();
-      keys[event.key]();
-    }
-  });
-}
-
-function panBy(dx, dy) {
-  ui.camera = { ...ui.camera, x: ui.camera.x + dx, y: ui.camera.y + dy };
-  kick();
-}
-
-function clickNode(node, shift) {
-  if (shift && ui.selected && ui.selected !== node.id && live.byId.has(ui.selected)) {
-    ui.path = shortestPath(live.m.adj, ui.selected, node.id);
-    if (!ui.path.length) ui.path = [ui.selected, node.id, "none"];
-    renderInspector();
-    kick();
-    return;
-  }
-  select(node.id);
-}
-
-function select(id, { center = false } = {}) {
-  const wasLocal = ui.settings.local && ui.selected !== id;
-  ui.selected = id;
-  ui.path = [];
-  if (wasLocal && id) return renderView();
-  renderInspector();
-  if (center && id) centerOn(live.byId.get(id));
-  kick();
-}
-
-// ------------------------------------------------------------ tooltip
-
-function showTip(node, p) {
-  const tip = $("#map-tip");
-  if (!tip) return;
-  const note = node.kind === "note" ? noteByPath(node.id) : null;
-  const summary = note ? core.summary(note.body) : "";
-  const meta = node.kind === "ghost"
-    ? "Not written yet · double-click to create"
-    : node.kind === "tag"
-      ? `Tag · ${plural(node.degree, "note")}`
-      : [TYPE_META[node.type]?.label, STATUS_LABEL[node.status], `${node.out} out · ${node.in} in`].filter(Boolean).join(" · ");
-  tip.innerHTML = `<strong>${esc(node.title)}</strong><span class="meta">${esc(meta)}</span>${summary ? `<span class="sum">${esc(summary)}</span>` : ""}`;
-  tip.hidden = false;
-  const x = Math.min(p.x + 16, live.width - tip.offsetWidth - 8);
-  const y = p.y + 18 + tip.offsetHeight > live.height ? p.y - tip.offsetHeight - 12 : p.y + 18;
-  tip.style.transform = `translate(${Math.max(8, x)}px, ${Math.max(8, y)}px)`;
-}
-
-function hideTip() {
-  const tip = $("#map-tip");
-  if (tip) tip.hidden = true;
-}
-
-// ------------------------------------------------------------ inspector, legend, a11y list
-
-function nodeButton(id) {
-  const n = live.byId.get(id) || live.m.graph.nodes.find((x) => x.id === id);
-  if (!n) return "";
-  const dot = n.kind === "note" ? `<i class="dot" style="background:${colorFor(n, live)}"></i>` : `<i class="dot ghost"></i>`;
-  return `<button class="map-row" data-map-select="${esc(id)}">${dot}<span>${esc(n.title)}</span>${n.kind === "note" ? `<span class="muted">${n.degree}</span>` : ""}</button>`;
-}
-
-function renderInspector() {
-  const el = $("#map-inspector");
-  if (!el) return;
-  const m = live.m;
-  if (ui.path.length) {
-    const none = ui.path[2] === "none";
-    const [a, b] = none ? ui.path : [ui.path[0], ui.path[ui.path.length - 1]];
-    const title = (id) => esc((live.byId.get(id) || {}).title || id);
-    el.innerHTML = `
-      <div class="insp-head"><span class="eyebrow">${icon("route", "sm")} Path</span><button class="btn ghost sm icon-only" data-map="clear" aria-label="Clear path">${icon("x", "sm")}</button></div>
-      <h3>${title(a)} → ${title(b)}</h3>
-      ${none ? `<p class="muted">These two notes aren't connected yet${readOnly() ? "." : ". Alt-drag one onto the other to link them."}</p>` : `<p class="muted">${plural(ui.path.length - 1, "step")} apart</p><ol class="insp-path">${ui.path.map((id) => `<li>${nodeButton(id)}</li>`).join("")}</ol>`}`;
-    el.classList.remove("overview");
-    return;
-  }
-  const node = ui.selected ? live.byId.get(ui.selected) : null;
-  if (!node) {
-    const notes = m.graph.nodes.filter((n) => n.kind === "note");
-    const orphans = notes.filter((n) => !m.fullAdj.get(n.id).size).length;
-    const ghosts = m.graph.nodes.filter((n) => n.kind === "ghost").length;
-    const groupCount = new Set([...m.groups.values()].filter((g) => g >= 0)).size;
-    const hubs = [...notes].sort((a, b) => b.degree - a.degree || a.title.localeCompare(b.title)).filter((n) => n.degree).slice(0, 5);
-    el.innerHTML = `
-      <div class="insp-head"><span class="eyebrow">${icon("map", "sm")} Overview</span></div>
-      <div class="insp-stats">
-        <div><strong>${notes.length}</strong><span>notes</span></div>
-        <div><strong>${m.graph.edges.filter((e) => e.kind === "link").length}</strong><span>links</span></div>
-        <div><strong>${groupCount}</strong><span>clusters</span></div>
-        <div><strong>${orphans}</strong><span>orphans</span></div>
-      </div>
-      ${hubs.length ? `<h4>Hubs</h4>${hubs.map((n) => nodeButton(n.id)).join("")}` : ""}
-      ${ghosts && ui.settings.ghosts ? `<p class="muted insp-note">${plural(ghosts, "link")} point${ghosts === 1 ? "s" : ""} to notes that don't exist yet: the hollow dots. Double-click one to write it.</p>` : ""}`;
-    el.classList.add("overview");
-    return;
-  }
-  el.classList.remove("overview");
-  if (node.kind === "ghost") {
-    const from = [...m.adj.get(node.id)];
-    el.innerHTML = `
-      <div class="insp-head"><span class="eyebrow">Not written yet</span><button class="btn ghost sm icon-only" data-map="clear" aria-label="Close">${icon("x", "sm")}</button></div>
-      <h3>${esc(node.title)}</h3>
-      <p class="muted">${plural(from.length, "note")} link${from.length === 1 ? "s" : ""} here, but there's no note with this name.</p>
-      ${readOnly() ? "" : `<button class="btn primary sm" data-map="create">${icon("plus", "sm")} Write this note</button>`}
-      <h4>Mentioned in</h4>${from.map(nodeButton).join("")}`;
-    return;
-  }
-  if (node.kind === "tag") {
-    const tagged = [...m.adj.get(node.id)];
-    el.innerHTML = `
-      <div class="insp-head"><span class="eyebrow">Tag</span><button class="btn ghost sm icon-only" data-map="clear" aria-label="Close">${icon("x", "sm")}</button></div>
-      <h3>${esc(node.title)}</h3><p class="muted">${plural(tagged.length, "note")}</p>${tagged.map(nodeButton).join("")}`;
-    return;
-  }
-  const note = noteByPath(node.id);
-  const neighbours = [...(m.adj.get(node.id) || [])].sort((a, b) => (live.byId.get(b)?.degree || 0) - (live.byId.get(a)?.degree || 0));
-  const summary = note ? core.summary(note.body) : "";
-  el.innerHTML = `
-    <div class="insp-head"><span class="pill t-${node.type}">${TYPE_META[node.type]?.label || "Note"}</span>${node.status && STATUS_LABEL[node.status] ? `<span class="pill">${STATUS_LABEL[node.status]}</span>` : ""}<button class="btn ghost sm icon-only" data-map="clear" aria-label="Close">${icon("x", "sm")}</button></div>
-    <h3>${esc(node.title)}</h3>
-    <p class="insp-path-text">brain/${esc(node.id)}</p>
-    ${summary ? `<p class="insp-sum">${esc(summary)}</p>` : ""}
-    ${node.tags.length ? `<p class="insp-tags">${node.tags.map((t) => `<span>#${esc(t)}</span>`).join(" ")}</p>` : ""}
-    <div class="insp-stats small"><div><strong>${node.out}</strong><span>links out</span></div><div><strong>${node.in}</strong><span>backlinks</span></div></div>
-    <div class="insp-actions">
-      <button class="btn primary sm" data-open="${esc(node.id)}">${icon("note", "sm")} Open</button>
-      <button class="btn sm" data-map="local-here" aria-pressed="${ui.settings.local}">${icon("target", "sm")} ${ui.settings.local ? "Show all" : "Local graph"}</button>
-      ${node.fx != null ? `<button class="btn sm ghost" data-map="unpin-one">Release</button>` : ""}
-    </div>
-    ${neighbours.length ? `<h4>Connected</h4>${neighbours.slice(0, 30).map(nodeButton).join("")}` : `<p class="muted insp-note">No links yet.${readOnly() ? "" : " Alt-drag from this note onto another to link them."}</p>`}
-    <p class="muted insp-note">Shift-click another note to see how they connect.</p>`;
-}
-
-function renderLegend() {
-  const el = $("#map-legend");
-  if (!el) return;
-  const s = ui.settings;
-  const m = live.m;
-  if (s.colorBy === "type") {
-    const present = new Set(m.graph.nodes.filter((n) => n.kind === "note").map((n) => n.type));
-    el.innerHTML = core.TYPES.filter((t) => present.has(t))
-      .map((t) => `<button class="legend-item" data-map-type="${t}" aria-pressed="${!s.hiddenTypes.includes(t)}" title="Show or hide ${TYPE_META[t].label.toLowerCase()}s"><i class="dot t-${t}"></i>${TYPE_META[t].label}</button>`)
-      .join("") + (s.ghosts && m.visible.some((n) => n.kind === "ghost") ? `<span class="legend-item static"><i class="dot ghost"></i>Unwritten</span>` : "");
-    return;
-  }
-  const items = [...live.categoryIndex.entries()].slice(0, 8);
-  const label = (k) => (s.colorBy === "cluster" ? (k === -1 ? "No links" : `Cluster ${k + 1}`) : s.colorBy === "status" ? STATUS_LABEL[k] || "No status" : k);
-  el.innerHTML = items
-    .map(([k]) => {
-      const sample = m.visible.find((n) => n.kind === "note" && categoryOf(n, m) === k);
-      return `<span class="legend-item static"><i class="dot" style="background:${sample ? colorFor(sample, live) : "transparent"}"></i>${esc(String(label(k)))}</span>`;
+// Dashed lines for the selected note's unlinked mentions: links you could make in one click.
+function drawSuggestions() {
+  const m = model;
+  const id = session.selected;
+  const lines = !id ? [] : m.mentions.filter((s) => (s.from === id || s.to === id) && m.byId.has(s.from) && m.byId.has(s.to)).slice(0, 30);
+  dom.suggest.innerHTML = lines
+    .map((s) => {
+      const a = m.byId.get(s.from);
+      const b = m.byId.get(s.to);
+      return `<line class="map-suggestion" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`;
     })
-    .join("") + (live.categoryIndex.size > 8 ? `<span class="legend-item static muted">+${live.categoryIndex.size - 8} more</span>` : "");
-}
-
-function renderA11yList() {
-  const el = $("#map-a11y");
-  if (!el) return;
-  const notes = live.m.visible.filter((n) => n.kind === "note").sort((a, b) => b.degree - a.degree || a.title.localeCompare(b.title));
-  el.innerHTML = notes
-    .map((n) => `<button class="map-node" data-open="${esc(n.id)}" data-node="${esc(n.id)}" aria-label="${esc(`${n.title}, ${TYPE_META[n.type]?.label || "note"}, ${plural(n.degree, "link")}`)}">${esc(n.title)}</button>`)
     .join("");
-  el.addEventListener("focusin", (event) => {
-    const button = event.target.closest(".map-node");
-    if (!button) return;
-    ui.selected = button.dataset.node;
-    ui.path = [];
-    renderInspector();
-    centerOn(live.byId.get(button.dataset.node));
-  });
 }
 
-// ------------------------------------------------------------ controls
+// "Productivity Diary — 2026-10-23" inside the Productivity Diary folder reads as "2026-10-23":
+// the folder already says the rest, and the map shows the full title on hover and in the card.
+function shortLabel(n) {
+  let title = n.title;
+  const folder = (n.folder || "").split("/").pop();
+  if (folder && title.toLowerCase().startsWith(folder.toLowerCase())) {
+    const rest = title.slice(folder.length).replace(/^\s*[—–:\-|·]\s*/, "");
+    if (rest && rest !== title.slice(folder.length)) title = rest;
+  }
+  return title.length > 30 ? `${title.slice(0, 29)}…` : title;
+}
 
-function wireControls() {
-  const wrap = live.wrap;
-  const rerender = () => {
-    saveSettings();
-    renderView();
-  };
-  wrap.addEventListener("click", async (event) => {
-    const pick = event.target.closest("[data-map-select]");
-    if (pick) return select(pick.dataset.mapSelect, { center: true });
-    const typeToggle = event.target.closest("[data-map-type]");
-    if (typeToggle) {
-      const type = typeToggle.dataset.mapType;
-      const hidden = new Set(ui.settings.hiddenTypes);
-      if (hidden.has(type)) hidden.delete(type);
-      else hidden.add(type);
-      ui.settings.hiddenTypes = [...hidden];
-      return rerender();
-    }
-    const toggleEl = event.target.closest("[data-map-toggle]");
-    if (toggleEl) {
-      const key = toggleEl.dataset.mapToggle;
-      ui.settings[key] = !ui.settings[key];
-      if (key === "local" && ui.settings.local && !ui.selected) toast("Select a note first, then Local shows only its neighbourhood.");
-      return rerender();
-    }
-    const button = event.target.closest("[data-map]");
-    if (!button) return;
-    const action = button.dataset.map;
-    const actions = {
-      "zoom-in": () => zoomAt(1.3),
-      "zoom-out": () => zoomAt(1 / 1.3),
-      fit: () => fit(),
-      play: () => playHistory(),
-      "link-mode": () => {
-        ui.linkMode = !ui.linkMode;
-        button.setAttribute("aria-pressed", String(ui.linkMode));
-        wrap.classList.toggle("linking", ui.linkMode);
-        if (ui.linkMode) toast("Link mode: drag from one note onto another to link them.");
-      },
-      settings: () => {
-        ui.settingsOpen = !ui.settingsOpen;
-        button.setAttribute("aria-pressed", String(ui.settingsOpen));
-        $("#map-settings").hidden = !ui.settingsOpen;
-      },
-      fullscreen: () => {
-        if (document.fullscreenElement) document.exitFullscreen();
-        else if (wrap.requestFullscreen) wrap.requestFullscreen().catch(() => wrap.classList.toggle("full"));
-        else wrap.classList.toggle("full");
-      },
-      unpin: () => {
-        for (const n of live.sim.nodes) n.fx = n.fy = null;
-        live.baseKey = null;
-        live.sim.reheat(0.5);
-        renderInspector();
-        kick();
-      },
-      "unpin-one": () => {
-        const n = live.byId.get(ui.selected);
-        if (n) n.fx = n.fy = null;
-        live.baseKey = null;
-        live.sim.reheat(0.3);
-        renderInspector();
-        kick();
-      },
-      clear: () => select(null),
-      create: () => createFromGhost(ui.selected),
-      "local-here": () => {
-        ui.settings.local = !ui.settings.local;
-        rerender();
-      },
-    };
-    actions[action]?.();
-  });
-  $("#map-color", wrap).addEventListener("change", (event) => {
-    ui.settings.colorBy = event.target.value;
-    rerender();
-  });
-  $("#map-depth", wrap).addEventListener("change", (event) => {
-    ui.settings.depth = Number(event.target.value);
-    rerender();
-  });
-  $$("[data-map-slider]", wrap).forEach((input) => {
-    input.addEventListener("input", () => {
-      const key = input.dataset.mapSlider;
-      ui.settings[key] = Number(input.value);
-      live.sim.settings[key] = Number(input.value);
-      if (key !== "labels") live.sim.reheat(0.5);
-      saveSettings();
-      kick();
+// Greedy label placement in screen space: well-connected notes claim room first; each label tries
+// below, above, right, then left of its dot and never overlaps another label or dot. Labels without
+// room stay hidden until their dot is hovered, focused or selected. Zooming in reveals more.
+function placeLabels() {
+  const m = model;
+  const k = scale();
+  const font = LABEL_FONT / k;
+  const char = LABEL_CHAR / k;
+  const pad = 2 / k;
+  const view = dom.box;
+  const inView = (n) => n.x > view.x - 20 / k && n.x < view.x + view.w + 20 / k && n.y > view.y - 20 / k && n.y < view.y + view.h + 20 / k;
+  const boxes = m.nodes.filter(inView).map((n) => ({ x1: n.x - n.r, y1: n.y - n.r, x2: n.x + n.r, y2: n.y + n.r }));
+  // Overlays (legend, zoom buttons, chips, the selection card) are no-go areas for labels.
+  const svgRect = dom.svg.getBoundingClientRect();
+  for (const el of $$(".map-legend, .map-zoom, .map-chip, .map-card:not([hidden])", dom.wrap)) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || getComputedStyle(el).display === "none") continue;
+    boxes.push({
+      x1: view.x + (r.left - svgRect.left) / k, y1: view.y + (r.top - svgRect.top) / k,
+      x2: view.x + (r.right - svgRect.left) / k, y2: view.y + (r.bottom - svgRect.top) / k,
     });
-  });
-  const search = $("#map-search", wrap);
-  search.addEventListener("input", () => {
-    ui.query = search.value;
-    kick();
-  });
-  search.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      const found = matches();
-      const first = found && [...found].map((id) => live.byId.get(id)).sort((a, b) => b.degree - a.degree)[0];
-      if (first) select(first.id, { center: true });
-    } else if (event.key === "Escape") {
-      ui.query = search.value = "";
-      kick();
+  }
+  const margin = 6 / k;
+  const inside = (a) => a.x1 >= view.x + margin && a.x2 <= view.x + view.w - margin && a.y1 >= view.y + margin && a.y2 <= view.y + view.h - margin;
+  const overlaps = (a) => !inside(a) || boxes.some((b) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2);
+  const focusId = session.hover || session.selected;
+  const near = new Set(focusId ? model.adj.get(focusId) || [] : []);
+  const priority = (n) => (n.id === focusId ? 1e6 : 0) + (session.path?.includes(n.id) ? 1e5 : 0) + (near.has(n.id) ? 1e4 : 0) + m.degree(n.id);
+  const order = [...m.nodes].sort((a, b) => priority(b) - priority(a) || a.title.localeCompare(b.title));
+  for (const n of order) {
+    const text = dom.nodeEls.get(n.id)?.querySelector("text");
+    if (!text) continue;
+    const label = shortLabel(n);
+    if (text.textContent !== label) text.textContent = label;
+    text.setAttribute("font-size", font.toFixed(3));
+    const w = label.length * char * (n.id === session.selected ? 1.1 : 1);
+    const r = n.r;
+    const gap = 3 / k;
+    const lh = 14 / k;
+    const candidates = [
+      { x: 0, y: r + gap + font * 0.95, anchor: "middle", box: [-w / 2, r + gap, w / 2, r + gap + lh] },
+      { x: 0, y: -(r + gap + font * 0.3), anchor: "middle", box: [-w / 2, -(r + gap + lh), w / 2, -(r + gap)] },
+      { x: r + gap * 2, y: font * 0.35, anchor: "start", box: [r + gap * 2, -lh / 2, r + gap * 2 + w, lh / 2] },
+      { x: -(r + gap * 2), y: font * 0.35, anchor: "end", box: [-(r + gap * 2) - w, -lh / 2, -(r + gap * 2), lh / 2] },
+    ];
+    let spot = null;
+    if (inView(n)) {
+      for (const c of candidates) {
+        const claim = { x1: n.x + c.box[0] - pad, y1: n.y + c.box[1] - pad, x2: n.x + c.box[2] + pad, y2: n.y + c.box[3] + pad };
+        if (!overlaps(claim)) {
+          boxes.push(claim);
+          spot = c;
+          break;
+        }
+      }
     }
-  });
+    const use = spot || candidates[0];
+    text.setAttribute("x", use.x.toFixed(2));
+    text.setAttribute("y", use.y.toFixed(2));
+    text.setAttribute("text-anchor", use.anchor);
+    text.classList.toggle("quiet", !spot);
+  }
 }
 
-// ------------------------------------------------------------ actions that change notes
+// ------------------------------------------------------------ selection and highlighting
 
-async function linkNotes(fromId, toId) {
-  const from = noteByPath(fromId);
-  const to = noteByPath(toId);
-  if (!from || !to) return;
-  const names = new Set(core.noteNames(to));
-  if (core.extractLinks(from.body).some((slug) => names.has(slug))) {
-    toast(`“${from.title}” already links to “${to.title}”.`);
+function neighboursOf(id) {
+  return [...(model.adj.get(id) || [])].filter((other) => model.byId.has(other));
+}
+
+function highlight(id, cls = "lit") {
+  $$(`.${cls}`, dom.svg).forEach((el) => el.classList.remove(cls));
+  if (!id) return;
+  dom.nodeEls.get(id)?.classList.add(cls);
+  for (const [line] of dom.edgeEls) {
+    const { a, b } = line.dataset;
+    if (a === id || b === id) {
+      line.classList.add(cls);
+      dom.nodeEls.get(a === id ? b : a)?.classList.add(cls);
+    }
+  }
+}
+
+function applyFocus() {
+  const id = session.hover || session.selected;
+  dom.wrap.classList.toggle("focus", Boolean(id) && !session.path);
+  highlight(id);
+  if (!frame) scheduleLabels();
+}
+
+function applyPath() {
+  $$(".on-path", dom.svg).forEach((el) => el.classList.remove("on-path"));
+  if (!session.path) return;
+  const steps = new Set(session.path.map((id, i) => (i ? `${session.path[i - 1]}\u0000${id}` : "")));
+  session.path.forEach((id) => dom.nodeEls.get(id)?.classList.add("on-path"));
+  for (const [line] of dom.edgeEls) {
+    const { a, b } = line.dataset;
+    if (steps.has(`${a}\u0000${b}`) || steps.has(`${b}\u0000${a}`)) line.classList.add("on-path");
+  }
+}
+
+function select(id, { focus = true, centre = false } = {}) {
+  session.selected = id && model.byId.has(id) ? id : null;
+  $$(".selected", dom.svg).forEach((el) => el.classList.remove("selected"));
+  for (const [nodeId, el] of dom.nodeEls) el.setAttribute("tabindex", nodeId === session.selected ? "0" : "-1");
+  if (!session.selected) {
+    dom.nodeEls.values().next().value?.setAttribute("tabindex", "0");
+  } else {
+    const el = dom.nodeEls.get(session.selected);
+    el.classList.add("selected");
+    if (focus) el.focus({ preventScroll: true });
+    if (centre) centreOn(model.byId.get(session.selected));
+  }
+  applyFocus();
+  renderCard();
+  drawSuggestions();
+  const panel = $("#map-suggestions");
+  if (panel) panel.innerHTML = suggestionsHtml(model);
+  placeLabels();
+}
+
+function centreOn(node) {
+  const box = dom.box;
+  const visible = node.x > box.x + box.w * 0.15 && node.x < box.x + box.w * 0.85 && node.y > box.y + box.h * 0.15 && node.y < box.y + box.h * 0.85;
+  if (visible) return;
+  dom.box = { ...box, x: node.x - box.w / 2, y: node.y - box.h / 2 };
+  setBox();
+}
+
+function renderCard() {
+  const card = dom.card;
+  const id = session.selected;
+  const node = id && model.byId.get(id);
+  if (!node) {
+    card.hidden = true;
     return;
   }
-  const before = from.body;
-  const body = `${before.replace(/\s*$/, "")}\n\n[[${to.slug}]]\n`;
-  const saved = await saveNote(fromId, { body });
+  card.hidden = false;
+  if (node.kind !== "note") {
+    const fix = model.graph.unresolved.find((u) => node.kind === "ghost" && u.target.toLowerCase() === node.title.toLowerCase() && u.suggestion);
+    card.innerHTML = `<div class="map-card-head"><strong>${esc(node.title)}</strong><button class="btn sm icon-only ghost" data-map="deselect" aria-label="Clear selection">${icon("x")}</button></div>
+      <p class="muted">${node.kind === "ghost" ? "Linked to, but this note doesn't exist yet." : "An attachment (image or file) embedded in a note."}</p>
+      ${fix ? `<p>Probably means <button class="row-link" data-map-select="${esc(fix.suggestion)}">${esc(noteByPath(fix.suggestion)?.title || fix.suggestion)}</button>.</p>` : ""}`;
+    return;
+  }
+  const note = noteByPath(id);
+  const out = model.graph.edges.filter((e) => (e.source === id) || (e.both && e.target === id)).length;
+  const back = model.graph.edges.filter((e) => e.target === id || (e.both && e.source === id)).length;
+  const isLocal = session.local === id;
+  card.innerHTML = `<div class="map-card-head"><span class="dot" style="background:${model.colour.of(node)}"></span><strong>${esc(node.title)}</strong><button class="btn sm icon-only ghost" data-map="deselect" aria-label="Clear selection">${icon("x")}</button></div>
+    <p class="muted small">${esc(node.id)}</p>
+    <p class="small">${plural(out, "outgoing link")} · ${plural(back, "backlink")}${note?.tags?.length ? ` · ${note.tags.slice(0, 4).map((t) => `#${esc(t)}`).join(" ")}` : ""}</p>
+    <div class="map-card-actions">
+      <button class="btn primary sm" data-open="${esc(id)}">Open</button>
+      <button class="btn sm" data-map="local" aria-pressed="${isLocal}">${isLocal ? "Whole map" : "Local map"}</button>
+      <button class="btn sm" data-map="path-from">Path from here</button>
+    </div>`;
+}
+
+// Arrow keys walk to the linked note that lies most in that direction (or the nearest dot that way).
+function step(direction) {
+  const m = model;
+  const from = m.byId.get(session.selected);
+  if (!from) {
+    const hub = m.facts.hubs.find((h) => m.byId.has(h.id))?.id || m.nodes[0]?.id;
+    return select(hub, { centre: true });
+  }
+  const [vx, vy] = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[direction];
+  const score = (n) => {
+    const dx = n.x - from.x;
+    const dy = n.y - from.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const cos = (dx * vx + dy * vy) / d;
+    return cos < 0.35 ? -Infinity : cos * 2 - d / 600;
+  };
+  const pick = (list) => list.map((n) => [n, score(n)]).filter(([, s]) => s > -Infinity).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const next = pick(neighboursOf(from.id).map((id) => m.byId.get(id))) || pick(m.nodes.filter((n) => n !== from));
+  if (next) select(next.id, { centre: true });
+}
+
+// ------------------------------------------------------------ actions
+
+async function acceptMention(index) {
+  const s = model.mentions[index];
+  const note = s && noteByPath(s.from);
+  if (!note) return;
+  const linkText = G.linkTextFor(state.notes, s.from, s.to);
+  const body = G.linkMention(note.body, s.phrase, linkText);
+  if (!body) return toast("That mention moved; nothing changed.", { error: true });
+  const before = note.body;
+  const saved = await saveNote(s.from, { body });
   if (!saved) return;
-  ui.selected = fromId;
   renderView();
-  toast(`Linked “${from.title}” → “${to.title}”`, {
+  toast(`Linked “${s.phrase}” in ${note.title}.`, {
     action: {
       label: "Undo",
       run: async () => {
-        await saveNote(fromId, { body: before });
+        await saveNote(s.from, { body: before });
         renderView();
       },
     },
   });
 }
 
-async function createFromGhost(id) {
-  if (readOnly() || !id?.startsWith("ghost:")) return;
-  const ghost = live.byId.get(id);
-  if (!ghost) return;
-  const note = await createNote({ type: "note", title: ghost.title });
-  const spot = ui.positions.get(id);
-  if (spot) ui.positions.set(note.path, spot);
-  ui.selected = note.path;
+async function fixLink(index) {
+  const u = model.graph.unresolved[index];
+  const note = u && noteByPath(u.from);
+  if (!note || !u.suggestion) return;
+  const linkText = G.linkTextFor(state.notes, u.from, u.suggestion);
+  const body = G.retargetLink(note.body, u.target, linkText);
+  if (!body) return toast("That link is in the note's properties; edit it in the note.", { error: true });
+  const before = note.body;
+  const saved = await saveNote(u.from, { body });
+  if (!saved) return;
   renderView();
-  renderNav();
-  toast(`Created brain/${note.path}`, { action: { label: "Open", run: () => openNote(note.path) } });
+  toast(`Fixed the link in ${note.title}.`, {
+    action: {
+      label: "Undo",
+      run: async () => {
+        await saveNote(u.from, { body: before });
+        renderView();
+      },
+    },
+  });
 }
 
-function playHistory() {
-  const order = live.m.visible.filter((n) => n.kind === "note").sort((a, b) => a.time - b.time || a.title.localeCompare(b.title));
-  if (!order.length) return;
-  if (live.play) {
-    live.play = null;
-    $("#map-caption").hidden = true;
-    return kick();
+function resolveTitle(text) {
+  const wanted = text.trim().toLowerCase();
+  if (!wanted) return null;
+  const nodes = model.graph.nodes;
+  return (nodes.find((n) => n.title.toLowerCase() === wanted) || nodes.find((n) => n.id.toLowerCase() === wanted) || nodes.find((n) => n.title.toLowerCase().includes(wanted)))?.id || null;
+}
+
+function findPath(fromText, toText) {
+  session.pathEnds = [fromText, toText];
+  session.pathMessage = "";
+  session.path = null;
+  const from = resolveTitle(fromText);
+  const to = resolveTitle(toText);
+  if (!from || !to) {
+    session.pathMessage = `No note called “${!from ? fromText : toText}”.`;
+  } else {
+    const path = G.shortestPath(model.adj, from, to);
+    if (path) session.path = path;
+    else session.pathMessage = "No route: these notes are on separate islands. A link between them would join the two.";
   }
-  live.play = { start: performance.now(), duration: reducedMotion() ? 1 : Math.min(9000, 1600 + order.length * 140), order };
-  $("#map-caption").hidden = false;
-  select(null);
-  kick();
+  renderView();
+  if (session.path) fit(session.path);
 }
 
-// ------------------------------------------------------------ test hooks
+export function resetMap() {
+  session.selected = null;
+  session.local = null;
+  session.path = null;
+  session.pathMessage = "";
+  positions.clear();
+  lastSignature = "";
+  renderView();
+}
 
-function debugApi() {
-  return {
-    screen(id) {
-      const n = live?.byId.get(id);
-      if (!n) return null;
-      const rect = live.canvas.getBoundingClientRect();
-      const s = toScreen(n.x, n.y);
-      return { x: rect.left + s.x, y: rect.top + s.y };
-    },
-    nodes: () => live?.m.visible.map((n) => ({ id: n.id, kind: n.kind, x: n.x, y: n.y, pinned: n.fx != null })) || [],
-    labels: () => live?.labels || [],
-    selected: () => ui.selected,
-    timeDraw(frames = 20) {
-      const start = performance.now();
-      for (let i = 0; i < frames; i++) draw(performance.now());
-      const drawMs = (performance.now() - start) / frames;
-      const t0 = performance.now();
-      for (let i = 0; i < frames; i++) live.sim.tick();
-      return { drawMs, tickMs: (performance.now() - t0) / frames };
-    },
-    path: () => [...ui.path],
-    settle() {
-      if (!live) return;
-      for (let i = 0; i < 400 && live.sim.running; i++) live.sim.tick();
-      live.sim.alpha = 0;
-      for (const n of live.m.visible) ui.positions.set(n.id, { x: n.x, y: n.y, fx: n.fx ?? null, fy: n.fy ?? null });
-      fit(false);
-      draw(performance.now());
-    },
-    reset() {
-      ui.settings = { ...DEFAULTS };
-      ui.positions.clear();
-      ui.camera = null;
-      ui.selected = null;
-      ui.path = [];
-      ui.query = "";
-      ui.linkMode = false;
-      saveSettings();
-    },
+const mapActions = {
+  "zoom-in": () => zoomBy(1 / 1.3),
+  "zoom-out": () => zoomBy(1.3),
+  fit: () => {
+    fit(session.path || null);
+    placeLabels();
+  },
+  deselect: () => select(null, { focus: false }),
+  local: () => {
+    session.local = session.local === session.selected ? null : session.selected;
+    renderView();
+  },
+  global: () => {
+    session.local = null;
+    renderView();
+  },
+  depth: (el) => {
+    saveSettings({ depth: Number(el.dataset.depth) });
+    renderView();
+  },
+  "path-from": () => {
+    session.pathEnds = [model.byId.get(session.selected)?.title || "", session.pathEnds[1]];
+    const input = $('#map-path [name="from"]');
+    if (input) input.value = session.pathEnds[0];
+    $('#map-path [name="to"]')?.focus();
+  },
+  "clear-path": () => {
+    session.path = null;
+    session.pathMessage = "";
+    session.pathEnds = ["", ""];
+    renderView();
+  },
+  "clear-filters": () => {
+    saveSettings({ query: "", types: [], folder: "", orphans: true });
+    renderView();
+  },
+  orphans: () => {
+    saveSettings({ query: "is:orphan", orphans: true });
+    renderView();
+  },
+  type: (el) => {
+    const type = el.dataset.type;
+    saveSettings({ types: settings.types.includes(type) ? settings.types.filter((t) => t !== type) : [...settings.types, type] });
+    renderView();
+  },
+  link: (el) => acceptMention(Number(el.dataset.index)),
+  fix: (el) => fixLink(Number(el.dataset.index)),
+};
+
+function zoomBy(factor, cx = null, cy = null) {
+  const box = dom.box;
+  const mx = cx ?? box.x + box.w / 2;
+  const my = cy ?? box.y + box.h / 2;
+  dom.box = { x: mx - (mx - box.x) * factor, y: my - (my - box.y) * factor, w: box.w * factor, h: box.h * factor };
+  setBox();
+  scheduleLabels();
+}
+
+let labelTimer = null;
+function scheduleLabels() {
+  clearTimeout(labelTimer);
+  labelTimer = setTimeout(() => dom && placeLabels(), 90);
+}
+
+// ------------------------------------------------------------ animation (dragging re-heats the layout)
+
+let frame = null;
+function animate() {
+  if (frame) return;
+  dom.wrap.classList.add("moving");
+  const loop = () => {
+    if (!dom || !model) {
+      frame = null;
+      return;
+    }
+    model.sim.tick();
+    draw();
+    if (model.sim.settled()) {
+      frame = null;
+      dom.wrap.classList.remove("moving");
+      savePositions(model);
+      placeLabels();
+      return;
+    }
+    frame = requestAnimationFrame(loop);
   };
+  frame = requestAnimationFrame(loop);
+}
+
+// ------------------------------------------------------------ wiring
+
+export function wireMap() {
+  const svg = $("#map-svg");
+  if (!svg || !model) return;
+  if (frame) cancelAnimationFrame(frame);
+  frame = null;
+  const wrap = $("#map-wrap");
+  const nodeEls = new Map($$(".map-dot", svg).map((el) => [el.dataset.node, el]));
+  const edgeEls = $$(".map-edge", svg).map((line) => [line, model.byId.get(line.dataset.a), model.byId.get(line.dataset.b)]);
+  dom = { svg, wrap, nodeEls, edgeEls, suggest: $(".map-suggest", svg), card: $("#map-card"), box: { x: -400, y: -300, w: 800, h: 600 } };
+  draw();
+  fit(session.local ? null : session.path || null);
+  applyPath();
+  select(session.selected, { focus: false });
+  if (!model.sim.settled()) animate();
+
+  // Hover shows a note's neighbours without changing the selection.
+  svg.addEventListener("pointerover", (event) => {
+    const el = event.target.closest(".map-dot");
+    if (!el || drag) return;
+    session.hover = el.dataset.node;
+    applyFocus();
+  });
+  svg.addEventListener("pointerout", (event) => {
+    const el = event.target.closest(".map-dot");
+    if (!el || (event.relatedTarget && el.contains(event.relatedTarget))) return;
+    session.hover = null;
+    applyFocus();
+  });
+  svg.addEventListener("focusin", (event) => {
+    const el = event.target.closest(".map-dot");
+    if (el && el.dataset.node !== session.selected) select(el.dataset.node, { focus: false });
+  });
+
+  svg.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const rect = svg.getBoundingClientRect();
+    const mx = dom.box.x + ((event.clientX - rect.left) / rect.width) * dom.box.w;
+    const my = dom.box.y + ((event.clientY - rect.top) / rect.height) * dom.box.h;
+    zoomBy(event.deltaY > 0 ? 1.12 : 1 / 1.12, mx, my);
+  }, { passive: false });
+
+  // One pointer on the background pans, one on a dot drags it, two pinch-zoom.
+  const pointers = new Map();
+  let drag = null;
+  let pinch = null;
+  const toWorld = (event) => {
+    const rect = svg.getBoundingClientRect();
+    return { x: dom.box.x + ((event.clientX - rect.left) / rect.width) * dom.box.w, y: dom.box.y + ((event.clientY - rect.top) / rect.height) * dom.box.h };
+  };
+  svg.addEventListener("pointerdown", (event) => {
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), box: { ...dom.box } };
+      drag = null;
+      return;
+    }
+    const el = event.target.closest(".map-dot");
+    drag = el
+      ? { kind: "node", id: el.dataset.node, x: event.clientX, y: event.clientY, moved: false }
+      : { kind: "pan", x: event.clientX, y: event.clientY, box: { ...dom.box }, moved: false };
+    if (!el) svg.classList.add("panning");
+  });
+  svg.addEventListener("pointermove", (event) => {
+    if (!pointers.has(event.pointerId)) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pinch && pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const factor = pinch.d / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+      const cx = pinch.box.x + pinch.box.w / 2;
+      const cy = pinch.box.y + pinch.box.h / 2;
+      dom.box = { x: cx - (pinch.box.w * factor) / 2, y: cy - (pinch.box.h * factor) / 2, w: pinch.box.w * factor, h: pinch.box.h * factor };
+      setBox();
+      return;
+    }
+    if (!drag) return;
+    const moved = Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4;
+    if (!drag.moved && !moved) return;
+    if (!drag.moved) svg.setPointerCapture(event.pointerId);
+    drag.moved = true;
+    if (drag.kind === "pan") {
+      const rect = svg.getBoundingClientRect();
+      dom.box = { ...drag.box, x: drag.box.x - ((event.clientX - drag.x) / rect.width) * drag.box.w, y: drag.box.y - ((event.clientY - drag.y) / rect.height) * drag.box.h };
+      setBox();
+    } else {
+      const node = model.byId.get(drag.id);
+      const p = toWorld(event);
+      node.fx = p.x;
+      node.fy = p.y;
+      model.sim.alphaTarget = 0.25;
+      if (model.sim.alpha < 0.25) model.sim.alpha = 0.25;
+      session.hover = drag.id;
+      applyFocus();
+      animate();
+    }
+  });
+  const end = (event) => {
+    pointers.delete(event.pointerId);
+    if (pinch) {
+      if (pointers.size < 2) {
+        pinch = null;
+        scheduleLabels();
+      }
+      return;
+    }
+    svg.classList.remove("panning");
+    if (!drag) return;
+    const done = drag;
+    drag = null;
+    if (done.kind === "pan") {
+      if (done.moved) scheduleLabels();
+      else if (event.type === "pointerup") select(null, { focus: false });
+      return;
+    }
+    const node = model.byId.get(done.id);
+    if (done.moved) {
+      node.fx = null;
+      node.fy = null;
+      model.sim.alphaTarget = 0;
+      session.hover = null;
+      animate();
+    } else if (event.type === "pointerup") {
+      select(done.id);
+    }
+  };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+  svg.addEventListener("dblclick", (event) => {
+    const el = event.target.closest(".map-node");
+    if (el) openNote(el.dataset.node);
+  });
+
+  wrap.addEventListener("keydown", (event) => {
+    if (event.target.closest("input, select, textarea, button:not(.map-dot)")) return;
+    const key = event.key;
+    if (key.startsWith("Arrow")) {
+      event.preventDefault();
+      step(key);
+    } else if (key === "Enter" || key === " ") {
+      if (session.selected && model.byId.get(session.selected)?.kind === "note") {
+        event.preventDefault();
+        openNote(session.selected);
+      }
+    } else if (key === "Escape") {
+      if (session.path) mapActions["clear-path"]();
+      else if (session.local) mapActions.global();
+      else if (session.selected) select(null, { focus: false });
+      else return;
+      event.stopPropagation();
+    } else if (key.toLowerCase() === "l" && session.selected) {
+      mapActions.local();
+    } else if (key.toLowerCase() === "f") {
+      mapActions.fit();
+    } else if (key === "+" || key === "=") {
+      zoomBy(1 / 1.3);
+    } else if (key === "-") {
+      zoomBy(1.3);
+    }
+  });
+
+  // Toolbar, card and side panel buttons are handled by one delegated listener (their HTML is
+  // re-rendered when the selection changes).
+  if (!delegated) {
+    $("#view").addEventListener("click", onDelegatedClick);
+    delegated = true;
+  }
+  const filter = $("#map-filter");
+  let filterTimer = null;
+  filter?.addEventListener("input", () => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      saveSettings({ query: filter.value });
+      renderView();
+      const again = $("#map-filter");
+      again?.focus();
+      again?.setSelectionRange(again.value.length, again.value.length);
+    }, 220);
+  });
+  $("#map-folder")?.addEventListener("change", (event) => {
+    saveSettings({ folder: event.target.value });
+    renderView();
+  });
+  $("#map-colour")?.addEventListener("change", (event) => {
+    saveSettings({ colour: event.target.value });
+    renderView();
+  });
+  $$("[data-map-setting]").forEach((input) => input.addEventListener("change", () => {
+    saveSettings({ [input.dataset.mapSetting]: input.checked });
+    renderView();
+  }));
+  $("#map-path")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = new FormData(event.target);
+    findPath(String(data.get("from") || ""), String(data.get("to") || ""));
+  });
+  // Hovering a suggestion shows where that link would go.
+  $("#map-suggestions")?.addEventListener("pointerover", (event) => {
+    const row = event.target.closest(".suggestion[data-a]");
+    if (!row) return;
+    session.hover = row.dataset.a;
+    applyFocus();
+    dom.nodeEls.get(row.dataset.b)?.classList.add("lit");
+  });
+  $("#map-suggestions")?.addEventListener("pointerleave", () => {
+    session.hover = null;
+    applyFocus();
+  });
+}
+
+let delegated = false;
+
+function onDelegatedClick(event) {
+  if (state.view !== "map" || !dom || !model) return;
+  const pick = event.target.closest("[data-map-select]");
+  if (pick) {
+    event.preventDefault();
+    const id = pick.dataset.mapSelect;
+    if (!model.byId.has(id)) {
+      // The note is filtered out: clear filters so it can be shown, then select it.
+      session.selected = id;
+      session.local = null;
+      saveSettings({ query: "", types: [], folder: "", orphans: true });
+      renderView();
+    }
+    select(id, { centre: true });
+    return;
+  }
+  const action = event.target.closest("[data-map]");
+  if (action) {
+    event.preventDefault();
+    mapActions[action.dataset.map]?.(action);
+  }
 }

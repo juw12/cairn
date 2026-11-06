@@ -245,7 +245,7 @@ class SyncTests(unittest.TestCase):
                     "() => window.cairn.state.files.find((f) => f.path === 'obsidian/Offline Maps.md')?.text === 'Edited in Obsidian.\\n'"
                 )
                 page.click('#nav [data-go="map"]')
-                page.wait_for_selector("#map-canvas")
+                page.wait_for_selector("#map-svg")
                 ids = page.evaluate("window.cairn.map.nodes().map((n) => n.id)")
                 self.assertIn("obsidian/Projects/Trail App.md", ids)
                 browser.close()

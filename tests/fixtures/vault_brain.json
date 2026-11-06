@@ -1,0 +1,14 @@
+{
+  "files": {
+    "Home.md": "---\r\ntags:\r\n  - hub\r\nstatus: active\r\n---\r\n# Home\r\n\r\nSee [[Projects/Alpha|the alpha]], [[Beta#Plan]] and [[Missing note]].\r\n![[diagram.png]]\r\n",
+    "Projects/Alpha.md": "---\ntitle: Alpha\ntype: project\nlinks: \"[[Home]]\"\n---\nWorks with [Beta](Beta.md) and [[Gamma]].\n`[[not a link]]`\n```\n[[also not]]\n```\n",
+    "Projects/Beta.md": "# Beta\n\n## Plan\nBack to [[Alpha]]. Near miss: [[Alpha — Notes]].\n",
+    "Projects/Gamma.md": "Gamma mentions Alpha and Beta in plain text only.\n",
+    "Archive/Alpha.md": "An older Alpha in another folder. Links [[Home]].\n",
+    "Archive/alpha-notes.md": "---\ntitle: Alpha notes\n---\nkebab-case Cairn style file.\n",
+    "Daily/2026-11-01.md": "Worked on [[Projects/Gamma.md]] and [[Offline Sync]].\n",
+    "notes/offline-sync.md": "---\ntitle: Offline Sync\ntype: note\ntags: [sync]\n---\nCairn note.\n",
+    "Orphan.md": "Nobody links here.\n",
+    "Projects/Alpha - Notes.md": "Meeting notes for Alpha, written in Obsidian.\n"
+  }
+}

@@ -527,7 +527,7 @@ const HOW = `
       <li><strong>Nothing is lost.</strong> Deleted in Cairn → the vault's <code>.trash/</code>. Deleted in Obsidian → <code>brain/.cairn/trash/</code>. Changed on both sides → the newer one wins and the other is kept as “<em>name</em> (conflict <em>date</em>)”.</li>
       <li><strong>Only Markdown.</strong> Images and other attachments stay in the vault; <code>.obsidian/</code> settings are never touched.</li>
     </ul>
-    <p class="muted">Prefer one folder and no sync at all? Open <code>brain/</code> itself as a vault in Obsidian: both apps then edit the same files.</p>
+    <p class="muted">Prefer one folder and no sync at all? Open the vault itself in Cairn (<code>cairn --root "path/to/vault" serve</code>, or the desktop app): both apps then edit the same files.</p>
   </section>`;
 
 export function obsidianView() {
@@ -539,6 +539,14 @@ export function obsidianView() {
     return `${head()}<div class="card sync-card"><p>${readOnly() ? "This brain is read-only, so nothing can be imported into it." : "Open your own brain first (a repo folder, the local app, the demo or your GitHub brain) to import a vault."}</p></div>${HOW}`;
   }
   if (!status) return `${head()}<div class="card sync-card"><p class="muted">${info.error ? esc(info.error) : "Checking…"}</p></div>`;
+  if (status.brainIsVault && !status.linked) {
+    return `${head()}
+      <div class="card sync-card linked direct">
+        <div class="sync-hero">${icon("vault")}<div><h2>Working directly in your vault</h2>
+        <p class="muted">Cairn opened <strong>${esc(state.info?.name || "your vault")}</strong> as it is. Every note you write or edit here is a file in the vault, so Obsidian sees it straight away: there is nothing to sync.</p></div></div>
+        <p class="hint" style="margin-top:14px">Sync is for the other case: a project with its own <code>brain/</code> folder (or a GitHub repo) that should stay in step with a vault somewhere else.</p>
+      </div>${HOW}`;
+  }
   const busy = info.busy ? "disabled" : "";
   const progress = `<span id="obsidian-progress" class="muted" aria-live="polite">${info.busy ? "Syncing…" : ""}</span>`;
   if (!status.linked) {

@@ -134,26 +134,42 @@ Or click **Continue with GitHub**: approve on github.com with a short code, no t
 endpoints don't allow browser calls, so this goes through a tiny Cloudflare Worker that holds no secret and
 forwards only those two requests: see [`worker/README.md`](worker/README.md).
 
-### Bring in your Obsidian vault
+### Use it with your Obsidian vault
 
-Open **Obsidian sync** in the sidebar (or run `cairn obsidian ~/path/to/vault`). Cairn copies every note into
-`brain/obsidian/` and from then on keeps both sides in sync: edit a note in either app and the next sync copies it
-over, new notes appear on the other side.
+Cairn opens an Obsidian vault as it is: no import, no copy, no `brain/` folder needed. A folder with
+`.obsidian/` in it (or a GitHub repo of notes) is used directly, `.obsidian/`, `.trash/` and other
+hidden folders are skipped, and links resolve the way Obsidian resolves them: `[[folder/note|alias]]`,
+`[[note#heading]]`, `![[embeds]]`, `[text](note.md)` and wiki links in properties.
 
-* **Local app:** paste the vault path; it syncs every 20 s while Cairn is open. `cairn obsidian --watch 10` keeps
-  syncing with the app closed.
-* **Whole brain instead of a subfolder:** `cairn obsidian ~/vault --folder .` mirrors the vault into `brain/`
-  itself (Cairn's own `README.md` and `CONTEXT.md` stay out of the vault). `--folder ""` works too, except in
-  PowerShell, which drops empty arguments. Add `--dry-run` first to see what would be copied.
+- **On this computer:** `python -m cairn --root "path/to/your vault" serve`, or *Choose a folder* in the browser.
+- **On any device:** keep the vault in a GitHub repo (the Obsidian Git plugin can push and pull it),
+  sign in and open `you/your-vault`.
+
+Edits only change what you changed: properties keep their order, comments and list style, and files
+keep their line endings, so Obsidian and git see clean one-line diffs.
+
+The Map goes further than Obsidian's graph: filters, colour by type, folder, cluster or tag, local maps
+of depth 1 to 3, the shortest path between two notes, keyboard navigation (arrow keys walk the links,
+Enter opens, L for local), hubs, orphans and islands at a glance, and *suggested links*: notes that
+mention another note's title without linking it, linked in one click.
+
+### Keep a separate brain in sync with a vault
+
+When your notes live in a project's `brain/` folder (or a GitHub repo) and you also keep an Obsidian vault,
+open **Obsidian sync** in the sidebar or run `cairn obsidian ~/path/to/vault`. Cairn copies the vault into
+`brain/obsidian/` and from then on keeps both sides in sync: edit a note in either app and the next sync
+copies it over. (If Cairn opened the vault itself, there is nothing to sync and the page says so.)
+
+* **Local app:** paste the vault path; it syncs every 20 s while Cairn is open. `cairn obsidian --watch 10`
+  keeps syncing with the app closed. `--folder .` mirrors the vault into `brain/` itself (`--folder ""` too,
+  except in PowerShell, which drops empty arguments); `--dry-run` shows what would be copied.
 * **Browser, Chrome/Edge:** pick the vault folder; two-way sync while the tab is open, nothing uploaded.
 * **Other browsers:** one-way import; import again to bring in changes.
 
 Nothing is ever lost: a note deleted in Cairn goes to the vault's `.trash/`, one deleted in Obsidian goes to
 `brain/.cairn/trash/`, and if both sides changed a note the newer wins and the other is kept as
-`Name (conflict 2026-11-06).md`. A vault that suddenly looks empty (unplugged drive) stops the sync instead of
-deleting anything. Obsidian links (`[[Folder/Note#Heading|alias]]`, case and spaces as you like) resolve in Cairn,
-and daily notes named `2026-11-05.md` show up in Journal. Only Markdown is synced; attachments and `.obsidian/`
-settings stay in the vault. Prefer no sync at all? Open `brain/` itself as your vault.
+`Name (conflict 2026-11-06).md`. A vault that suddenly looks empty (unplugged drive) stops the sync instead
+of deleting anything. Only Markdown is synced; attachments and `.obsidian/` settings stay in the vault.
 
 ### Command line
 
