@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       matrix:
@@ -20,7 +20,11 @@ jobs:
         timeout-minutes: 6
         run: |
           pip install playwright
-          playwright install --with-deps chromium
+          playwright install chromium
+          # The runner image already ships Chromium's system libraries; only fall
+          # back to apt (slow mirrors) if the browser genuinely cannot start.
+          python -c "from playwright.sync_api import sync_playwright as s; p = s().start(); p.chromium.launch().close(); p.stop()" \
+            || playwright install-deps chromium
       - name: Run all tests
         env:
           CAIRN_REQUIRE_BROWSER: "1"
