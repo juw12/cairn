@@ -15,11 +15,11 @@ SHOTS = Path(__file__).resolve().parents[1] / ".shots"
 SESSION = json.dumps({"token": VALID_TOKEN, "method": "token", "login": "juw12", "name": "Juwen Lie", "avatar": "", "remember": False})
 
 
-def new_page(browser, signed_in=False, viewport=(1280, 860)):
+def new_page(browser, signed_in=False, viewport=(1280, 860), theme="light"):
     context = browser.new_context(viewport={"width": viewport[0], "height": viewport[1]})
     mock = install_github_mock(context)
     page = context.new_page()
-    page.add_init_script("localStorage.setItem('cairn.theme', 'light')")
+    page.add_init_script(f"localStorage.setItem('cairn.theme', '{theme}')")
     if signed_in:
         page.add_init_script(f"sessionStorage.setItem('cairn.session', {json.dumps(SESSION)})")
     return context, page, mock
@@ -78,6 +78,34 @@ def main() -> None:
         page.wait_for_selector("#signin-dialog")
         page.wait_for_timeout(300)
         page.screenshot(path=str(SHOTS / "signin-mobile.png"))
+        context.close()
+
+        # Dark theme: the dialog, a signed-in board and the conflict card.
+        context, page, _ = new_page(browser, theme="dark")
+        page.goto(url + "?brain=juw12/cairn")
+        page.wait_for_selector(".ro-banner")
+        page.click('#sidebar-foot [data-action="sign-in"]')
+        page.wait_for_selector("#signin-dialog")
+        page.wait_for_timeout(300)
+        page.screenshot(path=str(SHOTS / "signin-dialog-dark.png"))
+        context.close()
+
+        context, page, mock = new_page(browser, signed_in=True, theme="dark")
+        page.goto(url + "?brain=juw12/cairn#/board")
+        page.wait_for_function("() => window.cairn?.state?.info && !window.cairn.state.info.readOnly")
+        page.click('.item-card[data-open="tasks/mcp-server.md"]')
+        page.wait_for_selector("#ed-body")
+        mock.set_text("juw12/cairn", "brain/tasks/mcp-server.md", "---\ntitle: MCP server for AI assistants\ntype: task\nstatus: doing\n---\nEdited on my laptop.\n")
+        page.click("#ed-body")
+        page.keyboard.type(" My phone edit.")
+        page.wait_for_selector(".held-card")
+        page.screenshot(path=str(SHOTS / "signin-conflict-dark.png"))
+        context.close()
+
+        context, page, _ = new_page(browser, signed_in=True, theme="dark")
+        page.goto(url + "?u=juw12")
+        page.wait_for_selector(".my-brains .repo-row")
+        page.screenshot(path=str(SHOTS / "signin-people-dark.png"))
         context.close()
 
         browser.close()

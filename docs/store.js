@@ -337,6 +337,7 @@ export class GitHubStore {
       branch,
       // Every save is a commit, so wait for a real pause in typing before saving.
       saveDelay: this.writable ? 1500 : 450,
+      savedLabel: "Saved to GitHub",
     };
   }
 

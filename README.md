@@ -117,10 +117,12 @@ Sign in with GitHub on the web app and your brain repo becomes editable from you
 any browser. Every save is a commit to `brain/` in your repo; there is still no Cairn server or database.
 
 1. Open [juw12.github.io/cairn](https://juw12.github.io/cairn/) → **Sign in with GitHub**.
-2. Paste a token. The narrowest is a [fine-grained token](https://github.com/settings/personal-access-tokens/new)
-   limited to your brain repo with *Contents: Read and write*. A [classic token with `public_repo`](https://github.com/settings/tokens/new?scopes=public_repo&description=Cairn)
+2. Paste a token. The dialog links to a [pre-filled fine-grained token](https://github.com/settings/personal-access-tokens/new?name=Cairn&expires_in=90&contents=write)
+   (name, 90-day expiry and *Contents: Read and write* filled in; you pick *Only select repositories* and your
+   brain repo). That is the narrowest access. A [classic token with `public_repo`](https://github.com/settings/tokens/new?scopes=public_repo&description=Cairn)
    also lets you create new brains from the People page.
-3. Edit as usual. Typing is batched, so a burst of edits becomes one commit.
+3. You land in your brain (the one you last edited, or your only one). Edit as usual: typing is batched, so a
+   burst of edits becomes one commit.
 
 If the same note was changed somewhere else, Cairn shows the newer version and keeps yours next to it
 (*Use my version*, *Copy my text* or *Keep the newer one*). Failed saves (offline, expired sign-in) keep your text
@@ -203,9 +205,10 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 ## Development
 
 ```bash
-python -m unittest discover -s tests          # 54 tests: core, API, CLI, parity, e2e, sign-in, Worker
+python -m unittest discover -s tests          # 56 tests: core, API, CLI, parity, e2e, sign-in, Worker
 pip install playwright && playwright install chromium   # for the parity and e2e tests
 python scripts/make_media.py                  # regenerate the banner and screenshot
+python scripts/live_github_check.py           # sign-in + edits against the real GitHub API on a throwaway repo
 ```
 
 The web app in `docs/` is plain HTML, CSS and ES modules with no build step. `cairn/core.py` and

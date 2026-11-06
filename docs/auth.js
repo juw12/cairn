@@ -192,5 +192,6 @@ export async function finishDeviceFlow(flow, { remember = false, signal, pollMs 
 // Links that open GitHub's token page with sensible defaults.
 export const TOKEN_LINKS = {
   classic: `https://github.com/settings/tokens/new?scopes=${SCOPE}&description=${encodeURIComponent("Cairn")}`,
-  fineGrained: "https://github.com/settings/personal-access-tokens/new",
+  // GitHub pre-fills these fields; the repository itself is picked by hand (it can't be pre-filled).
+  fineGrained: `https://github.com/settings/personal-access-tokens/new?name=Cairn&description=${encodeURIComponent("Edit my Cairn brain from the browser")}&expires_in=90&contents=write`,
 };

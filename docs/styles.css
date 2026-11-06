@@ -616,3 +616,5 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
   .create-brain .input { flex: 1; width: auto; min-width: 0; }
   .create-brain label { width: 100%; }
 }
+
+.save-state.unsaved { color: var(--accent); }

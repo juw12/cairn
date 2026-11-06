@@ -3,6 +3,7 @@ import { renderMarkdown, toggleTask, escapeHtml as esc } from "./md.js";
 import { ServerStore, FolderStore, DemoStore, GitHubStore, ConflictError } from "./store.js";
 import * as gh from "./github.js";
 import * as auth from "./auth.js";
+import { openSignIn as showSignInDialog } from "./signin.js";
 
 // ============================================================ constants
 
@@ -1035,112 +1036,34 @@ function repoRow(repo) {
 // ------------------------------------------------------------ sign in
 
 function openSignIn() {
-  if ($("#signin-dialog")) return;
-  const deviceReady = Boolean(auth.authUrl());
-  const wrap = document.createElement("div");
-  wrap.className = "modal-wrap";
-  wrap.id = "signin-dialog";
-  wrap.innerHTML = `
-    <div class="modal signin" role="dialog" aria-modal="true" aria-labelledby="signin-title">
-      <h2 id="signin-title">Sign in with GitHub</h2>
-      <p>Edit your brain from any device. Your notes stay in your own GitHub repo; Cairn has no server and no database.</p>
-      <ul class="signin-facts">
-        <li><strong>Access:</strong> read and write your <em>public</em> repos (GitHub calls this <code>public_repo</code>). Cairn only touches <code>brain/</code> folders.</li>
-        <li><strong>Where it lives:</strong> in this browser only, sent only to <code>api.github.com</code>.</li>
-        <li><strong>Undo:</strong> sign out any time, or revoke access on GitHub.</li>
-      </ul>
-      ${deviceReady ? `
-        <button type="button" class="btn primary wide" data-signin="device">${icon("github", "sm")} Continue with GitHub</button>
-        <p class="hint">You approve on github.com. The sign-in passes once through Cairn's tiny relay, which keeps nothing; after that Cairn talks only to GitHub.</p>
-        <div class="device-step" id="device-step" hidden></div>
-        <div class="or"><span>or paste a token</span></div>` : ""}
-      <form id="token-form" class="token-form" autocomplete="off">
-        <label for="token-input">Personal access token</label>
-        <input id="token-input" class="input" type="password" spellcheck="false" placeholder="github_pat_… or ghp_…">
-        <p class="hint">Make one on GitHub: a <a href="${auth.TOKEN_LINKS.fineGrained}" target="_blank" rel="noopener">fine-grained token</a> is the narrowest (choose only your brain repo, Contents: Read and write). A <a href="${auth.TOKEN_LINKS.classic}" target="_blank" rel="noopener">classic token with public_repo</a> also lets you create new brains from here.</p>
-        <label class="check"><input type="checkbox" id="signin-remember"> Remember on this device</label>
-        <p class="hint" id="remember-hint">Off: forgotten when you close this tab. Turn it on only on your own device.</p>
-        <p class="form-error" id="signin-error" role="alert" hidden></p>
-        <div class="actions">
-          <button type="button" class="btn ghost" data-cancel>Cancel</button>
-          <button type="submit" class="btn ${deviceReady ? "" : "primary"}" id="token-submit">Sign in with token</button>
-        </div>
-      </form>
-    </div>`;
-  document.body.appendChild(wrap);
-  const controller = new AbortController();
-  const close = () => {
-    controller.abort();
-    wrap.remove();
-  };
-  const showError = (message) => {
-    const el = $("#signin-error", wrap);
-    el.textContent = message;
-    el.hidden = !message;
-  };
-  const remember = () => $("#signin-remember", wrap).checked;
-  $("#signin-remember", wrap).addEventListener("change", (e) => {
-    $("#remember-hint", wrap).textContent = e.target.checked
-      ? "On: kept in this browser until you sign out. Use only on your own device."
-      : "Off: forgotten when you close this tab. Turn it on only on your own device.";
-  });
-  wrap.addEventListener("click", (e) => {
-    if (e.target === wrap || e.target.closest("[data-cancel]")) close();
-  });
-  wrap.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      close();
-    }
-  });
-  $("#token-form", wrap).addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const button = $("#token-submit", wrap);
-    button.disabled = true;
-    button.textContent = "Checking…";
-    showError("");
-    try {
-      const me = await auth.signInWithToken($("#token-input", wrap).value, { remember: remember() });
-      close();
-      afterSignIn(me);
-    } catch (error) {
-      showError(error.message);
-      button.disabled = false;
-      button.textContent = "Sign in with token";
-    }
-  });
-  $("[data-signin=device]", wrap)?.addEventListener("click", async (e) => {
-    const step = $("#device-step", wrap);
-    e.currentTarget.disabled = true;
-    showError("");
-    try {
-      const flow = await auth.startDeviceFlow();
-      step.hidden = false;
-      step.innerHTML = `
-        <p>Enter this code on GitHub:</p>
-        <div class="device-code" id="device-code">${esc(flow.userCode)}</div>
-        <a class="btn primary wide" id="device-open" href="${esc(flow.verificationUri)}" target="_blank" rel="noopener">${icon("copy", "sm")} Copy code and open GitHub</a>
-        <p class="muted waiting">Waiting for you to approve on GitHub…</p>`;
-      $("#device-open", wrap).addEventListener("click", () => navigator.clipboard?.writeText(flow.userCode).catch(() => {}));
-      const me = await auth.finishDeviceFlow(flow, { remember: remember(), signal: controller.signal, pollMs: window.CAIRN_TEST_POLL_MS });
-      close();
-      afterSignIn(me);
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      showError(error.message);
-      step.hidden = true;
-      e.currentTarget.disabled = false;
-    }
-  });
-  setTimeout(() => (deviceReady ? $("[data-signin=device]", wrap) : $("#token-input", wrap))?.focus(), 0);
+  showSignInDialog({ icon, onSignedIn: afterSignIn });
 }
 
-function afterSignIn(me) {
-  toast(`Signed in as @${me.login}`);
+async function afterSignIn(me) {
   state.mine = null;
-  // A brain you were reading may now be editable; otherwise show your brains.
-  if (state.info?.mode === "github") return location.reload();
-  location.href = `${location.pathname}?u=${encodeURIComponent(me.login)}`;
+  // A GitHub brain you were reading may now be editable: reload it with your access.
+  if (state.store instanceof GitHubStore) return location.reload();
+  // Working in a local folder: stay there; your GitHub brains are one click away under People.
+  if (state.store instanceof ServerStore || state.store instanceof FolderStore) {
+    toast(`Signed in as @${me.login}. Your GitHub brains are under People.`);
+    renderSidebarFoot();
+    if (state.view === "people") renderView();
+    return;
+  }
+  toast(`Signed in as @${me.login}. Opening your brain…`);
+  const brain = await brainToOpen().catch(() => null);
+  location.href = brain
+    ? `${location.pathname}?brain=${encodeURIComponent(brain)}`
+    : `${location.pathname}?u=${encodeURIComponent(me.login)}`;
+}
+
+// The brain you last edited if it is still yours, else your only brain; null means "let me choose".
+async function brainToOpen() {
+  const brains = await gh.myBrains();
+  const last = (localStorage.getItem(LAST_BRAIN_KEY) || "").toLowerCase();
+  const lastOne = brains.find((repo) => repo.fullName.toLowerCase() === last);
+  if (lastOne) return lastOne.fullName;
+  return brains.length === 1 ? brains[0].fullName : null;
 }
 
 async function afterSignOut() {
@@ -1376,7 +1299,7 @@ function flushPending() {
   pending = null;
   return saveNote(path, changes)
     .then((saved) => {
-      if (saved) setSaveState(state.info?.mode === "github" ? "Saved to GitHub" : "Saved");
+      if (saved) setSaveState(state.info?.savedLabel || "Saved");
       renderView();
     })
     .catch(() => setSaveState("Not saved"));
@@ -1416,7 +1339,7 @@ async function useHeld() {
   upsertFile(held.path, held.text, mtime);
   if (state.open === held.path) renderDrawer();
   render();
-  toast(state.info?.mode === "github" ? "Saved your version to GitHub" : "Saved your version");
+  toast(`${state.info?.savedLabel || "Saved"}: your version`);
 }
 
 function renderDrawer() {
@@ -1438,7 +1361,7 @@ function renderDrawer() {
       <div class="drawer-head">
         ${typePill(note.type)}
         <span class="path" title="brain/${esc(note.path)}">brain/${esc(note.path)}</span>
-        <span class="save-state" id="save-state">${readOnly() ? "Read-only" : "Saved"}</span>
+        <span class="save-state${state.held?.path === note.path ? " unsaved" : ""}" id="save-state">${readOnly() ? "Read-only" : state.held?.path === note.path ? "Not saved" : "Saved"}</span>
         <button class="btn ghost sm icon-only" data-action="close-drawer" aria-label="Close">${icon("x")}</button>
       </div>
       <div class="drawer-body">

@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from webserver import OTHER_TOKEN, VALID_TOKEN, install_github_mock, launch_browser, start_static_server  # noqa: E402
+from webserver import CORS, OTHER_TOKEN, VALID_TOKEN, install_github_mock, launch_browser, start_static_server  # noqa: E402
 
 try:
     from playwright.sync_api import sync_playwright
@@ -62,7 +62,7 @@ class SignInTests(unittest.TestCase):
 
     def note_console(self, message):
         # Chrome logs every 4xx as "Failed to load resource"; the expected ones are part of these tests.
-        expected = message.text.startswith("Failed to load resource") and any(code in message.text for code in ("401", "409", "422", "ERR_INTERNET_DISCONNECTED"))
+        expected = message.text.startswith("Failed to load resource") and any(code in message.text for code in ("401", "403", "409", "422", "ERR_INTERNET_DISCONNECTED"))
         if message.type == "error" and not expected:
             self.errors.append(message.text)
 
@@ -169,6 +169,7 @@ class SignInTests(unittest.TestCase):
         page.keyboard.type(" My phone edit.")
         page.wait_for_selector(".held-card")
         self.assertIn("changed somewhere else", page.inner_text(".held-card"))
+        self.assertEqual(page.inner_text("#save-state"), "Not saved", "the header must not say Saved while my text is held")
         self.assertIn("Edited on my laptop.", page.evaluate("() => window.cairn.state.files.find((f) => f.path === 'tasks/mcp-server.md').text"))
         self.assertIn("My phone edit.", page.evaluate("() => window.cairn.state.held.text"))
         page.click('[data-action="held-use"]')
@@ -199,6 +200,46 @@ class SignInTests(unittest.TestCase):
         page.click('[data-action="held-use"]')
         self.wait_for_remote(page, "brain/tasks/mcp-server.md", lambda t: t and "Typed on a train." in t)
         page.wait_for_selector(".held-card", state="detached")
+        self.assertEqual(self.errors, [])
+
+    def test_sign_in_from_welcome_lands_in_your_brain(self):
+        page = self.open("", wait=".welcome-account")
+        page.click('.welcome-account [data-action="sign-in"]')
+        page.wait_for_selector("#signin-dialog")
+        page.fill("#token-input", VALID_TOKEN)
+        page.click("#token-submit")
+        # One brain (juw12/cairn) means no list to pick from: it opens, editable.
+        page.wait_for_url(lambda url: "brain=juw12%2Fcairn" in url)
+        page.wait_for_function("() => window.cairn?.state?.info?.repoName === 'cairn' && !window.cairn.state.info.readOnly")
+        self.assertEqual(page.locator(".ro-banner").count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_rate_limited_save_keeps_text(self):
+        page = self.open(f"?brain={REPO}#/board", session=session_json())
+        page.wait_for_function("() => window.cairn.state.info && !window.cairn.state.info.readOnly")
+
+        def rate_limit_writes(route):
+            if route.request.method == "PUT":
+                route.fulfill(
+                    status=403,
+                    content_type="application/json",
+                    body=json.dumps({"message": "API rate limit exceeded"}),
+                    headers={**CORS, "x-ratelimit-remaining": "0"},
+                )
+            else:
+                route.fallback()
+
+        page.route("https://api.github.com/repos/**", rate_limit_writes)
+        page.click('.item-card[data-open="tasks/mcp-server.md"]')
+        page.wait_for_selector("#ed-body")
+        page.click("#ed-body")
+        page.keyboard.type(" Typed during a busy hour.")
+        page.wait_for_selector(".held-card")
+        self.assertIn("hourly limit", page.inner_text(".held-card"))
+        self.assertIn("Typed during a busy hour.", page.evaluate("() => window.cairn.state.held.text"))
+        page.unroute("https://api.github.com/repos/**", rate_limit_writes)
+        page.click('[data-action="held-use"]')
+        self.wait_for_remote(page, "brain/tasks/mcp-server.md", lambda t: t and "Typed during a busy hour." in t)
         self.assertEqual(self.errors, [])
 
     # ------------------------------------------------------------------ G6
