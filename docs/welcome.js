@@ -60,10 +60,10 @@ export function showWelcome(remembered) {
         </section>
         <section class="card choice">
           <span class="badge-icon">${icon("terminal")}</span>
-          <h2>Run it locally</h2>
-          <p>Full app with code scanning and one-click git commits. Python 3.10+, no dependencies.</p>
-          <code>git clone ${REPO_URL}<br>python -m cairn --root ~/your-repo</code>
-          <button class="btn" data-copy-cmd>${icon("copy")} Copy commands</button>
+          <h2>Get the desktop app</h2>
+          <p>Its own window, opens your Obsidian vault by itself, syncs with GitHub in one click and updates itself. Windows, no admin needed.</p>
+          <a class="btn primary" href="Cairn-Setup.cmd" download="Cairn-Setup.cmd">${icon("arrow")} Download for Windows</a>
+          <button class="sub-link" data-copy-cmd>Mac or Linux? Copy the two terminal commands</button>
         </section>
       </div>
       ${welcomeAccount()}

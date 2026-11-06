@@ -3,6 +3,10 @@
 Security model: binds to 127.0.0.1, checks the Host header (DNS rebinding) and requires an
 `X-Cairn: 1` header on every API call, which browsers can't send cross-site without a CORS
 preflight that this server never approves.
+
+The desktop app (cairn.desktop) plugs in a `desktop` object for the things only a native app
+can do: open another folder, clone a repo, start with Windows, self-update. Plain `cairn serve`
+has none of that and answers 404 for /api/desktop.
 """
 
 from __future__ import annotations
@@ -17,8 +21,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .brain import Brain, ConflictError, PathError
-from .obsidian import ObsidianSync, SyncError
+from .brain import Brain, ConflictError, PathError, SyncError
+from .obsidian import ObsidianSync
+from .obsidian import SyncError as ObsidianSyncError
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_CANDIDATES = [PACKAGE_DIR / "web", PACKAGE_DIR.parent / "docs"]
@@ -36,6 +41,7 @@ class Handler(BaseHTTPRequestHandler):
     brain: Brain
     web_dir: Path
     allowed_hosts: set[str]
+    desktop = None  # optional DesktopHooks: state() -> dict, act(action, payload) -> dict
     server_version = f"Cairn/{__version__}"
 
     def log_message(self, *args):  # keep the terminal quiet
@@ -54,6 +60,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _error(self, status: int, message: str, **extra):
         self._send_json({"error": message, **extra}, status)
+
+    def _drain(self) -> None:
+        """Read an unused request body so Windows does not reset the connection before the reply."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if 0 < length <= MAX_BODY:
+            self.rfile.read(length)
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
@@ -93,6 +105,8 @@ class Handler(BaseHTTPRequestHandler):
                     "brainDir": brain._brain_pathspec(),
                     "exists": brain.dir.exists(),
                     "git": brain.git_available(),
+                    "desktop": self.desktop is not None,
+                    "path": str(brain.root) if self.desktop is not None else None,
                 })
             elif route == "/api/files":
                 self._send_json({"files": brain.files()})
@@ -102,6 +116,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(brain.git_status())
             elif route == "/api/obsidian":
                 self._send_json(self.obsidian.status())
+            elif route == "/api/desktop" and self.desktop is not None:
+                self._send_json(self.desktop.state())
             else:
                 self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
             return
@@ -148,6 +164,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(self.brain.git_commit(str(body.get("message", "")).strip()))
             except (RuntimeError, ValueError) as error:
                 return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        if route == "/api/git/sync":
+            try:
+                body = self._body()
+                return self._send_json(self.brain.git_sync(str(body.get("message", "")).strip()))
+            except (RuntimeError, ValueError) as error:
+                return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        if route == "/api/desktop" and self.desktop is not None:
+            try:
+                body = self._body()
+                return self._send_json(self.desktop.act(str(body.get("action", "")), body))
+            except (SyncError, ValueError, OSError) as error:
+                return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        self._drain()
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
 
     def _obsidian(self, action: str):
@@ -165,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     return self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
             self._send_json({"status": sync.status(), "report": report})
-        except SyncError as error:
+        except ObsidianSyncError as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
         except (ValueError, TypeError, OSError) as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
@@ -193,18 +222,25 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1") -> ThreadingHTTPServer:
+def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop=None) -> ThreadingHTTPServer:
     if host not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("Cairn only listens on localhost")
     handler = type("CairnHandler", (Handler,), {})
     handler.brain = brain
     handler.obsidian = ObsidianSync(brain)
     handler.sync_lock = threading.Lock()
+    handler.desktop = desktop
     handler.web_dir = find_web_dir().resolve()
     server = ThreadingHTTPServer((host, port), handler)
     actual_port = server.server_address[1]
     handler.allowed_hosts = {f"127.0.0.1:{actual_port}", f"localhost:{actual_port}", f"[::1]:{actual_port}"}
     return server
+
+
+def switch_brain(server: ThreadingHTTPServer, brain: Brain) -> None:
+    """Serve a different folder from now on (the desktop app's "Open a brain")."""
+    server.RequestHandlerClass.brain = brain
+    server.RequestHandlerClass.obsidian = ObsidianSync(brain)
 
 
 def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:
