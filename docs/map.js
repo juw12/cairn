@@ -215,7 +215,7 @@ export function mapView() {
       const shape = n.kind === "file"
         ? `<rect x="${-n.r}" y="${-n.r}" width="${n.r * 2}" height="${n.r * 2}" rx="1.5"/>`
         : `<circle r="${n.r.toFixed(1)}"${n.kind === "note" ? ` style="fill:${colour.of(n)}"` : ""}/>`;
-      return `<g class="map-dot ${n.kind === "note" ? "map-node" : `map-${n.kind}`}" data-node="${esc(n.id)}" tabindex="-1" role="button" aria-label="${esc(label)}">${shape}<text class="quiet"></text></g>`;
+      return `<g class="map-dot ${n.kind === "note" ? "map-node" : `map-${n.kind}`}" data-node="${esc(n.id)}" tabindex="-1" role="button" aria-label="${esc(label)}"><rect class="hit"/>${shape}<text class="quiet"></text></g>`;
     })
     .join("");
   const hidden = m.graph.nodes.length - m.nodes.filter((n) => n.kind === "note").length;
@@ -486,6 +486,15 @@ function placeLabels() {
     const label = shortLabel(n);
     if (text.textContent !== label) text.textContent = label;
     text.setAttribute("font-size", font.toFixed(3));
+    // Invisible hit area: at least 34 screen px across on phones, the dot itself on desktop.
+    const hit = text.previousElementSibling?.previousElementSibling;
+    if (hit?.classList.contains("hit")) {
+      const half = innerWidth <= 900 ? Math.max(n.r, 17 / k) : n.r;
+      hit.setAttribute("x", (-half).toFixed(2));
+      hit.setAttribute("y", (-half).toFixed(2));
+      hit.setAttribute("width", (half * 2).toFixed(2));
+      hit.setAttribute("height", (half * 2).toFixed(2));
+    }
     const w = label.length * char * (n.id === session.selected ? 1.1 : 1);
     const r = n.r;
     const gap = 3 / k;

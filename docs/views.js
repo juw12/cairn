@@ -248,7 +248,7 @@ export function contextView() {
   const existing = fileByPath("CONTEXT.md");
   const saved = existing ? `Last saved ${relativeTime(existing.mtime)}${existing.text === pack ? " · up to date" : " · out of date"}` : "Not saved yet";
   const body = state.contextMode === "preview"
-    ? `<div class="prose" style="padding:22px 26px">${renderMarkdown(pack, (t) => core.resolveLink(state.notes, t))}</div>`
+    ? `<div class="prose" style="padding:22px 26px">${renderMarkdown(pack, (t) => core.resolveLink(state.notes, t)).replace(/<(\/?)h([1-5])>/g, (_, slash, level) => `<${slash}h${+level + 1}>`)}</div>`
     : `<pre class="pre-box">${esc(pack)}</pre>`;
   return `${pageHead("Context pack", "A one-page brief of where the project stands, for teammates and AI assistants (Copilot, Claude, Cursor, ChatGPT…). No API keys: it’s just a file your tools can read.",
     `<button class="btn" data-action="copy-context">${icon("copy")} Copy</button><button class="btn primary" data-action="save-context">${icon("save")} Save to brain/CONTEXT.md</button>`)}
