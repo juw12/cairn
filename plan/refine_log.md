@@ -79,6 +79,7 @@ Not verified
 | 1 | `auth.js`, GitHub Contents API store, sign-in dialog, account row, held-text card, create-brain form, Worker + tests | G1-G8 pass (53 tests) | 8.0 | better than v0 | yes | Screenshots: dialog facts list inherited the mono list style and was clipped on mobile; conflict toast red; no offline test; no README docs |
 | 2 | Dialog list fixed (sans, unclipped), calm conflict toast, offline save test, honest relay note, README sign-in + privacy sections, brain notes updated | G1-G8 pass (54 tests) | 8.7 | better than round 1 | yes | Met target (>= 8.5); stopped |
 | 3 | User asked to continue toward 10. Real-GitHub end-to-end check, land in your brain after sign-in, pre-filled fine-grained token link, `signin.js` module, store-provided save wording, rate-limit test, dark-mode review; fixed "Saved" shown while a conflict held unsaved text | G1-G8 pass (56 tests) + live check PASS twice | 9.6 | better than round 2 | yes | Remaining gap needs the owner's accounts (OAuth App + Worker) |
+| 4 | Deployed the device-flow relay (`cairn-auth.juwenmondial.workers.dev`) and the "Cairn" OAuth App; site points at it; CI hardened (pinned ubuntu-24.04, install timeouts) | G1-G8 pass (56 tests, CI green) + owner signed in live | 9.8 | better than round 3 | yes | Only `app.js` size and minor polish remain |
 
 Round 2 scores (evidence):
 - S1 Usefulness 8.5: sign in, land in your brain or create one from People, capture/move/edit saved as commits; burst
@@ -117,3 +118,16 @@ Round 3 scores (evidence):
 Weighted: \(0.25(9) + 0.2(10) + 0.2(10) + 0.15(9) + 0.1(9.5) + 0.1(10) = 9.55 \approx 9.6\).
 
 Still not verified: the device-flow Worker on Cloudflare with a real OAuth App (logic tested only).
+
+Round 4 scores (evidence):
+- S1 Usefulness 10: one click on "Continue with GitHub" shows a code, "Copy code and open GitHub", approve, and you
+  land signed in. Live check: relay returned a real user code and polled GitHub; the owner then approved on
+  github.com/login/device and was signed in on https://juw12.github.io/cairn/. Token paste remains as a fallback.
+- S2 Trust 10, S3 Robustness 10, S6 Verification 10: unchanged from round 3; the relay was additionally checked live
+  (preflight 204 for the site, 403 for other origins, 404 for any other path).
+- S4 Code 9: unchanged; `app.js` is still ~2.2k lines.
+- S5 Design 9.5: unchanged.
+
+Weighted: \(0.25(10) + 0.2(10) + 0.2(10) + 0.15(9) + 0.1(9.5) + 0.1(10) = 9.8\).
+
+Remaining to reach 10: split `app.js` into view modules (S4) and a last design polish pass (S5).
