@@ -476,3 +476,222 @@ function collide(nodes, pad) {
     }
   }
 }
+
+// ------------------------------------------------------------ force layout in 3D
+
+// The same forces in three dimensions, for the 3D map: springs along links, Barnes-Hut repulsion
+// over an octree, and gentle gravity. Bodies are plain {id, x, y, z} objects; missing positions
+// start on a Fibonacci sphere (even and deterministic).
+export function createSimulation3D(bodies, edges, options = {}) {
+  const settings = {
+    linkDistance: 62,
+    charge: -210,
+    gravity: 0.045,
+    theta2: 0.81,
+    velocityDecay: 0.4,
+    alphaMin: 0.003,
+    alphaDecay: 1 - Math.pow(0.003, 1 / 300),
+    ...options,
+  };
+  const byId = new Map(bodies.map((b) => [b.id, b]));
+  const links = edges
+    .map((e) => ({ source: byId.get(e.source), target: byId.get(e.target) }))
+    .filter((l) => l.source && l.target && l.source !== l.target);
+  const count = new Map(bodies.map((b) => [b.id, 0]));
+  for (const link of links) {
+    count.set(link.source.id, count.get(link.source.id) + 1);
+    count.set(link.target.id, count.get(link.target.id) + 1);
+  }
+  for (const link of links) {
+    const a = count.get(link.source.id);
+    const b = count.get(link.target.id);
+    link.strength = 1 / Math.min(a, b);
+    link.bias = a / (a + b);
+  }
+  const total = bodies.length || 1;
+  bodies.forEach((body, index) => {
+    if (![body.x, body.y, body.z].every(Number.isFinite)) {
+      const radius = 14 * Math.cbrt(0.5 + index);
+      const phi = Math.acos(1 - (2 * (index + 0.5)) / total);
+      const theta = index * Math.PI * (3 - Math.sqrt(5));
+      body.x = radius * Math.sin(phi) * Math.cos(theta);
+      body.y = radius * Math.sin(phi) * Math.sin(theta);
+      body.z = radius * Math.cos(phi);
+    }
+    body.vx = body.vx || 0;
+    body.vy = body.vy || 0;
+    body.vz = body.vz || 0;
+  });
+
+  const sim = {
+    bodies,
+    alpha: options.alpha ?? 1,
+    alphaTarget: 0,
+    settings,
+    tick() {
+      sim.alpha += (sim.alphaTarget - sim.alpha) * settings.alphaDecay;
+      const alpha = sim.alpha;
+      for (const link of links) {
+        const { source: s, target: t } = link;
+        let dx = t.x + t.vx - s.x - s.vx || 1e-6;
+        let dy = t.y + t.vy - s.y - s.vy || 1e-6;
+        let dz = t.z + t.vz - s.z - s.vz || 1e-6;
+        let length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        length = ((length - settings.linkDistance) / length) * alpha * link.strength;
+        dx *= length;
+        dy *= length;
+        dz *= length;
+        t.vx -= dx * link.bias;
+        t.vy -= dy * link.bias;
+        t.vz -= dz * link.bias;
+        s.vx += dx * (1 - link.bias);
+        s.vy += dy * (1 - link.bias);
+        s.vz += dz * (1 - link.bias);
+      }
+      if (bodies.length > 1) {
+        const root = buildOctree(bodies);
+        for (const body of bodies) applyOctree(root, body, settings.charge, alpha, settings.theta2);
+      }
+      for (const body of bodies) {
+        body.vx -= body.x * settings.gravity * alpha;
+        body.vy -= body.y * settings.gravity * alpha;
+        body.vz -= body.z * settings.gravity * alpha;
+        body.vx *= 1 - settings.velocityDecay;
+        body.vy *= 1 - settings.velocityDecay;
+        body.vz *= 1 - settings.velocityDecay;
+        body.x += body.vx;
+        body.y += body.vy;
+        body.z += body.vz;
+      }
+    },
+    settled() {
+      return sim.alpha < settings.alphaMin && sim.alphaTarget === 0;
+    },
+    run(budgetMs = 1500, now = () => performance.now()) {
+      const start = now();
+      let ticks = 0;
+      while (!sim.settled() && now() - start < budgetMs) {
+        sim.tick();
+        ticks += 1;
+      }
+      return ticks;
+    },
+  };
+  return sim;
+}
+
+function octCell(x0, y0, z0, size) {
+  return { x0, y0, z0, size, kids: null, bodies: [], count: 0, cx: 0, cy: 0, cz: 0 };
+}
+
+function buildOctree(bodies) {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let z0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  let z1 = -Infinity;
+  for (const b of bodies) {
+    x0 = Math.min(x0, b.x);
+    y0 = Math.min(y0, b.y);
+    z0 = Math.min(z0, b.z);
+    x1 = Math.max(x1, b.x);
+    y1 = Math.max(y1, b.y);
+    z1 = Math.max(z1, b.z);
+  }
+  const root = octCell(x0, y0, z0, Math.max(x1 - x0, y1 - y0, z1 - z0, 1) + 1);
+  for (const b of bodies) octInsert(root, b, 0);
+  octSummarise(root);
+  return root;
+}
+
+function octInsert(cell, body, depth) {
+  if (!cell.kids) {
+    if (!cell.bodies.length || depth > 20 || cell.bodies.every((b) => b.x === body.x && b.y === body.y && b.z === body.z)) {
+      cell.bodies.push(body);
+      return;
+    }
+    const existing = cell.bodies;
+    cell.bodies = [];
+    cell.kids = new Array(8).fill(null);
+    for (const b of existing) octChild(cell, b, depth);
+  }
+  octChild(cell, body, depth);
+}
+
+function octChild(cell, body, depth) {
+  const half = cell.size / 2;
+  const right = body.x >= cell.x0 + half ? 1 : 0;
+  const down = body.y >= cell.y0 + half ? 1 : 0;
+  const back = body.z >= cell.z0 + half ? 1 : 0;
+  const index = right + down * 2 + back * 4;
+  if (!cell.kids[index]) {
+    cell.kids[index] = octCell(cell.x0 + right * half, cell.y0 + down * half, cell.z0 + back * half, half);
+  }
+  octInsert(cell.kids[index], body, depth + 1);
+}
+
+function octSummarise(cell) {
+  let count = 0;
+  let sx = 0;
+  let sy = 0;
+  let sz = 0;
+  if (cell.kids) {
+    for (const kid of cell.kids) {
+      if (!kid) continue;
+      octSummarise(kid);
+      count += kid.count;
+      sx += kid.cx * kid.count;
+      sy += kid.cy * kid.count;
+      sz += kid.cz * kid.count;
+    }
+  } else {
+    for (const b of cell.bodies) {
+      count += 1;
+      sx += b.x;
+      sy += b.y;
+      sz += b.z;
+    }
+  }
+  cell.count = count;
+  cell.cx = count ? sx / count : 0;
+  cell.cy = count ? sy / count : 0;
+  cell.cz = count ? sz / count : 0;
+}
+
+function applyOctree(cell, body, strength, alpha, theta2) {
+  if (!cell.count) return;
+  const dx = cell.cx - body.x;
+  const dy = cell.cy - body.y;
+  const dz = cell.cz - body.z;
+  let l = dx * dx + dy * dy + dz * dz;
+  if (cell.kids && (cell.size * cell.size) / theta2 < l) {
+    if (l < 1) l = Math.sqrt(l);
+    const f = (strength * cell.count * alpha) / l;
+    body.vx += dx * f;
+    body.vy += dy * f;
+    body.vz += dz * f;
+    return;
+  }
+  if (cell.kids) {
+    for (const kid of cell.kids) if (kid) applyOctree(kid, body, strength, alpha, theta2);
+    return;
+  }
+  for (const other of cell.bodies) {
+    if (other === body) continue;
+    let bx = other.x - body.x;
+    let by = other.y - body.y;
+    let bz = other.z - body.z;
+    if (!bx && !by && !bz) {
+      bx = 1e-3;
+      by = -1e-3;
+      bz = 1e-3;
+    }
+    let bl = bx * bx + by * by + bz * bz;
+    if (bl < 1) bl = Math.sqrt(bl);
+    const f = (strength * alpha) / bl;
+    body.vx += bx * f;
+    body.vy += by * f;
+    body.vz += bz * f;
+  }
+}

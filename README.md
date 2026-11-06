@@ -188,6 +188,11 @@ Nothing is ever lost: a note deleted in Cairn goes to the vault's `.trash/`, one
 `Name (conflict 2026-11-06).md`. A vault that suddenly looks empty (unplugged drive) stops the sync instead
 of deleting anything. Only Markdown is synced; attachments and `.obsidian/` settings stay in the vault.
 
+Switch the Map between **2D and 3D** with the toggle in its corner (or press 2 / 3). The 3D map lays your
+notes out in space with perspective, depth and lit spheres; drag to turn it a full 360° any way, right-drag
+or Shift-drag to pan, scroll or pinch to zoom, R for auto-rotate. Selection, local maps, paths, filters
+and suggested links work the same in both, and Cairn remembers which one you like.
+
 ### Command line
 
 ```bash

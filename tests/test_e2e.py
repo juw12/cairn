@@ -353,6 +353,57 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_function("() => !document.querySelector('#map-svg .future')", timeout=15000)
         self.assertEqual(self.errors, [])
 
+    def test_map_3d_mode_turns_selects_and_remembers(self):
+        page = self.open(query="?demo=1#/map", wait="#map-svg text")
+        page.evaluate("localStorage.removeItem('cairn.map')")
+        page.click('[data-map="view"][data-view="3d"]')
+        page.wait_for_selector("#map-canvas")
+        self.assertEqual(page.locator("#map-svg").count(), 0)
+        page.wait_for_function("() => window.cairn.map3d && window.cairn.map3d.settled", timeout=15000)
+        # Every note has a place in space, and the layout really uses depth.
+        bodies = page.evaluate("window.cairn.map3d.bodies()")
+        self.assertEqual(len(bodies), 18)
+        zs = [b["z"] for b in bodies]
+        self.assertGreater(max(zs) - min(zs), 40, "the 3D layout should not be flat")
+        # Dragging turns the map (a trackball: any direction, no limit).
+        if page.get_attribute('[data-map="spin"]', "aria-pressed") == "true":
+            page.click('[data-map="spin"]')
+        before = page.evaluate("window.cairn.map3d.camera.rot")
+        box = page.locator("#map-canvas").bounding_box()
+        x, y = box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.75
+        page.mouse.move(x, y)
+        page.mouse.down()
+        for i in range(1, 16):
+            page.mouse.move(x + i * 14, y - i * 10)
+        page.mouse.up()
+        self.assertNotEqual(page.evaluate("window.cairn.map3d.camera.rot"), before)
+        page.keyboard.press("f")
+        page.wait_for_timeout(600)
+        # Clicking a dot selects it and opens the card, as in 2D.
+        hub = page.evaluate("""() => {
+            const g = window.cairn.core.buildGraph(window.cairn.state.notes);
+            const deg = new Map();
+            g.edges.forEach((e) => { deg.set(e.source, (deg.get(e.source) || 0) + 1); deg.set(e.target, (deg.get(e.target) || 0) + 1); });
+            return [...deg.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        }""")
+        pos = page.evaluate("(id) => window.cairn.map3d.screenPos(id)", hub)
+        page.mouse.click(box["x"] + pos["x"], box["y"] + pos["y"])
+        page.wait_for_selector("#map-card:not([hidden])")
+        title = page.evaluate("(p) => window.cairn.state.notes.find((n) => n.path === p).title", hub)
+        self.assertEqual(page.inner_text("#map-card strong"), title)
+        # "Watch it grow" replays the brain in 3D too, then everything is back.
+        page.click('[data-map="grow"]')
+        page.wait_for_selector("#map-growth:not([hidden])")
+        page.wait_for_selector("#map-growth", state="hidden", timeout=15000)
+        # The choice is remembered; "2" goes back to the flat map.
+        page.reload()
+        page.wait_for_selector("#map-canvas")
+        page.locator("#map-canvas").focus()
+        page.keyboard.press("2")
+        page.wait_for_selector("#map-svg text")
+        self.assertEqual(page.locator(".map-node").count(), 18)
+        self.assertEqual(self.errors, [])
+
     def test_map_select_keyboard_local_and_path(self):
         page = self.open(query="?demo=1#/map", wait="#map-svg text")
         page.evaluate("localStorage.removeItem('cairn.map')")
