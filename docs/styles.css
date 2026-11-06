@@ -359,6 +359,8 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .map-node circle { stroke: var(--surface); stroke-width: 2.5; }
 .map-node text { font-size: 11.5px; font-family: var(--font); fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
 .map-node:hover circle { stroke: var(--ink); }
+.map-node text.quiet { opacity: 0; transition: opacity .12s; }
+.map-node:hover text.quiet, .map-node:focus-visible text.quiet, .map-wrap.focus .map-node.lit text.quiet { opacity: 1; }
 .map-edge { stroke: var(--line-strong); stroke-width: 1.2; }
 .map-wrap.focus .map-node:not(.lit) { opacity: .22; }
 .map-wrap.focus .map-edge:not(.lit) { opacity: .12; }
@@ -368,7 +370,7 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 
 .people-search { position: relative; display: flex; gap: 8px; align-items: center; max-width: 720px; margin-bottom: 28px; }
 .people-search .icon { position: absolute; left: 14px; color: var(--muted); }
-.people-search input { flex: 1; height: 46px; padding: 0 14px 0 42px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); outline: none; font-size: 15px; }
+.people-search input { flex: 1; min-width: 0; height: 46px; padding: 0 14px 0 42px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); outline: none; font-size: 15px; }
 .people-search input:focus { border-color: var(--ink); }
 .people-search .btn { height: 46px; padding: 0 20px; }
 .profile-card { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 24px; padding: 24px 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line); }
@@ -499,7 +501,7 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .explore-box label { display: block; margin-bottom: 8px; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .explore-row { position: relative; display: flex; gap: 8px; align-items: center; }
 .explore-row .icon { position: absolute; left: 14px; color: var(--muted); }
-.explore-row input { flex: 1; height: 46px; padding: 0 14px 0 42px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); outline: none; font-size: 15px; }
+.explore-row input { flex: 1; min-width: 0; height: 46px; padding: 0 14px 0 42px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); outline: none; font-size: 15px; }
 .explore-row input:focus { border-color: var(--ink); }
 .explore-row .btn { height: 46px; padding: 0 20px; }
 .welcome-points { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; margin-top: 44px; }
@@ -536,7 +538,8 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
   .choices, .welcome-points { grid-template-columns: minmax(0, 1fr); }
   .choice + .choice { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
   .capture .hint { display: none; }
-  .capture input { padding-right: 90px; }
+  .capture input { padding-right: 12px; }
+  .capture:has(.capture-type:not([hidden])) input { padding-right: 90px; }
   .search-field { flex: 1 1 100%; max-width: none; min-width: 0; margin-left: 0; }
   .toolbar > * { min-width: 0; }
   .list-row { grid-template-columns: 22px minmax(0, 1fr) auto; }

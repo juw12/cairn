@@ -147,14 +147,52 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(page.locator(".guide-step.done").count(), 1)
 
     def test_mobile_and_dark_have_no_horizontal_scroll(self):
-        for theme in ("light", "dark"):
-            page = self.open(viewport=(390, 844), theme=theme)
+        for theme, width in (("light", 390), ("dark", 390), ("light", 320)):
+            page = self.open(viewport=(width, 844), theme=theme)
             for view in VIEWS:
                 page.evaluate("(v) => { location.hash = '#/' + v; dispatchEvent(new PopStateEvent('popstate')); }", view)
                 page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
                 overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
-                self.assertLessEqual(overflow, 0, f"{theme}/{view} scrolls sideways by {overflow}px")
+                self.assertLessEqual(overflow, 0, f"{theme}/{width}px/{view} scrolls sideways by {overflow}px")
             self.assertEqual(page.evaluate("document.documentElement.dataset.theme"), theme)
+            self.assertEqual(self.errors, [])
+
+
+    def test_small_phone_welcome_and_capture_fit(self):
+        page = self.open(query="", viewport=(320, 640), wait="#welcome:not([hidden])")
+        overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+        self.assertLessEqual(overflow, 0, f"welcome scrolls sideways by {overflow}px at 320px")
+        page = self.open(viewport=(320, 640))
+        fits = page.evaluate("""() => {
+            const input = document.querySelector('#capture-input');
+            const style = getComputedStyle(input);
+            const ctx = document.createElement('canvas').getContext('2d');
+            ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            const room = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+            return { text: ctx.measureText(input.placeholder).width, room };
+        }""")
+        self.assertLessEqual(fits["text"], fits["room"], f"capture placeholder is clipped: {fits}")
+
+    def test_map_labels_never_overlap(self):
+        for theme, viewport in (("light", (1440, 900)), ("dark", (1024, 768))):
+            page = self.open(query="?demo=1#/map", viewport=viewport, theme=theme, wait="#map-svg text")
+            overlaps = page.evaluate("""() => {
+                const boxes = [...document.querySelectorAll('#map-svg text')]
+                    .filter((t) => getComputedStyle(t).opacity !== '0')
+                    .map((t) => [t.textContent, t.getBoundingClientRect()]);
+                const pairs = [];
+                boxes.forEach(([na, a], i) => boxes.slice(i + 1).forEach(([nb, b]) => {
+                    if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) pairs.push([na, nb]);
+                }));
+                return pairs;
+            }""")
+            self.assertEqual(overlaps, [], f"{theme}: overlapping map labels")
+            # Labels hidden for lack of room still appear when their dot is hovered or focused.
+            quiet = page.locator("#map-svg text.quiet")
+            if quiet.count():
+                node = page.locator("#map-svg .map-node", has=quiet.first)
+                node.focus()
+                self.assertEqual(quiet.first.evaluate("(t) => getComputedStyle(t).opacity"), "1")
             self.assertEqual(self.errors, [])
 
 

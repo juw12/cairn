@@ -385,7 +385,7 @@ async function boot() {
   $("#capture-icon").innerHTML = icon("plus");
   $("#search-btn").innerHTML = `${icon("search", "sm")}<span class="sr-only">Search</span><kbd>Ctrl K</kbd>`;
   if (matchMedia("(max-width: 900px)").matches) {
-    $("#capture-input").placeholder = "Capture… idea, todo:, decision:";
+    $("#capture-input").placeholder = "Capture…";
   }
   wireGlobal();
 

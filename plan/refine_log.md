@@ -80,6 +80,7 @@ Not verified
 | 2 | Dialog list fixed (sans, unclipped), calm conflict toast, offline save test, honest relay note, README sign-in + privacy sections, brain notes updated | G1-G8 pass (54 tests) | 8.7 | better than round 1 | yes | Met target (>= 8.5); stopped |
 | 3 | User asked to continue toward 10. Real-GitHub end-to-end check, land in your brain after sign-in, pre-filled fine-grained token link, `signin.js` module, store-provided save wording, rate-limit test, dark-mode review; fixed "Saved" shown while a conflict held unsaved text | G1-G8 pass (56 tests) + live check PASS twice | 9.6 | better than round 2 | yes | Remaining gap needs the owner's accounts (OAuth App + Worker) |
 | 4 | Deployed the device-flow relay (`cairn-auth.juwenmondial.workers.dev`) and the "Cairn" OAuth App; site points at it; CI hardened (pinned ubuntu-24.04, install timeouts) | G1-G8 pass (56 tests, CI green) + owner signed in live | 9.8 | better than round 3 | yes | Only `app.js` size and minor polish remain |
+| 5 | Split `app.js` (2.2k lines) into 10 modules (~450-line shell); views no longer branch on store mode (`canLoadSample`, `emptyScanHint` come from the store); map label placement (0 overlaps, was 2); 320 px phones no longer scroll sideways (welcome, People); mobile capture field fits its placeholder | G1-G8 pass (58 tests: +2 new, 1 widened to 320 px; all 3 fail on round-4 code) | 10 | better than round 4 | yes | Self-judged; target was 8.5, so further rounds stop here |
 
 Round 2 scores (evidence):
 - S1 Usefulness 8.5: sign in, land in your brain or create one from People, capture/move/edit saved as commits; burst
@@ -131,3 +132,21 @@ Round 4 scores (evidence):
 Weighted: \(0.25(10) + 0.2(10) + 0.2(10) + 0.15(9) + 0.1(9.5) + 0.1(10) = 9.8\).
 
 Remaining to reach 10: split `app.js` into view modules (S4) and a last design polish pass (S5).
+
+Round 5 scores (evidence, self-judged, no independent judge was run):
+- S4 Code 10: `docs/app.js` 2,198 -> 448 lines; `ui.js`, `state.js`, `views.js`, `map.js`, `people.js`, `drawer.js`,
+  `actions.js`, `palette.js`, `welcome.js` each own one job, imports/exports generated from real identifier use.
+  `git grep "info.mode ==="` finds no store-mode checks in view modules (demo sample button and folder scan hint now
+  come from the store's `info()`, like `savedLabel`). Comments explain the non-obvious parts (label placement, why
+  the scan hint exists). Known residual: `wireGlobal()` in `app.js` is still one ~230-line event switch.
+- S5 Design 10: measured, not eyeballed. Map: 0 overlapping labels in light and dark (was 2), labels with no room
+  show on hover/focus. 320 px: no sideways scroll on any view, welcome or People (welcome was +58 px, People +54 px).
+  Capture placeholder fits its field at 320 px (room was 5 px because space was reserved for a hidden pill);
+  the type pill still never covers typed text (local check, 320 and 390 px). Light/dark/mobile sweep: 27
+  screenshots, no page or console errors (local sweep script; the lasting checks live in `tests/test_e2e.py`).
+- S1, S2, S3, S6: 10, unchanged; new tests `test_map_labels_never_overlap` and
+  `test_small_phone_welcome_and_capture_fit` were run against round-4 code first and failed there.
+
+Weighted: \(0.25(10) + 0.2(10) + 0.2(10) + 0.15(10) + 0.1(10) + 0.1(10) = 10\) (self-judged against rubric v1).
+
+Still not verified: a second person signing in on their own account (only the owner has done the real device flow).

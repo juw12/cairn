@@ -163,6 +163,8 @@ export class FolderStore {
       label: `Folder · ${brain === this.root ? this.root.name : "brain"}/`,
       canGit: false,
       canScan: true,
+      // Opening brain/ itself leaves no code around it to scan; say so instead of "inbox zero".
+      emptyScanHint: brain === this.root ? "You opened the brain folder itself. Open the repo root instead to scan its code." : "",
     };
   }
 
@@ -279,7 +281,7 @@ export class DemoStore {
   }
 
   async info() {
-    return { mode: "demo", project: "cairn-demo", label: "Demo · saved in this browser", canGit: false, canScan: true };
+    return { mode: "demo", project: "cairn-demo", label: "Demo · saved in this browser", canGit: false, canScan: true, canLoadSample: true };
   }
 
   async list() {

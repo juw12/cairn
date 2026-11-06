@@ -61,6 +61,48 @@ function layoutGraph(graph) {
   return pos;
 }
 
+// Greedy label placement: well-connected notes claim space first; each label tries below, above, right,
+// then left of its dot and avoids other labels and dots. Labels with no free spot stay hidden until the
+// dot is hovered or focused, so the map never shows text on top of text.
+const LABEL_FONT = 11.5;
+const LABEL_CHAR = LABEL_FONT * 0.54;
+
+function placeLabels(nodes, pos, radius, labelOf, degree) {
+  const boxes = nodes.map((node) => {
+    const p = pos.get(node.id);
+    const r = radius.get(node.id);
+    return { x1: p.x - r, y1: p.y - r, x2: p.x + r, y2: p.y + r };
+  });
+  const overlaps = (a) => boxes.some((b) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2);
+  const order = [...nodes].sort((a, b) => degree.get(b.id) - degree.get(a.id) || a.title.localeCompare(b.title));
+  const placed = new Map();
+  for (const node of order) {
+    const p = pos.get(node.id);
+    const r = radius.get(node.id);
+    const w = labelOf(node).length * LABEL_CHAR;
+    const candidates = [
+      { x: 0, y: r + 14, anchor: "middle", box: [-w / 2, r + 3, w / 2, r + 17] },
+      { x: 0, y: -(r + 6), anchor: "middle", box: [-w / 2, -(r + 17), w / 2, -(r + 3)] },
+      { x: r + 6, y: 4, anchor: "start", box: [r + 6, -7, r + 6 + w, 7] },
+      { x: -(r + 6), y: 4, anchor: "end", box: [-(r + 6) - w, -7, -(r + 6), 7] },
+    ];
+    const pad = 2;
+    const fit = candidates.find((c) => {
+      const box = { x1: p.x + c.box[0] - pad, y1: p.y + c.box[1] - pad, x2: p.x + c.box[2] + pad, y2: p.y + c.box[3] + pad };
+      if (overlaps(box)) return false;
+      c.claim = box;
+      return true;
+    });
+    if (fit) {
+      boxes.push(fit.claim);
+      placed.set(node.id, { x: fit.x, y: fit.y, anchor: fit.anchor, quiet: false });
+    } else {
+      placed.set(node.id, { ...candidates[0], quiet: true });
+    }
+  }
+  return placed;
+}
+
 let mapState = null;
 
 export function mapView() {
@@ -86,13 +128,16 @@ export function mapView() {
       return `<line class="map-edge" data-a="${esc(e.source)}" data-b="${esc(e.target)}" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`;
     })
     .join("");
+  const radius = new Map(graph.nodes.map((n) => [n.id, 7 + Math.sqrt(degree.get(n.id)) * 3]));
+  const labelOf = (node) => (node.title.length > 28 ? node.title.slice(0, 27) + "…" : node.title);
+  const labels = placeLabels(graph.nodes, pos, radius, labelOf, degree);
   const nodeSvg = graph.nodes
     .map((node) => {
       const p = pos.get(node.id);
-      const r = 7 + Math.sqrt(degree.get(node.id)) * 3;
-      const label = node.title.length > 28 ? node.title.slice(0, 27) + "…" : node.title;
+      const r = radius.get(node.id);
+      const spot = labels.get(node.id);
       return `<g class="map-node" data-open="${esc(node.id)}" data-node="${esc(node.id)}" transform="translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})" tabindex="0" role="button" aria-label="${esc(node.title)}">
-        <circle r="${r.toFixed(1)}" fill="var(--${node.type})"/><text y="${(r + 14).toFixed(1)}" text-anchor="middle">${esc(label)}</text></g>`;
+        <circle r="${r.toFixed(1)}" fill="var(--${node.type})"/><text${spot.quiet ? ' class="quiet"' : ""} x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" text-anchor="${spot.anchor}">${esc(labelOf(node))}</text></g>`;
     })
     .join("");
   const legend = core.TYPES.map((t) => `<span><i class="dot t-${t}"></i>${TYPE_META[t].label}</span>`).join("");

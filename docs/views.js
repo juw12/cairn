@@ -41,7 +41,7 @@ export function home() {
   const todoCount = state.todos === null ? "–" : state.todos.length;
   const figure = (view, value, label) => `<button class="figure" data-go="${view}"><span class="value">${value}</span><span class="label">${label}</span></button>`;
   const emptyBrain = state.notes.length === 0;
-  const sampleButton = emptyBrain && state.info.mode === "demo" ? `<button class="btn primary" data-action="load-sample">${icon("play")} Load the sample project</button>` : "";
+  const sampleButton = emptyBrain && state.info.canLoadSample ? `<button class="btn primary" data-action="load-sample">${icon("play")} Load the sample project</button>` : "";
   const intro = emptyBrain
     ? "An empty brain. Write the first thing on your mind in the bar above."
     : readOnly()
@@ -214,7 +214,7 @@ export function codeView() {
   if (state.todos === null) return `${head}<div class="card">${emptyState("code", "Scanning your code…", "Looking for TODO, FIXME and HACK comments.")}</div>`;
   if (state.todosError) return `${head}<div class="card">${emptyState("code", "Couldn’t scan the code", esc(state.todosError))}</div>`;
   if (!state.todos.length) {
-    const hint = state.info.mode === "folder" && !state.info.label.includes("brain/") ? "You opened the brain folder itself. Open the repo root instead to scan its code." : "No TODO, FIXME or HACK comments found. Nice and tidy.";
+    const hint = state.info.emptyScanHint || "No TODO, FIXME or HACK comments found. Nice and tidy.";
     return `${head}<div class="card">${emptyState("check", "Inbox zero", hint)}</div>`;
   }
   const tracked = new Set(state.notes.map((n) => (typeof n.meta.source === "string" ? n.meta.source : "")).filter(Boolean));
