@@ -128,9 +128,9 @@ If the same note was changed somewhere else, Cairn shows the newer version and k
 (*Use my version*, *Copy my text* or *Keep the newer one*). Failed saves (offline, expired sign-in) keep your text
 the same way. Repos you can't push to stay read-only.
 
-One-click **Continue with GitHub** (device flow, no token to copy) needs a tiny Cloudflare Worker because GitHub's
-OAuth endpoints don't allow browser calls. It holds no secret and forwards only those two requests:
-see [`worker/README.md`](worker/README.md).
+Or click **Continue with GitHub**: approve on github.com with a short code, no token to copy. GitHub's OAuth
+endpoints don't allow browser calls, so this goes through a tiny Cloudflare Worker that holds no secret and
+forwards only those two requests: see [`worker/README.md`](worker/README.md).
 
 ### Command line
 

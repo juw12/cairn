@@ -12,4 +12,4 @@ device-flow button that turns on once the Worker from [[0004-sign-in-through-a-t
 - [x] Create, edit, move and delete notes as commits through the GitHub Contents API
 - [x] Conflicts and failed saves keep your text next to the newer version
 - [x] Create a new brain repo from People
-- [ ] Deploy the Worker and set `<meta name="cairn-auth">`
+- [x] Deploy the Worker and set `<meta name="cairn-auth">` (one-click Continue with GitHub)

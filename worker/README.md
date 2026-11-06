@@ -8,6 +8,9 @@ device flow has no CORS). It holds **no secret**: the device flow only needs a p
 It stores nothing and logs nothing. It does see the token in the one response it relays back to
 the browser, so only deploy it on an account you control.
 
+**Live for juw12.github.io:** `https://cairn-auth.juwenmondial.workers.dev`, using the "Cairn" OAuth App
+(Client ID `Ov23liZGOkKszTJypcel`, set in `wrangler.toml`). Redeploy with `npx wrangler deploy` from this folder.
+
 ## Setup (about 10 minutes, free)
 
 1. **GitHub OAuth App**: github.com → Settings → Developer settings → OAuth Apps → New OAuth App.

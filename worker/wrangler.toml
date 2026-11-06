@@ -3,5 +3,6 @@ main = "cairn-auth.js"
 compatibility_date = "2025-01-01"
 
 [vars]
-# Set GITHUB_CLIENT_ID in the dashboard (or here). It is public, not a secret.
+# The Client ID of the "Cairn" GitHub OAuth App (Device Flow enabled). Public, not a secret.
+GITHUB_CLIENT_ID = "Ov23liZGOkKszTJypcel"
 ALLOWED_ORIGINS = "https://juw12.github.io"
