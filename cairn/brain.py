@@ -65,7 +65,19 @@ def find_brain_dir(root: Path, explicit: str | None = None) -> Path:
         candidate = root / name
         if candidate.is_dir():
             return candidate.resolve()
+    if is_vault(root):
+        return root.resolve()
     return (root / "brain").resolve()
+
+
+def is_vault(root: Path) -> bool:
+    """An Obsidian vault is opened as it is: the whole folder is the brain."""
+    return (root / ".obsidian").is_dir()
+
+
+def _read_text(path: Path) -> str:
+    # Keep line endings exactly as they are on disk (CRLF notes from Windows editors stay CRLF).
+    return path.read_bytes().decode("utf-8")
 
 
 def _mtime_ms(path: Path) -> int:
@@ -92,7 +104,7 @@ class Brain:
                 target.mkdir(parents=True)
                 created.append(f"{folder}/")
         readme = self.dir / "README.md"
-        if not readme.exists():
+        if not readme.exists() and not is_vault(self.dir):
             readme.write_text(BRAIN_README, encoding="utf-8")
             created.append("README.md")
         return created
@@ -129,7 +141,7 @@ class Brain:
                     continue
                 path = Path(current) / name
                 try:
-                    text = path.read_text(encoding="utf-8")
+                    text = _read_text(path)
                 except (OSError, UnicodeDecodeError):
                     continue
                 out.append({"path": self.relative(path), "text": text, "mtime": _mtime_ms(path)})
@@ -144,7 +156,7 @@ class Brain:
 
     def read(self, relative: str) -> dict:
         path = self.resolve(relative)
-        return {"path": relative, "text": path.read_text(encoding="utf-8"), "mtime": _mtime_ms(path)}
+        return {"path": relative, "text": _read_text(path), "mtime": _mtime_ms(path)}
 
     def write(self, relative: str, text: str, expected_mtime: int | None = None) -> int:
         """Write a note. `expected_mtime=None` means "create": it fails if the file exists."""
@@ -152,12 +164,13 @@ class Brain:
         if path.exists():
             current = _mtime_ms(path)
             if expected_mtime is None or int(expected_mtime) != current:
-                raise ConflictError(path.read_text(encoding="utf-8"), current)
+                raise ConflictError(_read_text(path), current)
         elif expected_mtime is not None:
             raise ConflictError(None, 0)
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_name(path.name + ".cairn-tmp")
-        temp.write_text(text.replace("\r\n", "\n"), encoding="utf-8", newline="\n")
+        # Written byte-for-byte: the client already chose the note's line endings.
+        temp.write_bytes(text.encode("utf-8"))
         os.replace(temp, path)
         return _mtime_ms(path)
 

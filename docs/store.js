@@ -149,7 +149,9 @@ export class FolderStore {
       // Opening the brain folder itself also works.
       const names = [];
       for await (const [name] of this.root.entries()) names.push(name);
-      const isBrain = ["ideas", "tasks", "decisions"].some((n) => names.includes(n)) && !names.includes("brain");
+      // So does an Obsidian vault: the whole vault is the brain.
+      const isVault = names.includes(".obsidian") && !names.includes("brain");
+      const isBrain = isVault || (["ideas", "tasks", "decisions"].some((n) => names.includes(n)) && !names.includes("brain"));
       this.brain = isBrain ? this.root : await this.root.getDirectoryHandle("brain", { create: true });
     }
     return this.brain;
@@ -316,7 +318,7 @@ export class GitHubStore {
   // Writable only when you are signed in AND GitHub says you may push to the repo.
   constructor(repo, loaded, { writable = false } = {}) {
     this.repo = repo;
-    this.root = loaded.root || "brain/";
+    this.root = loaded.root ?? "brain/";
     this.files = loaded.files || [];
     this.writable = Boolean(writable);
     // The sha of the version we last saw for each file: GitHub refuses a save based on an older one.

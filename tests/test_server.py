@@ -107,5 +107,37 @@ class ServerTests(unittest.TestCase):
         self.assertIn("src/app.py", git("status", "--porcelain").stdout)
 
 
+class VaultFolderTests(unittest.TestCase):
+    """An Obsidian vault opens as it is: no brain/ folder, CRLF kept, .obsidian ignored, nothing added."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / ".obsidian").mkdir()
+        (self.tmp / ".obsidian" / "workspace.md").write_text("not a note", encoding="utf-8")
+        (self.tmp / "Projects").mkdir()
+        self.crlf = "---\r\nstatus: active\r\n---\r\nSee [[Home]]\r\n"
+        (self.tmp / "Projects" / "Alpha.md").write_bytes(self.crlf.encode("utf-8"))
+        (self.tmp / "Home.md").write_bytes(b"# Home\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_vault_root_is_the_brain(self):
+        brain = Brain(self.tmp)
+        self.assertEqual(brain.dir, self.tmp.resolve())
+        paths = [f["path"] for f in brain.files()]
+        self.assertEqual(paths, ["Home.md", "Projects/Alpha.md"])
+        self.assertEqual(brain.read("Projects/Alpha.md")["text"], self.crlf)
+        brain.init()
+        self.assertFalse((self.tmp / "README.md").exists())
+
+    def test_writes_keep_line_endings_byte_for_byte(self):
+        brain = Brain(self.tmp)
+        current = brain.read("Projects/Alpha.md")
+        updated = self.crlf.replace("active", "done")
+        brain.write("Projects/Alpha.md", updated, current["mtime"])
+        self.assertEqual((self.tmp / "Projects" / "Alpha.md").read_bytes(), updated.encode("utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

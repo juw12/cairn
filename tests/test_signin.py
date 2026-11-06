@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from webserver import CORS, OTHER_TOKEN, VALID_TOKEN, install_github_mock, launch_browser, start_static_server  # noqa: E402
+from webserver import CORS, MOCK_REPO, OTHER_TOKEN, VALID_TOKEN, install_github_mock, launch_browser, start_static_server  # noqa: E402
 
 try:
     from playwright.sync_api import sync_playwright
@@ -317,6 +317,35 @@ class SignInTests(unittest.TestCase):
         page.wait_for_function("() => window.cairn?.state?.info && !window.cairn.state.info.readOnly", timeout=15000)
         self.assertGreaterEqual(polls["count"], 2)
         self.assertEqual(json.loads(self.storage(page)["session"])["method"], "device")
+        self.assertEqual(self.errors, [])
+
+    # ------------------------------------------------------------------ Obsidian vault repo (no brain/ folder)
+
+    def test_obsidian_vault_repo_opens_at_root_and_edits_stay_lossless(self):
+        page = self.open("?u=juw12", session=session_json(), wait="#view")
+        home = "---\r\ntags:\r\n  - hub\r\nstatus: active\r\n---\r\n# Home\r\nSee [[Projects/Alpha|alpha]].\r\n"
+        self.mock.repos["juw12/vault"] = {
+            "meta": dict(MOCK_REPO, name="vault", full_name="juw12/vault", html_url="https://github.com/juw12/vault", topics=[]),
+            "files": {
+                ".obsidian/app.json": "{}",
+                ".trash/old.md": "# Old\n",
+                "Home.md": home,
+                "Projects/Alpha.md": "# Alpha\nBack to [[Home]].\n",
+            },
+        }
+        page.goto(self.url + "?brain=juw12/vault")
+        page.wait_for_function("() => window.cairn?.state?.info?.repoName === 'vault' && window.cairn.state.files.length === 2")
+        paths = page.evaluate("window.cairn.state.files.map((f) => f.path).sort()")
+        self.assertEqual(paths, ["Home.md", "Projects/Alpha.md"])
+        edges = page.evaluate("window.cairn.core.buildGraph(window.cairn.state.notes).edges.length")
+        self.assertEqual(edges, 1)
+        page.evaluate("""async () => {
+            const { saveNote } = await import('./state.js');
+            await saveNote('Home.md', { status: 'done' });
+        }""")
+        page.wait_for_function("() => window.cairn.state.files.find((f) => f.path === 'Home.md').text.includes('status: done')")
+        self.assertEqual(self.mock.text("juw12/vault", "Home.md"), home.replace("status: active", "status: done"))
+        self.assertNotIn("brain/Home.md", self.mock.repos["juw12/vault"]["files"])
         self.assertEqual(self.errors, [])
 
 

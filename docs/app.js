@@ -8,7 +8,7 @@ import * as auth from "./auth.js";
 import { $, LOGO, SPARKS, TYPE_META, ask, icon, plural, toast, today } from "./ui.js";
 import { GUIDE_KEY, LAST_BRAIN_KEY, REPO_URL, VIEWS, createNote, deleteNote, guide, loadAll, markGuide, noteByPath, readOnly, refreshGit, refreshTodos, state } from "./state.js";
 import { board, codeView, contextView, decisions, home, ideas, journal, moveNote, notesView, wireBoard } from "./views.js";
-import { mapView, wireMap } from "./map.js";
+import { mapView, resetMap, wireMap } from "./map.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { addSpark, closeDrawer, flushPending, openNote, promote, renderDrawer, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openToday, saveContext, switchBrain, todoToTask, toggleTheme } from "./actions.js";
@@ -99,15 +99,26 @@ export function setView(view, { push = true } = {}) {
 export function renderView() {
   const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView, people: peopleView };
   const view = $("#view");
-  // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing.
+  // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
+  // in any field of the view, and keep it focused.
   const typing = $("#people-query");
-  const hadFocus = typing && document.activeElement === typing;
   if (typing) state.peopleQuery = typing.value;
+  const active = document.activeElement;
+  const kept = active && view.contains(active) && active.id && /^(INPUT|TEXTAREA)$/.test(active.tagName)
+    ? { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd }
+    : null;
   view.innerHTML = readOnlyBanner() + (renderers[state.view] || home)();
-  if (hadFocus) {
-    const restored = $("#people-query");
-    restored?.focus();
-    restored?.setSelectionRange(restored.value.length, restored.value.length);
+  if (kept) {
+    const restored = document.getElementById(kept.id);
+    if (restored) {
+      restored.value = kept.value;
+      restored.focus();
+      try {
+        restored.setSelectionRange(kept.start ?? kept.value.length, kept.end ?? kept.value.length);
+      } catch {
+        /* some input types have no selection */
+      }
+    }
   }
   afterRender();
 }
@@ -201,7 +212,7 @@ function wireGlobal() {
       "save-context": saveContext,
       commit: commitBrain,
       "switch-brain": switchBrain,
-      "map-reset": () => renderView(),
+      "map-reset": () => resetMap(),
       "open-brain": () => openBrain(actionEl.dataset.repo),
       "sign-in": openSignIn,
       "sign-out": () => {

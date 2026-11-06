@@ -132,6 +132,25 @@ Or click **Continue with GitHub**: approve on github.com with a short code, no t
 endpoints don't allow browser calls, so this goes through a tiny Cloudflare Worker that holds no secret and
 forwards only those two requests: see [`worker/README.md`](worker/README.md).
 
+### Use it with your Obsidian vault
+
+Cairn opens an Obsidian vault as it is: no import, no copy, no `brain/` folder needed. A folder with
+`.obsidian/` in it (or a GitHub repo of notes) is used directly, `.obsidian/`, `.trash/` and other
+hidden folders are skipped, and links resolve the way Obsidian resolves them: `[[folder/note|alias]]`,
+`[[note#heading]]`, `![[embeds]]`, `[text](note.md)` and wiki links in properties.
+
+- **On this computer:** `python -m cairn --root "path/to/your vault" serve`, or *Choose a folder* in the browser.
+- **On any device:** keep the vault in a GitHub repo (the Obsidian Git plugin can push and pull it),
+  sign in and open `you/your-vault`.
+
+Edits only change what you changed: properties keep their order, comments and list style, and files
+keep their line endings, so Obsidian and git see clean one-line diffs.
+
+The Map goes further than Obsidian's graph: filters, colour by type, folder, cluster or tag, local maps
+of depth 1 to 3, the shortest path between two notes, keyboard navigation (arrow keys walk the links,
+Enter opens, L for local), hubs, orphans and islands at a glance, and *suggested links*: notes that
+mention another note's title without linking it, linked in one click.
+
 ### Command line
 
 ```bash

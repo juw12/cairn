@@ -103,13 +103,15 @@ export function saveNote(path, changes) {
   const run = async () => {
     const note = noteByPath(path);
     if (!note) return null;
-    const meta = { ...note.meta };
-    if (changes.title !== undefined) meta.title = changes.title;
-    if (changes.status !== undefined) meta.status = changes.status;
-    if (changes.tags !== undefined) meta.tags = changes.tags;
-    const body = changes.body !== undefined ? changes.body : note.body;
-    const text = core.serializeNote(meta, body);
-    if (text === fileByPath(path)?.text) return noteByPath(path);
+    // Only properties that really changed are written, and everything else in the file keeps its exact
+    // bytes (order, comments, list style, CRLF), so notes from Obsidian or any editor stay as they were.
+    const properties = {};
+    if (changes.title !== undefined && changes.title !== note.title) properties.title = changes.title;
+    if (changes.status !== undefined && changes.status !== note.status) properties.status = changes.status;
+    if (changes.tags !== undefined && JSON.stringify(changes.tags) !== JSON.stringify(note.tags)) properties.tags = changes.tags;
+    const original = fileByPath(path)?.text ?? "";
+    const text = core.updateNoteText(original, properties, changes.body);
+    if (text === original) return noteByPath(path);
     try {
       const { mtime } = await state.store.write(path, text, note.mtime);
       upsertFile(path, text, mtime);
