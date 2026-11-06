@@ -9,6 +9,7 @@ import { $, LOGO, SPARKS, TYPE_META, ask, icon, plural, toast, today } from "./u
 import { GUIDE_KEY, LAST_BRAIN_KEY, REPO_URL, VIEWS, createNote, deleteNote, guide, loadAll, markGuide, noteByPath, readOnly, refreshGit, refreshTodos, state } from "./state.js";
 import { board, codeView, contextView, decisions, home, ideas, journal, moveNote, notesView, wireBoard } from "./views.js";
 import { mapView, wireMap } from "./map.js";
+import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { addSpark, closeDrawer, flushPending, openNote, promote, renderDrawer, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openToday, saveContext, switchBrain, todoToTask, toggleTheme } from "./actions.js";
@@ -34,6 +35,7 @@ function counts() {
     map: "",
     code: state.todos ? state.todos.length : "",
     context: "",
+    obsidian: "",
     people: "",
   };
 }
@@ -97,7 +99,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView, people: peopleView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView, obsidian: obsidianView, people: peopleView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing.
   const typing = $("#people-query");
@@ -158,7 +160,7 @@ function wireGlobal() {
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
-    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random"];
+    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink"];
     if (readOnly() && mutating.includes(action)) {
       toast("This brain is read-only. Ask to join to contribute.");
       return;
@@ -201,7 +203,8 @@ function wireGlobal() {
       "save-context": saveContext,
       commit: commitBrain,
       "switch-brain": switchBrain,
-      "map-reset": () => renderView(),
+      "obsidian-sync": () => syncObsidian(),
+      "obsidian-unlink": unlinkObsidian,
       "open-brain": () => openBrain(actionEl.dataset.repo),
       "sign-in": openSignIn,
       "sign-out": () => {
@@ -241,6 +244,7 @@ function wireGlobal() {
   document.addEventListener("change", (event) => {
     const move = event.target.closest("[data-move]");
     if (move) moveNote(move.dataset.move, move.value);
+    if (event.target.matches("[data-obsidian-auto]")) toggleAutoSync(event.target.checked);
   });
 
   document.addEventListener("input", (event) => {
@@ -258,6 +262,10 @@ function wireGlobal() {
     if (event.target.id === "people-form") {
       event.preventDefault();
       return lookupProfile(event.target.query.value);
+    }
+    if (event.target.id === "obsidian-form") {
+      event.preventDefault();
+      return linkObsidian(event.target);
     }
     if (event.target.id === "create-brain-form") {
       event.preventDefault();
@@ -377,6 +385,7 @@ export async function start(store) {
   setView(location.hash.replace("#/", "") || "home", { push: false });
   refreshTodos();
   refreshGit();
+  initObsidian();
 }
 
 async function boot() {

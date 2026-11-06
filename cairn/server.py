@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__
 from .brain import Brain, ConflictError, PathError
+from .obsidian import ObsidianSync, SyncError
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_CANDIDATES = [PACKAGE_DIR / "web", PACKAGE_DIR.parent / "docs"]
@@ -99,6 +100,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"items": brain.scan_code()})
             elif route == "/api/git":
                 self._send_json(brain.git_status())
+            elif route == "/api/obsidian":
+                self._send_json(self.obsidian.status())
             else:
                 self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
             return
@@ -137,6 +140,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "/api/init":
             return self._send_json({"created": self.brain.init()})
+        if route.startswith("/api/obsidian/"):
+            return self._obsidian(route.rsplit("/", 1)[-1])
         if route == "/api/git/commit":
             try:
                 body = self._body()
@@ -144,6 +149,26 @@ class Handler(BaseHTTPRequestHandler):
             except (RuntimeError, ValueError) as error:
                 return self._error(HTTPStatus.BAD_REQUEST, str(error))
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+
+    def _obsidian(self, action: str):
+        sync = self.obsidian
+        try:
+            with self.sync_lock:
+                if action == "link":
+                    body = self._body()
+                    sync.link(str(body.get("vault", "")), body.get("folder"))
+                    report = sync.sync()
+                elif action == "sync":
+                    report = sync.sync()
+                elif action == "unlink":
+                    return self._send_json({"status": sync.unlink(), "report": None})
+                else:
+                    return self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+            self._send_json({"status": sync.status(), "report": report})
+        except SyncError as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
+        except (ValueError, TypeError, OSError) as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
 
     def _serve_static(self, route: str):
         if not self._host_ok():
@@ -173,6 +198,8 @@ def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1") -> Thre
         raise ValueError("Cairn only listens on localhost")
     handler = type("CairnHandler", (Handler,), {})
     handler.brain = brain
+    handler.obsidian = ObsidianSync(brain)
+    handler.sync_lock = threading.Lock()
     handler.web_dir = find_web_dir().resolve()
     server = ThreadingHTTPServer((host, port), handler)
     actual_port = server.server_address[1]

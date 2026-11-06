@@ -98,7 +98,7 @@ const SKIP_DIRS = new Set([
 ]);
 const CODE_EXT = /\.(py|m?js|cjs|tsx?|jsx|java|kt|go|rs|c|h|cpp|hpp|cs|rb|php|swift|sh|ps1|lua|sql|html|css|scss|vue|svelte|ya?ml|toml|f90|dart)$/i;
 
-function idb(action) {
+export function idb(action) {
   return new Promise((resolve, reject) => {
     const open = indexedDB.open("cairn", 1);
     open.onupgradeneeded = () => open.result.createObjectStore("handles");

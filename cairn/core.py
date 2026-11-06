@@ -55,6 +55,7 @@ _TODO_RE = re.compile(
     r"(?:#|//|/\*|<!--|--|;|\*)\s*(TODO|FIXME|HACK|XXX)\b(?:\([^)]*\))?[\s:\-]*(.*)$"
 )
 _CAPTURE_RE = re.compile(r"^([A-Za-z]+):\s*(.*)$", re.S)
+_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 # ---------------------------------------------------------------- frontmatter
@@ -255,6 +256,9 @@ def note_from_file(path: str, text: str, mtime: int = 0) -> dict:
     meta, body = parsed["meta"], parsed["body"]
     folder = path.split("/")[0] if "/" in path else ""
     folder_type = next((t for t, f in FOLDERS.items() if f == folder), "note")
+    file_name = path.rsplit("/", 1)[-1][:-3]
+    if folder_type == "note" and _DAY_RE.match(file_name):
+        folder_type = "journal"  # Obsidian-style daily notes (2026-11-05.md) anywhere in the brain
     note_type = meta.get("type") if isinstance(meta.get("type"), str) and meta.get("type") in TYPES else folder_type
     title = meta.get("title") if isinstance(meta.get("title"), str) else ""
     if not title:
@@ -281,20 +285,34 @@ def note_from_file(path: str, text: str, mtime: int = 0) -> dict:
     }
 
 
+def link_slug(raw: str) -> str:
+    """`[[Folder/My Note.md#Heading|alias]]` -> `my-note`: how Obsidian, Foam and Cairn resolve a link."""
+    target = raw.split("|")[0].split("#")[0].strip().rstrip("\\")
+    target = target.replace("\\", "/").split("/")[-1]
+    if target.lower().endswith(".md"):
+        target = target[:-3]
+    return slugify(target)
+
+
 def extract_links(body: str) -> list[str]:
     links = []
     for raw in _LINK_RE.findall(body):
-        target = slugify(raw.split("|")[0].split("#")[0])
+        target = link_slug(raw)
         if target not in links:
             links.append(target)
     return links
 
 
+def _names(note: dict) -> list[str]:
+    """Every name a link can use for this note: file name as is, file name slugified, title slugified."""
+    return [note["slug"], slugify(note["slug"]), slugify(note["title"])]
+
+
 def build_graph(notes: list[dict]) -> dict:
     by_slug = {}
     for note in notes:
-        by_slug.setdefault(note["slug"], note["path"])
-        by_slug.setdefault(slugify(note["title"]), note["path"])
+        for name in _names(note):
+            by_slug.setdefault(name, note["path"])
     nodes = [{"id": n["path"], "title": n["title"], "type": n["type"]} for n in notes]
     edges = []
     seen = set()
@@ -315,8 +333,43 @@ def backlinks(notes: list[dict], path: str) -> list[str]:
     target = next((n for n in notes if n["path"] == path), None)
     if not target:
         return []
-    names = {target["slug"], slugify(target["title"])}
+    names = set(_names(target))
     return [n["path"] for n in notes if n["path"] != path and names.intersection(extract_links(n["body"]))]
+
+
+# ---------------------------------------------------------------- folder sync (Obsidian)
+
+
+def plan_sync(vault: dict, brain: dict, manifest: dict) -> list[dict]:
+    """Two-way sync plan between a vault folder and a brain folder.
+
+    vault / brain: {relative path: {"hash": str, "mtime": int}}; manifest: {path: hash both sides had at the
+    last sync}. Returns [{path, op[, keep]}] sorted by path, where op is pull (vault -> brain), push
+    (brain -> vault), delete-brain, delete-vault or conflict (keep = the newer side). An edit always wins over
+    a delete, so nothing written on either side is lost.
+    """
+    plan = []
+    for path in sorted(set(vault) | set(brain)):
+        v, b, m = vault.get(path), brain.get(path), manifest.get(path)
+        vh = v["hash"] if v else None
+        bh = b["hash"] if b else None
+        if vh == bh:
+            continue
+        if m is None:
+            op = "pull" if v and not b else "push" if b and not v else "conflict"
+        else:
+            vault_changed, brain_changed = vh != m, bh != m
+            if vault_changed and not brain_changed:
+                op = "pull" if v else "delete-brain"
+            elif brain_changed and not vault_changed:
+                op = "push" if b else "delete-vault"
+            else:
+                op = "push" if not v else "pull" if not b else "conflict"
+        step = {"path": path, "op": op}
+        if op == "conflict":
+            step["keep"] = "brain" if b["mtime"] > v["mtime"] else "vault"
+        plan.append(step)
+    return plan
 
 
 # ---------------------------------------------------------------- code inbox

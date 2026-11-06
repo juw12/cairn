@@ -5,6 +5,7 @@ import { $, TYPE_META, byRecent, icon } from "./ui.js";
 import { VIEWS, refreshTodos, state } from "./state.js";
 import { openNote } from "./drawer.js";
 import { capture, commitBrain, newNote, openToday, saveContext, switchBrain, toggleTheme } from "./actions.js";
+import { syncObsidian } from "./obsidian.js";
 import { setView } from "./app.js";
 
 function commands() {
@@ -21,6 +22,7 @@ function commands() {
     { label: "Switch brain", kind: "App", icon: "folder", run: switchBrain },
   );
   if (state.info?.canGit) list.push({ label: "Commit brain", kind: "Project", icon: "git", run: commitBrain });
+  if (state.obsidian?.status?.linked) list.push({ label: "Sync with Obsidian now", kind: "Project", icon: "vault", run: () => syncObsidian() });
   return list;
 }
 

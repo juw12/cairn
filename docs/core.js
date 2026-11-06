@@ -45,6 +45,7 @@ const TAG_RE = /(^|\s)#([A-Za-z0-9][A-Za-z0-9_/-]*)/g;
 const LINK_RE = /\[\[([^\]\n]+)\]\]/g;
 const TODO_RE = /(?:#|\/\/|\/\*|<!--|--|;|\*)\s*(TODO|FIXME|HACK|XXX)\b(?:\([^)]*\))?[\s:\-]*(.*)$/;
 const CAPTURE_RE = /^([A-Za-z]+):\s*([\s\S]*)$/;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // ------------------------------------------------------------ frontmatter
 
@@ -235,10 +236,12 @@ export function parseCapture(text) {
 export function noteFromFile(path, text, mtime = 0) {
   const { meta, body } = parseNote(text);
   const folder = path.includes("/") ? path.split("/")[0] : "";
-  const folderType = Object.keys(FOLDERS).find((t) => FOLDERS[t] === folder) || "note";
+  let folderType = Object.keys(FOLDERS).find((t) => FOLDERS[t] === folder) || "note";
+  const fileName = path.split("/").pop().slice(0, -3);
+  // Obsidian-style daily notes (2026-11-05.md) anywhere in the brain
+  if (folderType === "note" && DAY_RE.test(fileName)) folderType = "journal";
   const type = typeof meta.type === "string" && TYPES.includes(meta.type) ? meta.type : folderType;
   let title = typeof meta.title === "string" ? meta.title : "";
-  const fileName = path.split("/").pop().slice(0, -3);
   if (!title) {
     const heading = /^#\s+(.+)$/m.exec(body);
     title = heading ? heading[1].trim() : fileName;
@@ -251,21 +254,32 @@ export function noteFromFile(path, text, mtime = 0) {
   return { path, slug: fileName, type, title, status, tags, meta, body, mtime };
 }
 
+// `[[Folder/My Note.md#Heading|alias]]` -> `my-note`: how Obsidian, Foam and Cairn resolve a link.
+export function linkSlug(raw) {
+  let target = raw.split("|")[0].split("#")[0].trim().replace(/\\+$/, "");
+  target = target.replaceAll("\\", "/").split("/").pop();
+  if (target.toLowerCase().endsWith(".md")) target = target.slice(0, -3);
+  return slugify(target);
+}
+
 export function extractLinks(body) {
   const links = [];
   for (const match of body.matchAll(LINK_RE)) {
-    const target = slugify(match[1].split("|")[0].split("#")[0]);
+    const target = linkSlug(match[1]);
     if (!links.includes(target)) links.push(target);
   }
   return links;
 }
 
+// Every name a link can use for this note: file name as is, file name slugified, title slugified.
+export function noteNames(note) {
+  return [note.slug, slugify(note.slug), slugify(note.title)];
+}
+
 export function buildGraph(notes) {
   const bySlug = new Map();
   for (const note of notes) {
-    if (!bySlug.has(note.slug)) bySlug.set(note.slug, note.path);
-    const titleSlug = slugify(note.title);
-    if (!bySlug.has(titleSlug)) bySlug.set(titleSlug, note.path);
+    for (const name of noteNames(note)) if (!bySlug.has(name)) bySlug.set(name, note.path);
   }
   const nodes = notes.map((n) => ({ id: n.path, title: n.title, type: n.type }));
   const edges = [];
@@ -284,17 +298,54 @@ export function buildGraph(notes) {
 }
 
 export function resolveLink(notes, target) {
-  const slug = slugify(target);
-  return notes.find((n) => n.slug === slug) || notes.find((n) => slugify(n.title) === slug) || null;
+  const slug = linkSlug(target);
+  return (
+    notes.find((n) => n.slug === slug) ||
+    notes.find((n) => slugify(n.slug) === slug) ||
+    notes.find((n) => slugify(n.title) === slug) ||
+    null
+  );
 }
 
 export function backlinks(notes, path) {
   const target = notes.find((n) => n.path === path);
   if (!target) return [];
-  const names = new Set([target.slug, slugify(target.title)]);
+  const names = new Set(noteNames(target));
   return notes
     .filter((n) => n.path !== path && extractLinks(n.body).some((link) => names.has(link)))
     .map((n) => n.path);
+}
+
+// ------------------------------------------------------------ folder sync (Obsidian)
+
+// Two-way sync plan between a vault folder and a brain folder. Same rules as plan_sync in core.py:
+// vault / brain: { path: { hash, mtime } }; manifest: { path: hash both sides had at the last sync }.
+// Returns [{ path, op[, keep] }]; an edit always wins over a delete, so nothing written is lost.
+export function planSync(vault, brain, manifest) {
+  const plan = [];
+  const paths = [...new Set([...Object.keys(vault), ...Object.keys(brain)])].sort();
+  for (const path of paths) {
+    const v = vault[path] || null;
+    const b = brain[path] || null;
+    const m = Object.prototype.hasOwnProperty.call(manifest, path) ? manifest[path] : null;
+    const vh = v ? v.hash : null;
+    const bh = b ? b.hash : null;
+    if (vh === bh) continue;
+    let op;
+    if (m === null) {
+      op = v && !b ? "pull" : b && !v ? "push" : "conflict";
+    } else {
+      const vaultChanged = vh !== m;
+      const brainChanged = bh !== m;
+      if (vaultChanged && !brainChanged) op = v ? "pull" : "delete-brain";
+      else if (brainChanged && !vaultChanged) op = b ? "push" : "delete-vault";
+      else op = !v ? "push" : !b ? "pull" : "conflict";
+    }
+    const step = { path, op };
+    if (op === "conflict") step.keep = b.mtime > v.mtime ? "brain" : "vault";
+    plan.push(step);
+  }
+  return plan;
 }
 
 // ------------------------------------------------------------ code inbox

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+import time
 
 from . import __version__, core
 from .brain import Brain
@@ -72,6 +73,59 @@ def cmd_context(brain: Brain, args) -> int:
     return 0
 
 
+def _print_report(report: dict) -> None:
+    labels = [
+        ("pulled", "from Obsidian"),
+        ("pushed", "to Obsidian"),
+        ("deletedInBrain", "moved to brain/.cairn/trash (deleted in Obsidian)"),
+        ("deletedInVault", "moved to the vault's .trash (deleted in Cairn)"),
+    ]
+    for key, label in labels:
+        for path in report.get(key, []):
+            print(f"  {label}: {path}")
+    for conflict in report.get("conflicts", []):
+        print(f"  conflict: {conflict['path']} (kept the {conflict['kept']} version; other one in {conflict['copy']})")
+
+
+def cmd_obsidian(brain: Brain, args) -> int:
+    from .obsidian import ObsidianSync, SyncError
+
+    sync = ObsidianSync(brain)
+    try:
+        if args.unlink:
+            sync.unlink()
+            print("Unlinked. Notes already synced stay where they are.")
+            return 0
+        if args.vault:
+            brain.init()
+            status = sync.link(args.vault, args.folder)
+            print(f"Linked {status['vault']} <-> {brain.dir / status['folder']}")
+        status = sync.status()
+        if not status["linked"]:
+            print("No vault linked. Example: cairn obsidian ~/Documents/MyVault", file=sys.stderr)
+            return 2
+        while True:
+            report = sync.sync(_today(), dry_run=args.dry_run)
+            if args.dry_run:
+                for step in report["plan"]:
+                    print(f"  would {step['op']}: {step['path']}")
+                print(f"{len(report['plan'])} change(s) planned, nothing written")
+                return 0
+            if report["changes"] or not args.watch:
+                stamp = dt.datetime.now().strftime("%H:%M:%S")
+                print(f"[{stamp}] synced: {report['changes']} change(s)")
+                _print_report(report)
+            if not args.watch:
+                return 0
+            time.sleep(max(args.watch, 2))
+    except SyncError as error:
+        print(f"Sync stopped: {error}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        return 0
+
+
 def cmd_serve(brain: Brain, args) -> int:
     from .server import serve
 
@@ -103,6 +157,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("todos", help="list TODO/FIXME comments in the code")
     context_parser = sub.add_parser("context", help="write brain/CONTEXT.md for teammates and AI assistants")
     context_parser.add_argument("--stdout", action="store_true", help="print instead of writing the file")
+    obsidian_parser = sub.add_parser(
+        "obsidian",
+        help="import an Obsidian vault and keep it in sync both ways",
+        description="Mirror an Obsidian vault into brain/<folder>/ and keep both in sync. The first run imports "
+        "everything; later runs copy whatever changed on either side. Deletes go to a trash folder, never away.",
+    )
+    obsidian_parser.add_argument("vault", nargs="?", help="vault folder (only needed the first time)")
+    obsidian_parser.add_argument("--folder", default="obsidian", help="folder inside the brain (default: obsidian; '' = whole brain)")
+    obsidian_parser.add_argument("--watch", type=float, default=0, metavar="SECONDS", help="keep syncing every N seconds")
+    obsidian_parser.add_argument("--dry-run", action="store_true", help="show what would change")
+    obsidian_parser.add_argument("--unlink", action="store_true", help="stop syncing (keeps the notes)")
     return parser
 
 
@@ -118,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         "list": cmd_list,
         "todos": cmd_todos,
         "context": cmd_context,
+        "obsidian": cmd_obsidian,
         "serve": cmd_serve,
         None: cmd_serve,
     }

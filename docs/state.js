@@ -16,6 +16,7 @@ export const VIEWS = [
   { id: "map", label: "Map", icon: "map", group: "Remember" },
   { id: "code", label: "Code inbox", icon: "code", group: "Project" },
   { id: "context", label: "Context pack", icon: "sparkle", group: "Project" },
+  { id: "obsidian", label: "Obsidian sync", icon: "vault", group: "Project" },
   { id: "people", label: "People", icon: "users", group: "Network" },
 ];
 
@@ -43,6 +44,7 @@ export const state = {
   peopleQuery: "",
   profile: null,
   discover: null,
+  obsidian: null,
 };
 
 export const readOnly = () => Boolean(state.info?.readOnly);
