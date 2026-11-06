@@ -151,8 +151,8 @@ class DesktopApiTests(unittest.TestCase):
         (self.second / ".obsidian").mkdir()
         (self.second / "hello.md").write_text("# Hello\n", encoding="utf-8")
         self.documents = self.tmp / "Documents"
-        for name, value in (("documents_dir", self.documents), ("obsidian_vaults", [])):
-            patcher = mock.patch.object(desktop, name, return_value=value)
+        for name, value in (("documents_dir", self.documents), ("obsidian_vaults", []), ("log", None)):
+            patcher = mock.patch.object(desktop, name, return_value=value)  # never touch the real app's files
             patcher.start()
             self.addCleanup(patcher.stop)
 
