@@ -310,6 +310,149 @@ class StartMenuShortcutTests(unittest.TestCase):
         self.assertIn("could not tag", log.call_args.args[0])
 
 
+class NetworkRouteTests(unittest.TestCase):
+    """Sync keeps working when one way out of an office network stalls."""
+
+    URL = "https://github.com/you/vault.git"
+
+    def setUp(self):
+        from cairn import brain as brain_module
+
+        self.brain = brain_module
+        self.brain._last_route.clear()
+        self.addCleanup(self.brain._last_route.clear)
+        patcher = mock.patch.object(self.brain, "_windows_system_proxy", return_value=["proxy.corp:80"])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        env = mock.patch.dict(desktop.os.environ, {"HTTPS_PROXY": "http://localhost:3128"}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+
+    @staticmethod
+    def done(code=0, err=""):
+        return subprocess.CompletedProcess([], code, "", err)
+
+    def test_routes_cover_every_proxy_then_direct(self):
+        routes = self.brain.network_routes(self.URL)
+        self.assertEqual([name for name, _ in routes][:1], ["as configured"])
+        names = [name for name, _ in routes]
+        self.assertIn("via proxy.corp:80", names)
+        self.assertIn("via localhost:3128", names)
+        self.assertEqual(names[-1], "direct")
+        flags = dict(routes)["via proxy.corp:80"]
+        self.assertIn("http.https://github.com/.proxy=http://:@proxy.corp:80", flags, "beats a per-host proxy in .gitconfig")
+
+    def test_a_stalled_route_falls_through_to_the_next_and_is_remembered(self):
+        calls = []
+
+        def run(args, cwd, timeout, env=None):
+            calls.append(args)
+            if len(calls) == 1:
+                raise subprocess.TimeoutExpired(args, timeout)
+            if len(calls) == 2:
+                return self.done(128, "fatal: unable to access 'https://github.com/': Recv failure: Connection was reset")
+            return self.done(0)
+
+        with mock.patch.object(self.brain, "_run_git", side_effect=run):
+            result = self.brain.git_over_network(["fetch", "origin"], None, self.URL)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(calls), 3)
+        winner = calls[2]
+        self.assertIn("http.proxy=http://:@localhost:3128", winner)
+        with mock.patch.object(self.brain, "_run_git", return_value=self.done(0)) as again:
+            self.brain.git_over_network(["push"], None, self.URL)
+        self.assertIn("http.proxy=http://:@localhost:3128", again.call_args.args[0], "the route that worked goes first")
+
+    def test_a_real_answer_from_the_server_stops_the_search(self):
+        with mock.patch.object(self.brain, "_run_git", return_value=self.done(128, "remote: Authentication failed")) as run:
+            result = self.brain.git_over_network(["push"], None, self.URL)
+        self.assertEqual(run.call_count, 1)
+        self.assertIn("sign in", self.brain._explain_git_failure(result, "push"))
+
+    def test_every_route_down_reads_as_offline(self):
+        with mock.patch.object(self.brain, "_run_git", return_value=self.done(128, "fatal: unable to access: Could not resolve host")):
+            result = self.brain.git_over_network(["fetch"], None, self.URL)
+        self.assertIn("Couldn't reach the remote", self.brain._explain_git_failure(result, "pull"))
+
+    def test_direct_route_drops_proxy_variables(self):
+        seen = []
+
+        def run(args, cwd, timeout, env=None):
+            seen.append(env)
+            return self.done(128, "fatal: unable to access: proxy CONNECT aborted")
+
+        with mock.patch.object(self.brain, "_run_git", side_effect=run):
+            self.brain.git_over_network(["fetch"], None, self.URL)
+        self.assertIn("HTTPS_PROXY", seen[0])
+        self.assertNotIn("HTTPS_PROXY", seen[-1])
+
+
+class AutoPublishTests(unittest.TestCase):
+    """Public notes go out on their own after a sync, and only when something public changed."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.vault = self.tmp / "vault"
+        self.vault.mkdir()
+        (self.vault / ".obsidian").mkdir()
+        (self.vault / "open.md").write_text("---\ntitle: Open\npublish: true\n---\nShown. See [[secret]].\n", encoding="utf-8")
+        (self.vault / "secret.md").write_text("---\ntitle: Secret\n---\nPrivate.\n", encoding="utf-8")
+        patcher = mock.patch.object(desktop, "log")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.config = desktop.Config(self.tmp / "config.json")
+        self.hooks = desktop.DesktopHooks(self.config)
+        self.server = make_server(Brain(self.vault), port=0, desktop=self.hooks)
+        self.hooks.server = self.server
+        self.addCleanup(self.server.server_close)
+        self.reports = []
+
+        def fake_publish(source, repo, http, today, dry_run=False):
+            self.reports.append((Path(source), repo))
+            return {"repo": repo, "created": False, "write": ["brain/open.md"], "delete": [], "commit": "abc1234def"}
+
+        for name, value in (("publish_to_github", fake_publish), ("find_token", lambda: "t"), ("make_http", lambda token: None)):
+            patcher = mock.patch(f"cairn.publish.{name}", value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_repo_names_are_checked(self):
+        self.assertEqual(desktop.valid_repo(" https://github.com/juw12/brain.git "), "juw12/brain")
+        for bad in ("juw12", "juw12/brain/x", "ju w12/brain", "/brain"):
+            with self.assertRaises(ValueError):
+                desktop.valid_repo(bad)
+
+    def test_auto_publish_only_when_public_notes_change(self):
+        self.assertIsNone(self.hooks.maybe_publish(), "off until a repo is chosen")
+        self.assertEqual(self.hooks.act("publish-settings", {"to": "juw12/brain", "auto": True}), {"publishTo": "juw12/brain", "autoPublish": True})
+        first = self.hooks.maybe_publish()
+        self.assertTrue(first["published"])
+        self.assertEqual(self.reports, [(Brain(self.vault).dir, "juw12/brain")])
+        self.assertEqual(self.hooks.maybe_publish(), {"published": False, "reason": "up to date"})
+        (self.vault / "secret.md").write_text("---\ntitle: Secret\n---\nStill private, edited.\n", encoding="utf-8")
+        self.assertFalse(self.hooks.maybe_publish()["published"], "private edits don't trigger a publish")
+        (self.vault / "open.md").write_text("---\ntitle: Open\npublish: true\n---\nShown, now longer.\n", encoding="utf-8")
+        self.assertTrue(self.hooks.maybe_publish()["published"])
+        self.assertEqual(len(self.reports), 2)
+        state = self.hooks.state()
+        self.assertEqual(state["lastPublish"]["commit"], "abc1234")
+        self.assertTrue(state["autoPublish"])
+
+    def test_publish_now_and_errors_are_reported(self):
+        with self.assertRaises(ValueError):
+            self.hooks.act("publish", {})
+        self.hooks.act("publish-settings", {"to": "juw12/brain", "auto": False})
+        self.assertIsNone(self.hooks.maybe_publish(), "manual only")
+        self.assertTrue(self.hooks.act("publish", {})["published"])
+        from cairn import publish
+
+        with mock.patch("cairn.publish.find_token", side_effect=publish.PublishError("No GitHub token.")):
+            with self.assertRaises(desktop.SyncError):
+                self.hooks.act("publish", {})
+        self.assertIn("No GitHub token", self.hooks.state()["lastPublish"]["error"])
+
+
 def desktop_head(folder):
     return git(folder, "rev-parse", "--short", "HEAD")
 

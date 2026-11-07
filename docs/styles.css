@@ -999,3 +999,18 @@ details.callout[open] > summary::after { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) {
   .tour-hole, .tour-card { transition: none; }
 }
+
+/* Settings: public brain */
+.settings-publish { margin: 16px 0 4px; padding: 14px 0 0; border: 0; border-top: 1px solid var(--line); }
+.settings-publish legend { padding: 0; font-weight: 600; font-size: 13.5px; }
+.settings-publish .field { display: grid; gap: 6px; margin-top: 8px; font-size: 13.5px; }
+.settings-publish input[type="text"] { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+.settings-publish .publish-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+
+/* Maths (KaTeX) and diagrams (Mermaid) */
+.math-block { margin: 14px 0; overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.math-inline.rendered .katex { font-size: 1.05em; }
+pre.math { white-space: pre-wrap; }
+.mermaid-diagram { margin: 14px 0; overflow-x: auto; text-align: center; }
+.mermaid-diagram svg { max-width: 100%; height: auto; }
+[data-rendered="source"] { cursor: help; }

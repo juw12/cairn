@@ -94,7 +94,11 @@ Cairn in its own window. After that, everything happens inside the app:
   ones too; GitHub's own sign-in window appears once), or starts a new brain.
 - **One Sync button.** It saves your edits, gets everyone else's and sends yours (commit + pull + push). It also
   runs on its own every 10 minutes. If two people changed the same lines, nothing is lost: your edits stay
-  committed locally and Cairn tells you.
+  committed locally and Cairn tells you. Behind an office proxy, Sync tries every way out it can find (git's own
+  setting, the Windows proxy, `HTTPS_PROXY`, signing in to the proxy as you) and remembers the one that works.
+- **Your public brain stays current.** In Settings, name your public repo (e.g. `you/brain`) and turn on
+  *Publish automatically*: after each sync, notes marked `publish: true` are published, but only when one of
+  them changed.
 - **Always there.** Closing the window keeps Cairn in the tray and it starts with Windows.
 - **Updates itself, no restarts.** Cairn checks for a new version every 20 minutes. Changes to the app's
   screens are swapped in with a quick reload the moment you pause (your open note stays open); the rarer
@@ -209,8 +213,11 @@ The editor speaks Obsidian-flavoured Markdown, so a vault reads the same in both
 - **First run:** a short guided tour points at each part of the app. Skip it any time; replay it with the **?**
   button at the bottom of the sidebar or *Take the tour* in the palette.
 
-Not there (on purpose, for now): community plugins, Canvas, rendered math and Mermaid diagrams (they show as
-code), and tabs.
+- **Maths and diagrams:** `$E=mc^2$` and `$$…$$` are typeset with KaTeX, and ```` ```mermaid ```` blocks become
+  diagrams. Both libraries load only when a note uses them (pinned versions, integrity-checked); offline, the note
+  shows the source instead.
+
+Not there (on purpose, for now): community plugins, Canvas and tabs.
 
 ### Keep a separate brain in sync with a vault
 

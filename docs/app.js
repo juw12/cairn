@@ -18,6 +18,7 @@ import { openPalette } from "./palette.js";
 import { showWelcome } from "./welcome.js";
 import { maybeStartTour, startTour } from "./tour.js";
 import { initHoverPreview } from "./hover.js";
+import { initRichContent } from "./rich.js";
 
 // ============================================================ shell rendering
 
@@ -476,6 +477,7 @@ async function boot() {
   }
   wireGlobal();
   initHoverPreview();
+  initRichContent();
 
   const params = new URLSearchParams(location.search);
   const brainParam = params.get("brain");
