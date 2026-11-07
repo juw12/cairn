@@ -310,6 +310,10 @@ class StartMenuShortcutTests(unittest.TestCase):
         self.assertIn("could not tag", log.call_args.args[0])
 
 
+def desktop_head(folder):
+    return git(folder, "rev-parse", "--short", "HEAD")
+
+
 @unittest.skipUnless(HAS_GIT, "git not installed")
 class AutoUpdateTests(unittest.TestCase):
     """Updates install themselves: web-only changes reload the page, Python changes restart quietly."""
@@ -328,7 +332,9 @@ class AutoUpdateTests(unittest.TestCase):
         git(self.dev, "branch", "-M", "main")
         git(self.dev, "remote", "add", "origin", str(self.origin))
         git(self.dev, "push", "-q", "-u", "origin", "main")
-        subprocess.run(["git", "clone", "-q", str(self.origin), str(self.app)], check=True)
+        git(self.origin, "symbolic-ref", "HEAD", "refs/heads/main")  # whatever init.defaultBranch says
+        subprocess.run(["git", "clone", "-q", "-b", "main", str(self.origin), str(self.app)], check=True)
+        self.assertTrue(desktop_head(self.app), "the app checkout has a commit")
         for patcher in (mock.patch.object(desktop, "APP_ROOT", self.app), mock.patch.object(desktop, "log")):
             patcher.start()
             self.addCleanup(patcher.stop)
