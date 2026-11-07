@@ -92,17 +92,23 @@ export function showShortcuts() {
           </section>`).join("")}
       </div>
     </div>`;
-  const close = () => wrap.remove();
-  wrap.addEventListener("click", (event) => {
-    if (event.target === wrap || event.target.closest("[data-close]")) close();
-  });
-  wrap.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" || event.key === "?") {
+  // Listen on the document (capture) so Esc or ? closes the sheet wherever focus is.
+  const onKey = (event) => {
+    if (!wrap.isConnected) return;
+    if (event.key === "Escape" || (event.key === "?" && !event.target.closest?.("input, textarea, [contenteditable]"))) {
       event.preventDefault();
       event.stopPropagation();
       close();
     }
+  };
+  const close = () => {
+    wrap.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  wrap.addEventListener("click", (event) => {
+    if (event.target === wrap || event.target.closest("[data-close]")) close();
   });
+  document.addEventListener("keydown", onKey, true);
   document.body.appendChild(wrap);
-  setTimeout(() => $(".modal.shortcuts", wrap)?.focus(), 20);
+  $(".modal.shortcuts", wrap)?.focus();
 }
