@@ -136,7 +136,7 @@ function handleVault(root) {
         for await (const [name, handle] of dir.entries()) {
           if (handle.kind === "directory") {
             if (!skipName(name)) await walk(handle, `${prefix}${name}/`);
-          } else if (name.toLowerCase().endsWith(".md")) {
+          } else if (core.isBrainFile(name)) {
             const path = prefix + name;
             const file = await handle.getFile();
             const stamp = `${file.lastModified}:${file.size}`;
@@ -178,7 +178,7 @@ async function snapshotVault(fileList) {
   for (const file of fileList) {
     const parts = (file.webkitRelativePath || file.name).split("/");
     if (parts.length > 1) name = parts.shift();
-    if (!file.name.toLowerCase().endsWith(".md") || parts.slice(0, -1).some(skipName)) continue;
+    if (!core.isBrainFile(file.name) || parts.slice(0, -1).some(skipName)) continue;
     const text = normalize(await file.text());
     files[parts.join("/")] = { hash: hashText(text), mtime: file.lastModified, text };
   }
@@ -186,9 +186,11 @@ async function snapshotVault(fileList) {
 }
 
 function conflictName(path, taken, day) {
-  const stem = path.slice(0, -3);
-  let candidate = `${stem} (conflict ${day}).md`;
-  for (let n = 2; taken.has(candidate); n++) candidate = `${stem} (conflict ${day} ${n}).md`;
+  const dot = path.lastIndexOf(".");
+  const stem = dot > path.lastIndexOf("/") ? path.slice(0, dot) : path;
+  const suffix = path.slice(stem.length);
+  let candidate = `${stem} (conflict ${day})${suffix}`;
+  for (let n = 2; taken.has(candidate); n++) candidate = `${stem} (conflict ${day} ${n})${suffix}`;
   return candidate;
 }
 
@@ -201,7 +203,7 @@ async function browserSync(vault, saved, { pullOnly = false, auto = false } = {}
   const vaultFiles = await vault.list();
   const brainFiles = {};
   for (const file of state.files) {
-    if (!file.path.startsWith(prefix) || !file.path.toLowerCase().endsWith(".md")) continue;
+    if (!file.path.startsWith(prefix) || !core.isBrainFile(file.path)) continue;
     const text = normalize(file.text);
     brainFiles[file.path.slice(prefix.length)] = { hash: hashText(text), mtime: file.mtime || 0, text };
   }

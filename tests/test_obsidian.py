@@ -13,9 +13,9 @@ import unittest
 from pathlib import Path
 
 from cairn import core
-from cairn.brain import Brain
+from cairn.brain import Brain, PathError
 from cairn.cli import main
-from cairn.obsidian import ObsidianSync, SyncError
+from cairn.obsidian import ObsidianSync, SyncError, conflict_name
 from cairn.server import make_server
 
 try:
@@ -253,6 +253,51 @@ class SyncTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
         self.assertEqual(errors, [])
+
+
+class CanvasFileTests(unittest.TestCase):
+    """Obsidian canvases (.canvas, JSON Canvas) are brain files: listed, saved and synced, never notes."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.brain = Brain(self.tmp)
+        self.brain.init()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_canvas_files_are_listed_written_and_kept_out_of_notes(self):
+        text = '{\n\t"nodes":[{"id":"a","type":"text","text":"Hi","x":0,"y":0,"width":250,"height":60}],\n\t"edges":[]\n}'
+        self.brain.write("canvases/Plan.canvas", text, None)
+        listed = {f["path"]: f["text"] for f in self.brain.files()}
+        self.assertEqual(listed["canvases/Plan.canvas"], text)
+        self.assertNotIn("canvases/Plan.canvas", [n["path"] for n in self.brain.notes()])
+        self.assertEqual(self.brain.read("canvases/Plan.canvas")["text"], text)
+        self.brain.delete("canvases/Plan.canvas")
+        self.assertFalse((self.brain.dir / "canvases" / "Plan.canvas").exists())
+
+    def test_other_file_types_are_still_refused(self):
+        for bad in ("notes/run.js", "a.canvas.exe", "x.json"):
+            with self.assertRaises(PathError):
+                self.brain.write(bad, "nope", None)
+
+    def test_canvases_sync_with_an_obsidian_vault(self):
+        vault = self.tmp / "vault"
+        (vault / ".obsidian").mkdir(parents=True)
+        (vault / "Board.canvas").write_text('{"nodes":[],"edges":[]}', encoding="utf-8")
+        (vault / "Note.md").write_text("hello", encoding="utf-8")
+        sync = ObsidianSync(self.brain)
+        sync.link(str(vault))
+        report = sync.sync("2026-11-07")
+        self.assertIn("obsidian/Board.canvas", report["pulled"])
+        (self.brain.dir / "obsidian" / "Mine.canvas").write_text('{"nodes":[],"edges":[]}', encoding="utf-8")
+        report = sync.sync("2026-11-07")
+        self.assertIn("Mine.canvas", report["pushed"])
+        self.assertTrue((vault / "Mine.canvas").exists())
+
+    def test_conflict_copies_keep_the_canvas_extension(self):
+        self.assertEqual(conflict_name("Board.canvas", set(), "2026-11-07"), "Board (conflict 2026-11-07).canvas")
+        self.assertEqual(conflict_name("a/Note.md", {"a/Note (conflict 2026-11-07).md"}, "2026-11-07"), "a/Note (conflict 2026-11-07 2).md")
 
 
 if __name__ == "__main__":

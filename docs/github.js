@@ -168,7 +168,7 @@ export async function loadBrainFiles(owner, repo, branch) {
   if (root === undefined) throw new GitHubError(`${owner}/${repo} has no brain/ folder or notes yet.`);
   const hidden = (path) => path.split("/").some((part) => part.startsWith(".") && part !== ".brain");
   const wanted = blobs
-    .filter((item) => item.path.startsWith(root) && item.path.endsWith(".md") && !hidden(item.path))
+    .filter((item) => item.path.startsWith(root) && /\.(md|canvas)$/i.test(item.path) && !hidden(item.path))
     .slice(0, MAX_FILES);
   const signedIn = Boolean(session());
   const files = await mapLimited(wanted, 8, async (item) => {

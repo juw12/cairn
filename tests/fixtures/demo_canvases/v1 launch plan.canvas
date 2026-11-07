@@ -1,0 +1,121 @@
+{
+	"nodes": [
+		{
+			"id": "g-beta",
+			"type": "group",
+			"label": "Beta must-haves",
+			"x": 380,
+			"y": -40,
+			"width": 460,
+			"height": 620,
+			"color": "4"
+		},
+		{
+			"id": "t-goal",
+			"type": "text",
+			"x": -80,
+			"y": 0,
+			"width": 320,
+			"height": 170,
+			"color": "2",
+			"text": "# v1 beta\nShip to 50 hikers by **Nov 30**.\nEverything on this board must work with **no signal**."
+		},
+		{
+			"id": "f-gpx",
+			"type": "file",
+			"file": "tasks/gpx-import.md",
+			"x": 410,
+			"y": 0,
+			"width": 400,
+			"height": 160
+		},
+		{
+			"id": "f-elev",
+			"type": "file",
+			"file": "tasks/elevation-profile-chart.md",
+			"x": 410,
+			"y": 200,
+			"width": 400,
+			"height": 160
+		},
+		{
+			"id": "f-onb",
+			"type": "file",
+			"file": "tasks/onboarding-copy.md",
+			"x": 410,
+			"y": 400,
+			"width": 400,
+			"height": 150
+		},
+		{
+			"id": "f-idea",
+			"type": "file",
+			"file": "ideas/offline-maps.md",
+			"x": -80,
+			"y": 300,
+			"width": 320,
+			"height": 240
+		},
+		{
+			"id": "f-pmtiles",
+			"type": "file",
+			"file": "decisions/0001-use-pmtiles-for-offline-maps.md",
+			"x": -80,
+			"y": 640,
+			"width": 320,
+			"height": 200
+		},
+		{
+			"id": "t-questions",
+			"type": "text",
+			"x": 410,
+			"y": 660,
+			"width": 400,
+			"height": 170,
+			"text": "## Open questions\n- Corridor width on switchbacks?\n- Do we need accounts? See [[0003-no-accounts-in-v1]]\n- Resume interrupted downloads #offline"
+		},
+		{
+			"id": "l-pmtiles",
+			"type": "link",
+			"url": "https://docs.protomaps.com/pmtiles/",
+			"x": 920,
+			"y": 0,
+			"width": 300,
+			"height": 110
+		}
+	],
+	"edges": [
+		{
+			"id": "e1",
+			"fromNode": "t-goal",
+			"fromSide": "right",
+			"toNode": "g-beta",
+			"toSide": "left",
+			"label": "needs"
+		},
+		{
+			"id": "e2",
+			"fromNode": "f-idea",
+			"fromSide": "bottom",
+			"toNode": "f-pmtiles",
+			"toSide": "top",
+			"label": "decided by"
+		},
+		{
+			"id": "e3",
+			"fromNode": "f-pmtiles",
+			"fromSide": "right",
+			"toNode": "t-questions",
+			"toSide": "left",
+			"color": "1"
+		},
+		{
+			"id": "e4",
+			"fromNode": "f-gpx",
+			"fromSide": "right",
+			"toNode": "l-pmtiles",
+			"toSide": "left",
+			"label": "format docs"
+		}
+	]
+}

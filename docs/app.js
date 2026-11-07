@@ -12,13 +12,15 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
-import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, createMissing, flushPending, openNote, promote, renameOpenNote, renderDrawer, useHeld } from "./drawer.js";
+import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { showWelcome } from "./welcome.js";
 import { maybeStartTour, startTour } from "./tour.js";
 import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
+import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
+import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
 
 // ============================================================ shell rendering
 
@@ -40,6 +42,8 @@ function counts() {
     code: state.todos ? state.todos.length : "",
     context: "",
     obsidian: "",
+    canvas: canvasCount() || "",
+    plugins: "",
     people: "",
     proof: state.notes.filter((n) => typeof n.meta?.claim === "string" && n.meta.claim.trim()).length || "",
   };
@@ -59,6 +63,12 @@ export function renderNav() {
     html.push(
       `<button class="${active.trim()}" data-go="${view.id}" ${active ? 'aria-current="page"' : ""}>${icon(view.icon)}<span>${view.label}</span>${count}</button>`,
     );
+  }
+  const extra = pluginViews();
+  if (extra.length) html.push(`<div class="nav-label">Plugins</div>`);
+  for (const view of extra) {
+    const active = state.view === view.id;
+    html.push(`<button class="${active ? "active" : ""}" data-go="${esc(view.id)}" ${active ? 'aria-current="page"' : ""}>${icon(view.icon)}<span>${esc(view.label)}</span></button>`);
   }
   $("#nav").innerHTML = html.join("");
 }
@@ -105,8 +115,10 @@ export function renderSidebarFoot() {
 }
 
 export function setView(view, { push = true } = {}) {
-  if (!VIEWS.some((v) => v.id === view)) view = "home";
+  if (!VIEWS.some((v) => v.id === view) && !isPluginView(view)) view = "home";
+  if (state.view === "canvas" && view !== "canvas") flushCanvas();
   state.view = view;
+  emitPluginEvent("view-change", { view });
   if (push && location.hash !== `#/${view}`) history.pushState(null, "", `#/${view}`);
   $("#app").classList.remove("nav-open");
   render();
@@ -116,7 +128,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView, obsidian: obsidianView, people: peopleView, proof: proofView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -126,7 +138,10 @@ export function renderView() {
   const kept = active && view.contains(active) && active.id && /^(INPUT|TEXTAREA)$/.test(active.tagName)
     ? { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd }
     : null;
-  view.innerHTML = readOnlyBanner() + (renderers[state.view] || home)();
+  const pluginView = isPluginView(state.view);
+  view.innerHTML = readOnlyBanner() + (pluginView
+    ? `<div class="plugin-view" data-plugin-view="${esc(state.view)}"></div>`
+    : (renderers[state.view] || home)());
   if (kept) {
     const restored = document.getElementById(kept.id);
     if (restored) {
@@ -145,6 +160,10 @@ export function renderView() {
 function afterRender() {
   if ((state.view === "ideas" || state.view === "board") && !readOnly()) wireBoard();
   if (state.view === "map") wireMap();
+  if (state.view === "canvas") wireCanvas();
+  if (state.view === "plugins") wirePlugins();
+  const pluginView = $("[data-plugin-view]");
+  if (pluginView) renderPluginView(state.view, pluginView);
 }
 
 // ============================================================ global events
@@ -162,7 +181,7 @@ function wireGlobal() {
     const open = target.closest("[data-open]");
     if (open && !target.closest("[data-action]")) {
       event.preventDefault();
-      return openNote(open.dataset.open, { heading: open.dataset.heading || null });
+      return openNote(open.dataset.open, { heading: open.dataset.heading || null, newTab: event.ctrlKey || event.metaKey });
     }
     const missing = target.closest("[data-missing]");
     if (missing) {
@@ -204,6 +223,7 @@ function wireGlobal() {
       state.contextMode = contextMode.dataset.contextMode;
       return renderView();
     }
+    if (state.view === "plugins" && (await handlePluginClick(target))) return;
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
@@ -299,6 +319,15 @@ function wireGlobal() {
     }
   });
 
+  // Middle-click on any note link or card opens it in a new tab, like a browser.
+  document.addEventListener("auxclick", (event) => {
+    if (event.button !== 1) return;
+    const open = event.target.closest("[data-open]");
+    if (!open) return;
+    event.preventDefault();
+    openNote(open.dataset.open, { heading: open.dataset.heading || null, newTab: true });
+  });
+
   // Folder tree: remember which folders were collapsed across re-renders.
   document.addEventListener("toggle", (event) => {
     const folder = event.target.closest?.("details[data-folder]");
@@ -312,6 +341,7 @@ function wireGlobal() {
     const move = event.target.closest("[data-move]");
     if (move) moveNote(move.dataset.move, move.value);
     if (event.target.matches("[data-obsidian-auto]")) toggleAutoSync(event.target.checked);
+    handlePluginChange(event.target);
   });
 
   document.addEventListener("input", (event) => {
@@ -341,6 +371,10 @@ function wireGlobal() {
     if (event.target.id === "create-brain-form") {
       event.preventDefault();
       return createMyBrain();
+    }
+    if (event.target.id === "plugin-install-form") {
+      event.preventDefault();
+      return handlePluginSubmit(event.target);
     }
     const quick = event.target.closest("[data-quick]");
     if (!quick) return;
@@ -388,6 +422,23 @@ function wireGlobal() {
       event.preventDefault();
       return openPalette();
     }
+    // Tabs: Ctrl+Alt+→/← switch, Ctrl+Alt+W closes, Ctrl+Alt+T reopens the last closed tab.
+    if (mod && event.altKey && !event.shiftKey) {
+      const key = event.key.toLowerCase();
+      if (key === "arrowright" || key === "arrowleft") {
+        if (!state.open) return;
+        event.preventDefault();
+        return cycleTab(key === "arrowright" ? 1 : -1);
+      }
+      if (key === "w" && state.open) {
+        event.preventDefault();
+        return closeTab();
+      }
+      if (key === "t") {
+        event.preventDefault();
+        return reopenClosedTab();
+      }
+    }
     if (event.key === "Escape") {
       if ($(".palette-wrap") || $(".modal-wrap")) return;
       if (state.open) return closeDrawer();
@@ -407,7 +458,10 @@ function wireGlobal() {
   });
 
   window.addEventListener("popstate", () => setView(location.hash.replace("#/", "") || "home", { push: false }));
-  window.addEventListener("beforeunload", () => flushPending());
+  window.addEventListener("beforeunload", () => {
+    flushPending();
+    flushCanvas();
+  });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
     if (localStorage.getItem("cairn.theme")) return;
     document.documentElement.dataset.theme = e.matches ? "dark" : "light";
@@ -449,7 +503,10 @@ export async function start(store) {
   state.info = await store.info();
   state.todos = null;
   state.git = null;
+  state.canvas = null;
+  resetTabs();
   await loadAll();
+  await initPlugins();
   $("#welcome").hidden = true;
   $("#app").hidden = false;
   applyInfo();
@@ -576,6 +633,7 @@ async function applyUpdate({ restart = false } = {}) {
     return "waiting";
   }
   await flushPending();
+  await flushCanvas();
   localStorage.setItem(UPDATE_NOTE, JSON.stringify({ hash: location.hash, open: state.open || null, at: Date.now() }));
   if (!restart) {
     location.reload();

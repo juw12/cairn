@@ -31,6 +31,8 @@ ATTACHMENT_TYPES = {
     ".csv": "text/csv", ".txt": "text/plain",
 }
 MAX_TODOS = 500
+# Files the app reads and writes: Markdown notes, and Obsidian canvases (JSON Canvas, jsoncanvas.org).
+TEXT_SUFFIXES = (".md", ".canvas")
 LOCAL_WRITE_TIMEOUT = 120  # add/commit of a big vault on a machine with busy antivirus
 NETWORK_TIMEOUT = 180  # one clone, or a fetch/push that may wait for a GitHub sign-in window
 ROUTE_TIMEOUT = 75  # one fetch/push attempt over one network route before trying the next
@@ -142,8 +144,8 @@ class Brain:
         relative = relative.replace("\\", "/")
         if relative.startswith("/") or (len(relative) > 1 and relative[1] == ":"):
             raise PathError("absolute paths are not allowed")
-        if not relative.endswith(".md"):
-            raise PathError("only .md files can be read or written")
+        if not relative.endswith(TEXT_SUFFIXES):
+            raise PathError("only .md and .canvas files can be read or written")
         target = (self.dir / relative).resolve()
         if target != self.dir and self.dir not in target.parents:
             raise PathError("path escapes the brain folder")
@@ -192,14 +194,14 @@ class Brain:
     # ------------------------------------------------------------ files
 
     def files(self) -> list[dict]:
-        """Every Markdown file in the brain as {path, text, mtime}, sorted by path."""
+        """Every note (.md) and canvas (.canvas) in the brain as {path, text, mtime}, sorted by path."""
         if not self.dir.exists():
             return []
         out = []
         for current, dirs, names in os.walk(self.dir):
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
             for name in sorted(names):
-                if not name.endswith(".md"):
+                if not name.endswith(TEXT_SUFFIXES):
                     continue
                 path = Path(current) / name
                 try:
@@ -213,7 +215,7 @@ class Brain:
         return [
             core.note_from_file(f["path"], f["text"], f["mtime"])
             for f in self.files()
-            if f["path"] not in core.SPECIAL_FILES
+            if f["path"].endswith(".md") and f["path"] not in core.SPECIAL_FILES
         ]
 
     def read(self, relative: str) -> dict:

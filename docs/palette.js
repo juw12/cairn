@@ -3,7 +3,9 @@
 import { escapeHtml as esc } from "./md.js";
 import { $, TYPE_META, ask, byRecent, icon, toast } from "./ui.js";
 import { VIEWS, createNote, noteByPath, readOnly, refreshTodos, state } from "./state.js";
-import { bookmarkOpenNote, flushPending, insertIntoOpenNote, openNote, renameOpenNote } from "./drawer.js";
+import { bookmarkOpenNote, closeOtherTabs, closeTab, cycleTab, flushPending, insertIntoOpenNote, openInNewTab, openNote, openTabs, renameOpenNote, reopenClosedTab } from "./drawer.js";
+import { chooseCanvas, newCanvas } from "./canvas.js";
+import { pluginCommands, pluginViews } from "./plugins.js";
 import { capture, commitBrain, newNote, openSettings, openToday, saveContext, switchBrain, syncBrain, toggleTheme } from "./actions.js";
 import { syncObsidian } from "./obsidian.js";
 import { fillTemplate, searchNotes, searchScore, templates } from "./vault.js";
@@ -11,7 +13,7 @@ import { startTour } from "./tour.js";
 import { render, setView } from "./app.js";
 
 function commands() {
-  const list = VIEWS.map((v) => ({ label: `Go to ${v.label}`, kind: "View", icon: v.icon, run: () => setView(v.id) }));
+  const list = [...VIEWS, ...pluginViews()].map((v) => ({ label: `Go to ${v.label}`, kind: v.group === "Plugins" ? "Plugin" : "View", icon: v.icon, run: () => setView(v.id) }));
   const editable = !readOnly();
   if (editable) {
     list.push(
@@ -20,6 +22,7 @@ function commands() {
       { label: "New decision", kind: "Create", icon: "decision", run: () => newNote("decision") },
       { label: "New note", kind: "Create", icon: "note", run: () => newNote("note") },
       { label: "New note from template", kind: "Create", icon: "template", run: newFromTemplate },
+      { label: "New canvas", kind: "Create", icon: "canvas", run: newCanvas },
       { label: "Open today’s journal", kind: "Create", icon: "journal", run: openToday },
     );
     if (state.open) {
@@ -31,6 +34,20 @@ function commands() {
     list.push({ label: "Save context pack to brain/CONTEXT.md", kind: "Project", icon: "sparkle", run: saveContext });
   }
   if (state.open) list.push({ label: "Toggle bookmark on this note", kind: "Note", icon: "star", run: () => bookmarkOpenNote() });
+  list.push({ label: "Open a canvas…", kind: "Navigate", icon: "canvas", run: chooseCanvas });
+  list.push({ label: "Open a note in a new tab…", kind: "Tabs", icon: "tabs", run: openInNewTab });
+  const tabs = openTabs();
+  if (tabs.length > 1) {
+    list.push(
+      { label: "Next tab", kind: "Tabs  Ctrl+Alt+→", icon: "tabs", run: () => cycleTab(1) },
+      { label: "Previous tab", kind: "Tabs  Ctrl+Alt+←", icon: "tabs", run: () => cycleTab(-1) },
+      { label: "Close other tabs", kind: "Tabs", icon: "tabs", run: closeOtherTabs },
+    );
+  }
+  if (tabs.length) list.push({ label: "Close this tab", kind: "Tabs  Ctrl+Alt+W", icon: "x", run: () => closeTab() });
+  if ((state.closedTabs || []).length) list.push({ label: "Reopen closed tab", kind: "Tabs  Ctrl+Alt+T", icon: "tabs", run: reopenClosedTab });
+  list.push({ label: "Manage plugins", kind: "App", icon: "puzzle", run: () => setView("plugins") });
+  list.push(...pluginCommands());
   list.push(
     { label: "Open a random note", kind: "Navigate", icon: "shuffle", run: openRandom },
     { label: "Show bookmarks", kind: "Navigate", icon: "star", run: () => {

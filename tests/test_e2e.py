@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
         raise
     sync_playwright = None
 
-VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "code", "context", "people", "proof"]
+VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "context", "plugins", "people", "proof"]
 
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")

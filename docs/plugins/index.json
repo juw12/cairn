@@ -1,0 +1,36 @@
+{
+  "plugins": [
+    {
+      "id": "note-queries",
+      "name": "Note queries",
+      "author": "Cairn",
+      "version": "1.0.0",
+      "description": "Live lists and tables of notes from a query code block: filter by type, status, tag, folder or text, sort and limit. Dataview for everyday questions.",
+      "main": "plugins/note-queries.js"
+    },
+    {
+      "id": "calendar",
+      "name": "Calendar",
+      "author": "Cairn",
+      "version": "1.0.0",
+      "description": "A month calendar of your journal. See which days have entries and what you created; click a day to open or start it.",
+      "main": "plugins/calendar.js"
+    },
+    {
+      "id": "writing-stats",
+      "name": "Writing stats",
+      "author": "Cairn",
+      "version": "1.0.0",
+      "description": "Words written, notes per type, your longest notes and a 30-day activity chart. Adds a word-count command for the open note.",
+      "main": "plugins/writing-stats.js"
+    },
+    {
+      "id": "recent-files",
+      "name": "Recent files",
+      "author": "Cairn",
+      "version": "1.0.0",
+      "description": "Remembers the notes you open and lists them newest first, with a command to jump back to the last one.",
+      "main": "plugins/recent-files.js"
+    }
+  ]
+}
