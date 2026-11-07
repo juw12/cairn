@@ -80,7 +80,38 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
 | **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
 | **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture. |
+| **Autopilot** (Pro) | Type a goal once. A coding agent on your computer (OpenCode) reads the brain for precedents (CONTEXT.md, decisions, similar notes, your `brain/autopilot.md` defaults), then works round after round on its own, without you typing *go* or *continue*, until the goal is done and checked. Every goal is a task on the Board with the agent's progress logged in it. Comments are optional steering; it stops only for hard stops (paying, sending to people, final submit, deleting your data, passwords). |
 | **People** | Look up anyone on GitHub and see their proof of work, read from their brain's files: working on, shipped, decisions, open to collaborate. Open their brain read-only and **Ask to join** (opens a prefilled GitHub issue). |
+
+## Cairn Pro: Autopilot
+
+Everything above is free and stays free. **Autopilot** is the one paid feature, and it is how you support Cairn.
+Buying and unlocking both happen inside the app; there is no store website.
+
+- **Try it free:** every computer gets one trial goal.
+- **Buy in the app:** *Autopilot -> Cairn Pro* shows the plans (30 days or lifetime) and an embedded checkout
+  (card or PayPal). Pro turns on the moment the payment completes; the receipt is kept in `~/.cairn/license.json`
+  (never in your brain or repo).
+- **New computer? Restore it yourself:** *Autopilot -> Already bought Pro?* takes the PayPal order number (the
+  Transaction ID on your receipt) and the e-mail that paid, and Pro is back on. Or `cairn pro restore <order> <email>`.
+- **Pro keys:** every purchase also gets a key (`CAIRN1...`) in the background. It is signed by the seller and checked
+  offline, so it works without internet and cannot be made up. *Copy your Pro key* (or `cairn pro key`) and paste it
+  on another computer.
+- **What runs where:** Autopilot drives [OpenCode](https://opencode.ai) on your own machine with whatever model you
+  configured there. The only outside calls Cairn makes for Pro are the checkout, when you choose to buy, and asking
+  the Cairn Pro license server (`worker/pro`) for your key with your order number and e-mail.
+- **Make it yours:** add `brain/autopilot.md` with your standing defaults ("big files go to E:", "always add tests",
+  "publish to GitHub when done") and Autopilot follows them on every goal.
+
+**Selling it (maintainer):** `cairn pro keygen --install` makes the signing key once (private half stays in
+`~/.cairn/seller/`, back it up), `cairn pro issue --email buyer@x.com --plan lifetime` prints a key, prices live in
+`PLANS` in `cairn/pro.py`, and `cairn pro sell --paypal-client-id <id>` (the public id of a PayPal REST app) switches
+the in-app checkout on in one step. The license server is a Cloudflare Worker in `worker/pro`: it looks the order up
+at PayPal and signs a key, and stores nothing. Deploy it with `npx wrangler deploy` there, then run
+`worker/pro/set-secrets.ps1 -Signing` once to give it the signing key and the PayPal REST app's id and secret.
+
+Cairn is MIT-licensed, so you can read exactly what Autopilot and Pro do (`cairn/autopilot.py`, `cairn/pro.py`). The
+lock is honest, not DRM: Pro buys you the convenience, updates and the knowledge that the project keeps going.
 
 ## Use it
 

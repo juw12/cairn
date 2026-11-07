@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
+from .autopilot import Autopilot, PlanError
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -150,6 +151,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(brain.git_status())
             elif route == "/api/obsidian":
                 self._send_json(self.obsidian.status())
+            elif route == "/api/autopilot":
+                self._send_json(self.autopilot.state())
+            elif route == "/api/autopilot/log":
+                query = parse_qs(urlparse(self.path).query)
+                job_id = (query.get("id") or [""])[0]
+                since = int((query.get("since") or ["0"])[0] or 0)
+                self._send_json(self.autopilot.read_log(job_id, since))
             elif route == "/api/desktop" and self.desktop is not None:
                 self._send_json(self.desktop.state())
             else:
@@ -192,6 +200,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"created": self.brain.init()})
         if route.startswith("/api/obsidian/"):
             return self._obsidian(route.rsplit("/", 1)[-1])
+        if route.startswith("/api/autopilot/"):
+            return self._autopilot(route.rsplit("/", 1)[-1])
         if route == "/api/git/commit":
             try:
                 body = self._body()
@@ -233,6 +243,39 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError, OSError) as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
 
+    def _autopilot(self, action: str):
+        pilot = self.autopilot
+        try:
+            body = self._body()
+            job_id = str(body.get("id", ""))
+            if action == "start":
+                result = pilot.start(str(body.get("goal", "")))
+            elif action == "comment":
+                result = pilot.comment(job_id, str(body.get("text", "")))
+            elif action == "stop":
+                result = pilot.stop(job_id)
+            elif action == "resume":
+                result = pilot.resume(job_id)
+            elif action == "remove":
+                result = pilot.remove(job_id)
+            elif action == "license":
+                result = pilot.license.activate(str(body.get("key", "")))
+            elif action == "unlicense":
+                result = pilot.license.deactivate()
+            elif action == "purchase":
+                result = pilot.license.record_purchase(body)
+            elif action == "restore":
+                result = pilot.license.restore(str(body.get("orderId", "")), str(body.get("email", "")))
+            else:
+                return self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+            self._send_json(result)
+        except PlanError as error:
+            self._error(HTTPStatus.PAYMENT_REQUIRED, str(error), plan="pro")
+        except ConnectionError as error:
+            self._error(HTTPStatus.BAD_GATEWAY, str(error))
+        except (ValueError, TypeError, OSError) as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
+
     def _serve_static(self, route: str):
         if not self._host_ok():
             return self._error(HTTPStatus.FORBIDDEN, "unexpected Host header")
@@ -256,12 +299,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop=None) -> ThreadingHTTPServer:
+def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop=None, autopilot=None) -> ThreadingHTTPServer:
     if host not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("Cairn only listens on localhost")
     handler = type("CairnHandler", (Handler,), {})
     handler.brain = brain
     handler.obsidian = ObsidianSync(brain)
+    handler.autopilot = autopilot or Autopilot(brain)
     handler.sync_lock = threading.Lock()
     handler.desktop = desktop
     handler.web_dir = find_web_dir().resolve()
@@ -275,6 +319,7 @@ def switch_brain(server: ThreadingHTTPServer, brain: Brain) -> None:
     """Serve a different folder from now on (the desktop app's "Open a brain")."""
     server.RequestHandlerClass.brain = brain
     server.RequestHandlerClass.obsidian = ObsidianSync(brain)
+    server.RequestHandlerClass.autopilot = Autopilot(brain)
 
 
 def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:

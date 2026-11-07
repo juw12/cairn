@@ -1,0 +1,14 @@
+name = "cairn-pro"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[vars]
+# "live" for real money, "sandbox" while testing with PayPal sandbox accounts.
+PAYPAL_ENV = "live"
+
+# Secrets (never in this file):
+#   SIGNING_KEY       the seller key JSON from ~/.cairn/seller/signing-key.json
+#   PAYPAL_CLIENT_ID  PayPal REST app client id
+#   PAYPAL_SECRET     PayPal REST app secret
+# Set them with set-secrets.ps1 or `wrangler secret put NAME`.
