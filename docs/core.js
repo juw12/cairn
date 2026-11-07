@@ -787,14 +787,14 @@ export function contextPack(notes, project, today) {
 
 // A session log line: `- 14:02 pass: pytest (12s)`. Anything else in the body is free text.
 export const LOG_KINDS = ["start", "note", "prompt", "pass", "fail", "commit", "skill", "end"];
-const LOG_LINE_RE = /^\s*[-*]\s+(\d{1,2}:\d{2})\s+([a-z]+):\s*(.*)$/;
+const VIBE_LOG_LINE_RE = /^\s*[-*]\s+(\d{1,2}:\d{2})\s+([a-z]+):\s*(.*)$/;
 const STAMP_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/;
 export const FINISHED = ["shipped", "partial", "dropped"];
 
 export function sessionLog(body) {
   const entries = [];
   for (const line of body.replaceAll("\r\n", "\n").split("\n")) {
-    const match = LOG_LINE_RE.exec(line);
+    const match = VIBE_LOG_LINE_RE.exec(line);
     if (match && LOG_KINDS.includes(match[2])) {
       entries.push({ time: match[1].padStart(5, "0"), kind: match[2], text: match[3].trim() });
     }
