@@ -110,16 +110,22 @@ $ErrorActionPreference = 'Stop'
 $headers = @{ Authorization = "Bearer $env:CAIRN_GH_TOKEN"; Accept = 'application/vnd.github+json'; 'User-Agent' = 'cairn' }
 $params = @{ Uri = $env:CAIRN_URL; Method = $env:CAIRN_METHOD; Headers = $headers; UseBasicParsing = $true }
 if ($env:CAIRN_BODY_FILE) { $params.Body = [IO.File]::ReadAllBytes($env:CAIRN_BODY_FILE); $params.ContentType = 'application/json' }
-try {
-  $response = Invoke-WebRequest @params
-  $status = [int]$response.StatusCode
-  $content = [Text.Encoding]::UTF8.GetString($response.RawContentStream.ToArray())
-} catch {
-  $failed = $_.Exception.Response
-  if (-not $failed) { throw }
-  $status = [int]$failed.StatusCode
-  $content = (New-Object IO.StreamReader($failed.GetResponseStream())).ReadToEnd()
+function Send($direct) {
+  if ($direct) { [Net.WebRequest]::DefaultWebProxy = $null }
+  elseif ([Net.WebRequest]::DefaultWebProxy) { [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials }
+  try {
+    $response = Invoke-WebRequest @params
+    return @([int]$response.StatusCode, [Text.Encoding]::UTF8.GetString($response.RawContentStream.ToArray()))
+  } catch {
+    $failed = $_.Exception.Response
+    if (-not $failed) { return @(0, $_.Exception.Message) }
+    return @([int]$failed.StatusCode, (New-Object IO.StreamReader($failed.GetResponseStream())).ReadToEnd())
+  }
 }
+# The system proxy first (with your Windows sign-in), then straight to GitHub if the proxy is down or refuses.
+$status, $content = Send $false
+if ($status -eq 0 -or $status -eq 407) { $status, $content = Send $true }
+if ($status -eq 0) { throw $content }
 $out = @{ status = $status; body = $content } | ConvertTo-Json -Compress
 [IO.File]::WriteAllText($env:CAIRN_OUT_FILE, $out, (New-Object Text.UTF8Encoding($false)))
 """
@@ -165,8 +171,12 @@ def make_http(token: str, use_powershell: bool | None = None):
             except urllib.error.HTTPError as error:
                 status, raw = error.code, error.read()
             except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+                status, raw = 0, b""
+            # 0 = no connection; 407 = a proxy wants credentials Python doesn't have. Windows' own
+            # stack usually gets through both, so retry (and keep using) it there.
+            if status in (0, 407):
                 if os.name != "nt" or use_powershell is False:
-                    raise PublishError("Can't reach GitHub. Check your connection and try again.")
+                    raise PublishError("Can't reach GitHub. Check your connection or proxy and try again.")
                 state["powershell"] = True
         if state["powershell"]:
             status, raw = _powershell_request(method, url, token, payload)
