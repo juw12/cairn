@@ -32,6 +32,7 @@ from pathlib import Path
 from . import __version__
 from .brain import NO_WINDOW, Brain, SyncError, clone_repo, repo_folder_name
 from .server import make_server, switch_brain
+from .winshell import AUMID, stamp_shortcut, start_menu_shortcut
 
 APP_ROOT = Path(__file__).resolve().parent.parent  # the git checkout the installer made
 PORT = 47777  # own fixed port: saved settings survive restarts; never clashes with `cairn serve` (4777)
@@ -183,6 +184,32 @@ def set_autostart(enabled: bool) -> None:
 
 
 # ============================================================ updating Cairn itself
+
+def ensure_start_menu_shortcut(config: "Config") -> None:
+    """Keep the Start-menu shortcut tagged with Cairn's AppUserModelID.
+
+    Without the tag a pinned taskbar button can't find Cairn's icon or relaunch command (it shows a
+    blank icon). Written once per install location; rewritten if the shortcut goes missing.
+    """
+    if sys.platform != "win32":
+        return
+    link = start_menu_shortcut()
+    stamp = f"{AUMID}|{APP_ROOT}"
+    if link.exists() and config.get("shortcutStamp") == stamp:
+        return
+    try:
+        stamp_shortcut(
+            link,
+            pythonw_executable(),
+            f'"{APP_ROOT / "Cairn.pyw"}"',
+            APP_ROOT / "docs" / "icons" / "cairn.ico",
+            APP_ROOT,
+        )
+        config.set("shortcutStamp", stamp)
+        log("start menu shortcut tagged for taskbar pinning")
+    except (OSError, subprocess.SubprocessError) as error:
+        log(f"could not tag the start menu shortcut: {error}")
+
 
 def app_git(*args: str, timeout: int = 120) -> subprocess.CompletedProcess | None:
     if not (APP_ROOT / ".git").exists() or not shutil.which("git"):
@@ -618,7 +645,8 @@ class DesktopApp:
         if sys.platform == "win32":
             import ctypes
 
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("juw12.Cairn")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(AUMID)
+            threading.Thread(target=ensure_start_menu_shortcut, args=(self.config,), daemon=True).start()
             if self.config.get("autostart") is None:  # first run: always live, can be turned off
                 try:
                     set_autostart(True)
