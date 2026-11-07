@@ -5,7 +5,7 @@ import { escapeHtml as esc } from "./md.js";
 import { icon, pageHead, toast } from "./ui.js";
 import { loadAll, state } from "./state.js";
 
-const pilot = { data: null, selected: null, logFor: null, logSize: 0, timer: null, busy: false, wired: false, signature: null };
+const pilot = { data: null, selected: null, logFor: null, logSize: 0, timer: null, busy: false, wired: false, signature: null, plan: "lifetime", sdk: null };
 
 async function call(method, path, body) {
   const response = await fetch(path, {
@@ -37,21 +37,118 @@ const STATUS_LABEL = {
 
 // ------------------------------------------------------------ rendering
 
+function money(plan, currency) {
+  const value = Number(plan.price);
+  const amount = Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return currency === "USD" ? `$${amount}` : `${amount} ${esc(currency)}`;
+}
+
 function planPanel(license) {
   if (license.pro) {
-    return `<div class="callout">${icon("star")}<div><strong>Cairn Pro</strong> is active${license.email ? ` for ${esc(license.email)}` : ""}. Thank you for supporting Cairn.
-      <button class="btn ghost" data-pilot="unlicense" style="margin-left:8px">Remove key</button></div></div>`;
+    const until = license.expires ? ` until ${esc(license.expires)}` : "";
+    const who = license.email ? ` · ${esc(license.email)}` : "";
+    const order = license.order ? ` · order ${esc(license.order)}` : "";
+    return `<div class="callout pilot-pro">${icon("star")}<div style="flex:1"><strong>Cairn Pro</strong> · ${esc(license.planName || "active")}${until}${who}${order}
+      <div class="muted" style="margin-top:4px">Thank you for supporting Cairn. Autopilot has no goal limit on this computer.</div></div>
+      <button class="btn ghost" data-pilot="unlicense">Remove from this computer</button></div>`;
   }
-  const trial = license.trialLeft
-    ? `You have <strong>${license.trialLeft} free trial goal${license.trialLeft === 1 ? "" : "s"}</strong>. After that Autopilot needs Cairn Pro.`
-    : `Your free trial goal is used. Autopilot needs <strong>Cairn Pro</strong>; the rest of Cairn stays free forever.`;
-  const reason = license.reason ? `<div class="muted" style="margin-top:6px">${esc(license.reason)}</div>` : "";
-  return `<div class="callout pilot-plan">${icon("lock")}<div style="flex:1">${trial}${reason}
-    <div class="pilot-row" style="margin-top:10px">
-      <a class="btn primary" href="${esc(license.buyUrl)}" target="_blank" rel="noopener">${icon("star")} Get Cairn Pro</a>
-      <input class="input" id="pilot-key" placeholder="Paste your license key" autocomplete="off" style="flex:1;min-width:200px">
-      <button class="btn" data-pilot="license">Activate</button>
-    </div></div></div>`;
+  const lead = license.trialLeft
+    ? `You have <strong>${license.trialLeft} free goal</strong> to try Autopilot. After that it is part of Cairn Pro.`
+    : `Your free goal is used. Autopilot is part of <strong>Cairn Pro</strong>; everything else in Cairn stays free.`;
+  const reason = license.reason ? `<p class="pilot-reason">${esc(license.reason)}</p>` : "";
+  const cards = license.plans.map((plan) => {
+    const selected = plan.id === pilot.plan;
+    return `<button type="button" class="pilot-plancard${selected ? " sel" : ""}" data-pilot-plan="${esc(plan.id)}" aria-pressed="${selected}">
+      <span class="pilot-planname">${esc(plan.name)}</span>
+      <span class="pilot-price">${money(plan, license.currency)}</span>
+      <span class="pilot-blurb">${esc(plan.blurb)}</span>
+    </button>`;
+  }).join("");
+  const checkout = license.checkout.ready
+    ? `<div id="pilot-paypal" class="pilot-paypal" aria-live="polite"><span class="muted">Loading checkout…</span></div>
+       <p class="pilot-fine">Pay by card or PayPal without leaving Cairn. Pro turns on the moment the payment completes.</p>`
+    : `<p class="pilot-fine">${icon("help")} Checkout is not switched on in this copy of Cairn yet. If you have a Pro key, paste it below.</p>`;
+  return `<section class="pilot-upgrade" aria-label="Cairn Pro">
+    <div class="pilot-upgrade-head">${icon("lock")}<div><h3>Cairn Pro</h3><p>${lead}</p>${reason}</div></div>
+    <div class="pilot-plans" role="group" aria-label="Choose a plan">${cards}</div>
+    <ul class="pilot-perks">
+      <li>${icon("zap")} Unlimited Autopilot goals</li>
+      <li>${icon("folder")} Works in every brain you open on this computer</li>
+      <li>${icon("terminal")} Uses the OpenCode you already have; Cairn adds no AI fees</li>
+    </ul>
+    ${checkout}
+    <details class="pilot-keybox"${license.checkout.ready ? "" : " open"}>
+      <summary>Have a Pro key, or moving to a new computer?</summary>
+      <div class="pilot-row">
+        <input class="input" id="pilot-key" placeholder="CAIRN1…" autocomplete="off" spellcheck="false" aria-label="Pro key" style="flex:1;min-width:200px">
+        <button class="btn" data-pilot="license">Activate</button>
+      </div>
+      <p class="pilot-fine">Paste your key and Pro is on, even offline. Bought inside Cairn? Reply to your PayPal receipt with the order number and you get a key for your other computers.</p>
+    </details>
+  </section>`;
+}
+
+function engineNote(engine) {
+  if (engine.available) return "";
+  return `<div class="callout" style="margin-top:10px">${icon("terminal")}<div>Autopilot uses <strong>${esc(engine.name)}</strong> as its engine and it is not installed yet. Get it free at <a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>, then reopen Cairn.</div></div>`;
+}
+
+// ------------------------------------------------------------ in-app checkout (PayPal buttons)
+
+function loadPayPal(clientId, currency) {
+  if (window.paypal) return Promise.resolve(window.paypal);
+  if (!pilot.sdk) {
+    pilot.sdk = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${encodeURIComponent(currency)}&intent=capture&components=buttons`;
+      script.onload = () => (window.paypal ? resolve(window.paypal) : reject(new Error("Checkout did not load. Try again.")));
+      script.onerror = () => {
+        pilot.sdk = null;
+        reject(new Error("Could not reach PayPal. Check the internet connection and try again."));
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return pilot.sdk;
+}
+
+async function mountCheckout(license) {
+  const box = document.getElementById("pilot-paypal");
+  if (!box || license.pro || !license.checkout.ready) return;
+  const plan = license.plans.find((item) => item.id === pilot.plan) || license.plans[0];
+  try {
+    const paypal = await loadPayPal(license.checkout.clientId, license.currency);
+    if (!box.isConnected) return;
+    box.innerHTML = "";
+    await paypal.Buttons({
+      style: { layout: "vertical", shape: "rect", label: "pay", height: 40 },
+      createOrder: (data, actions) => actions.order.create({
+        intent: "CAPTURE",
+        purchase_units: [{
+          description: `Cairn Pro - ${plan.name}`,
+          custom_id: plan.id,
+          amount: { currency_code: license.currency, value: plan.price },
+        }],
+        application_context: { shipping_preference: "NO_SHIPPING", brand_name: "Cairn" },
+      }),
+      onApprove: async (data, actions) => {
+        const order = await actions.order.capture();
+        const unit = (order.purchase_units || [])[0] || {};
+        const capture = ((unit.payments || {}).captures || [])[0] || {};
+        const result = await act("purchase", {
+          orderId: order.id,
+          status: capture.status || order.status,
+          plan: plan.id,
+          amount: capture.amount || unit.amount,
+          email: (order.payer || {}).email_address || "",
+        });
+        if (result) toast("Cairn Pro is on. Thank you!");
+      },
+      onError: (error) => toast(`The payment did not go through: ${(error && error.message) || error}`, { error: true }),
+    }).render(box);
+  } catch (error) {
+    if (box.isConnected) box.innerHTML = `<span class="muted">${esc(error.message)}</span>`;
+  }
 }
 
 function jobsHtml(jobs) {
@@ -118,10 +215,15 @@ export function autopilotView() {
 function paint() {
   if (!pilot.data) return;
   const plan = document.getElementById("pilot-plan");
-  if (plan && !plan.contains(document.activeElement)) plan.innerHTML = planPanel(pilot.data.license);
-  const engine = pilot.data.engine;
-  if (plan && !engine.available) {
-    plan.insertAdjacentHTML("beforeend", `<div class="callout" style="margin-top:10px">${icon("terminal")}<div>Autopilot uses <strong>${esc(engine.name)}</strong> as its engine and it is not installed yet. Get it free at <a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>, then reopen Cairn.</div></div>`);
+  const { license, engine } = pilot.data;
+  const planKey = JSON.stringify([license, engine.available, pilot.plan]);
+  // Don't redraw under the user's cursor (typing a key, inside the checkout) unless Pro just turned on or off.
+  const flipped = plan && plan.dataset.pro !== String(license.pro);
+  if (plan && plan.dataset.key !== planKey && (flipped || !plan.contains(document.activeElement))) {
+    plan.dataset.key = planKey;
+    plan.dataset.pro = String(license.pro);
+    plan.innerHTML = planPanel(license) + engineNote(engine);
+    mountCheckout(license);
   }
   const jobs = pilot.data.jobs;
   if (!pilot.selected && jobs.length) pilot.selected = jobs[0].id;
@@ -236,14 +338,21 @@ export function wireAutopilot() {
       paint();
       return pollLog();
     }
+    const planCard = event.target.closest("[data-pilot-plan]");
+    if (planCard) {
+      pilot.plan = planCard.dataset.pilotPlan;
+      planCard.blur();
+      paint();
+      return;
+    }
     const button = event.target.closest("[data-pilot]");
     if (!button) return;
     const action = button.dataset.pilot;
     if (action === "license") {
       const key = document.getElementById("pilot-key").value.trim();
-      if (!key) return toast("Paste the key from your Gumroad receipt.", { error: true });
+      if (!key) return toast("Paste your Cairn Pro key (it starts with CAIRN1).", { error: true });
       document.getElementById("pilot-key").blur();
-      if (await act("license", { key })) toast("Cairn Pro activated. Thank you!");
+      if (await act("license", { key })) toast("Cairn Pro is on. Thank you!");
     } else if (action === "unlicense") {
       await act("unlicense");
     } else if (action === "remove") {

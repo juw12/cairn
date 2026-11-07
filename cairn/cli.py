@@ -176,6 +176,93 @@ def cmd_desktop(brain: Brain, args) -> int:
     return desktop.main(["--hidden"] if args.hidden else [])
 
 
+def cmd_pro(brain: Brain, args) -> int:
+    """Cairn Pro for sellers (keygen, issue) and buyers (status, verify)."""
+    import json
+    import re
+    from pathlib import Path
+
+    from . import pro
+
+    action = args.pro_command
+    if action == "keygen":
+        path = pro.seller_key_path()
+        if path.exists() and not args.force:
+            print(f"A seller key already exists at {path}. Keys issued with it stop working if you replace it.")
+            print("Use --force only if you really want a new one.")
+            return 1
+        print("Making a 2048-bit seller key (a few seconds)...")
+        pair = pro.generate_keypair()
+        pro._save(path, {"n": pair["n"], "e": pair["e"], "d": pair["d"], "created": _today()})
+        print(f"Private seller key saved to {path}")
+        print("Back it up somewhere safe and never commit it. Anyone with it can make Pro keys.")
+        if args.install:
+            source_path = Path(pro.__file__)
+            source = source_path.read_text(encoding="utf-8")
+            source, count = re.subn(r'"n": \d+,[^\n]*', f'"n": {pair["n"]},', source, count=1)
+            if not count:
+                print("Could not find SELLER_PUBLIC_KEY in pro.py; paste the public key in by hand.")
+                return 1
+            source_path.write_text(source, encoding="utf-8")
+            print(f"Public key installed in {source_path}. Commit that file so every copy of Cairn can check your keys.")
+        else:
+            print(json.dumps({"n": pair["n"], "e": pair["e"]}))
+        return 0
+    if action == "sell":
+        client_id = args.paypal_client_id.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", client_id):
+            print("That does not look like a PayPal client id (PayPal developer dashboard -> Apps -> Live).")
+            return 1
+        if not pro.seller_key_path().exists():
+            print("No seller key yet, making one first.")
+            args.force = False
+            args.install = True
+            args.pro_command = "keygen"
+            if cmd_pro(brain, args):
+                return 1
+        source_path = Path(pro.__file__)
+        source = source_path.read_text(encoding="utf-8")
+        source, count = re.subn(
+            r'PAYPAL_CLIENT_ID = os\.environ\.get\("CAIRN_PRO_PAYPAL_CLIENT", "[^"]*"\)',
+            f'PAYPAL_CLIENT_ID = os.environ.get("CAIRN_PRO_PAYPAL_CLIENT", "{client_id}")',
+            source,
+            count=1,
+        )
+        if not count:
+            print("Could not find PAYPAL_CLIENT_ID in pro.py.")
+            return 1
+        source_path.write_text(source, encoding="utf-8")
+        print(f"In-app checkout is on: {source_path} now carries your PayPal client id (public, safe to commit).")
+        print("Commit and release; every copy of Cairn then sells Pro inside the app.")
+        return 0
+    if action == "issue":
+        path = pro.seller_key_path()
+        private = pro._load(path, {})
+        if not private.get("d"):
+            print(f"No seller key at {path}. Run: cairn pro keygen --install")
+            return 1
+        if private["n"] != pro.SELLER_PUBLIC_KEY.get("n"):
+            print("Warning: this seller key does not match the public key built into this copy of Cairn.")
+        key = pro.issue_key(args.email, args.plan, private, days=args.days)
+        print(key)
+        return 0
+    if action == "verify":
+        try:
+            payload = pro.verify_key(args.key)
+        except ValueError as error:
+            print(f"Not valid: {error}")
+            return 1
+        print(json.dumps(payload, indent=2))
+        return 0
+    status = pro.License().status()
+    if status["pro"]:
+        until = f" until {status['expires']}" if status["expires"] else ""
+        print(f"Cairn Pro: {status['planName']}{until} ({status['email'] or 'no e-mail'}, from {status['source']})")
+    else:
+        print(f"Free plan. Trial goals left: {status['trialLeft']}. {status['reason']}".strip())
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cairn",
@@ -221,6 +308,22 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--source", help="folder to publish from (default: the brain; can be an Obsidian vault)")
     publish_parser.add_argument("--folder", help="write into this local clone instead of using the GitHub API")
     publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
+    pro_parser = sub.add_parser("pro", help="Cairn Pro: plan status, and key tools for the seller")
+    pro_sub = pro_parser.add_subparsers(dest="pro_command")
+    pro_sub.add_parser("status", help="show this computer's plan (default)")
+    keygen_parser = pro_sub.add_parser("keygen", help="seller: make the signing key pair (once)")
+    keygen_parser.add_argument("--install", action="store_true", help="write the public key into cairn/pro.py")
+    keygen_parser.add_argument("--force", action="store_true", help="replace an existing seller key")
+    issue_parser = pro_sub.add_parser("issue", help="seller: print a signed Pro key for a buyer")
+    issue_parser.add_argument("--email", required=True)
+    issue_parser.add_argument("--plan", default="lifetime", help="month or lifetime (default: lifetime)")
+    issue_parser.add_argument("--days", type=int, default=None, help="override the plan length (0 = never ends)")
+    sell_parser = pro_sub.add_parser("sell", help="seller: switch the in-app checkout on (one command)")
+    sell_parser.add_argument("--paypal-client-id", required=True, help="public client id of your PayPal REST app")
+    sell_parser.add_argument("--install", action="store_true", help=argparse.SUPPRESS)
+    sell_parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
+    verify_parser = pro_sub.add_parser("verify", help="check a Pro key")
+    verify_parser.add_argument("key")
     return parser
 
 
@@ -240,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
         "publish": cmd_publish,
         "serve": cmd_serve,
         "desktop": cmd_desktop,
+        "pro": cmd_pro,
         None: cmd_serve,
     }
     if args.command is None:

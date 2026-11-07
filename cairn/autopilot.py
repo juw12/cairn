@@ -7,9 +7,8 @@ until the goal is done and verified. Progress is written into the task note, so 
 remembers what happened. Comments are optional steering. It stops only for hard stops
 (money, sending to people, final submit, deleting data, credentials).
 
-Licensing: Autopilot is Cairn Pro. Keys are sold on Gumroad and checked with Gumroad's public
-license API (no server of ours). One free trial goal per machine. Everything else in Cairn
-stays free. Standard library only.
+Licensing: Autopilot is Cairn Pro, bought and unlocked inside the app (see pro.py). One free
+trial goal per machine. Everything else in Cairn stays free. Standard library only.
 """
 
 from __future__ import annotations
@@ -23,168 +22,13 @@ import socket
 import subprocess
 import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import core
 from .brain import Brain, ConflictError
-
-# ------------------------------------------------------------------ plan / license
-
-GUMROAD_PRODUCT_ID = os.environ.get("CAIRN_PRO_PRODUCT", "")  # set once the Gumroad product exists
-BUY_URL = os.environ.get("CAIRN_PRO_BUY_URL", "https://juw12.gumroad.com/l/cairn-pro")
-VERIFY_URL = "https://api.gumroad.com/v2/licenses/verify"
-TRIAL_GOALS = 1
-REVERIFY_AFTER = timedelta(days=7)
-OFFLINE_GRACE = timedelta(days=30)
-
-
-class PlanError(Exception):
-    """Autopilot needs Cairn Pro (or a free trial goal)."""
-
-
-def config_dir() -> Path:
-    return Path(os.environ.get("CAIRN_HOME") or (Path.home() / ".cairn"))
-
-
-def _load(path: Path, default):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return default
-
-
-def _save(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(temp, path)
-
-
-def gumroad_verify(key: str, product_id: str) -> dict:
-    """Ask Gumroad whether a license key is a live purchase. Returns {valid, email, reason}."""
-    data = urllib.parse.urlencode({
-        "product_id": product_id,
-        "license_key": key,
-        "increment_uses_count": "false",
-    }).encode("utf-8")
-    request = urllib.request.Request(VERIFY_URL, data=data, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        try:
-            payload = json.loads(error.read().decode("utf-8"))
-        except (ValueError, OSError):
-            raise ConnectionError(f"Gumroad answered {error.code}") from error
-    except (urllib.error.URLError, OSError, ValueError) as error:
-        raise ConnectionError(f"could not reach Gumroad: {error}") from error
-    if not payload.get("success"):
-        return {"valid": False, "email": "", "reason": payload.get("message") or "That key is not valid."}
-    purchase = payload.get("purchase") or {}
-    for flag, reason in (
-        ("refunded", "This purchase was refunded."),
-        ("chargebacked", "This purchase was charged back."),
-        ("subscription_cancelled_at", "The subscription was cancelled."),
-        ("subscription_failed_at", "The last subscription payment failed."),
-    ):
-        if purchase.get(flag):
-            return {"valid": False, "email": purchase.get("email", ""), "reason": reason}
-    return {"valid": True, "email": purchase.get("email", ""), "reason": ""}
-
-
-class License:
-    """Cairn Pro state for this machine, kept in ~/.cairn (never inside a brain or repo)."""
-
-    def __init__(self, home: Path | None = None, verify=gumroad_verify, product_id: str | None = None):
-        self.home = home or config_dir()
-        self.verify = verify
-        self.product_id = GUMROAD_PRODUCT_ID if product_id is None else product_id
-        self.lock = threading.Lock()
-
-    @property
-    def path(self) -> Path:
-        return self.home / "license.json"
-
-    @property
-    def trial_path(self) -> Path:
-        return self.home / "trial.json"
-
-    def _record(self) -> dict:
-        return _load(self.path, {})
-
-    def trial_left(self) -> int:
-        used = int(_load(self.trial_path, {}).get("goals_used", 0))
-        return max(0, TRIAL_GOALS - used)
-
-    def use_trial(self) -> None:
-        data = _load(self.trial_path, {})
-        data["goals_used"] = int(data.get("goals_used", 0)) + 1
-        _save(self.trial_path, data)
-
-    def is_pro(self) -> bool:
-        record = self._record()
-        if not record.get("key") or not record.get("valid"):
-            return False
-        checked = datetime.fromisoformat(record.get("checked", "1970-01-01T00:00:00"))
-        if datetime.now() - checked < REVERIFY_AFTER or not self.product_id:
-            return True
-        try:
-            result = self.verify(record["key"], self.product_id)
-        except ConnectionError:
-            return datetime.now() - checked < OFFLINE_GRACE
-        record.update(valid=result["valid"], checked=datetime.now().isoformat(timespec="seconds"), reason=result["reason"])
-        _save(self.path, record)
-        return result["valid"]
-
-    def status(self) -> dict:
-        pro = self.is_pro()
-        record = self._record()
-        return {
-            "plan": "pro" if pro else ("trial" if self.trial_left() else "free"),
-            "pro": pro,
-            "email": record.get("email", "") if pro else "",
-            "trialLeft": self.trial_left(),
-            "buyUrl": BUY_URL,
-            "checkoutReady": bool(self.product_id),
-            "reason": "" if pro else record.get("reason", ""),
-        }
-
-    def activate(self, key: str) -> dict:
-        key = key.strip()
-        if not key:
-            raise ValueError("Paste the license key from your Gumroad receipt.")
-        if not self.product_id:
-            raise ValueError("Cairn Pro checkout is not set up yet (no Gumroad product id).")
-        with self.lock:
-            result = self.verify(key, self.product_id)
-            if not result["valid"]:
-                raise ValueError(result["reason"] or "That key is not valid.")
-            _save(self.path, {
-                "key": key,
-                "valid": True,
-                "email": result["email"],
-                "checked": datetime.now().isoformat(timespec="seconds"),
-            })
-        return self.status()
-
-    def deactivate(self) -> dict:
-        if self.path.exists():
-            self.path.unlink()
-        return self.status()
-
-    def can_start(self) -> str:
-        """'pro', 'trial', or raise PlanError."""
-        if self.is_pro():
-            return "pro"
-        if self.trial_left() > 0:
-            return "trial"
-        raise PlanError("Autopilot is part of Cairn Pro. Your free trial goal is used up.")
-
+from .pro import License, PlanError, _load, _save, config_dir  # noqa: F401  (re-exported)
 
 # ------------------------------------------------------------------ engine (OpenCode)
 

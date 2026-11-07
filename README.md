@@ -86,18 +86,26 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 ## Cairn Pro: Autopilot
 
 Everything above is free and stays free. **Autopilot** is the one paid feature, and it is how you support Cairn.
+Buying and unlocking both happen inside the app; there is no store website.
 
 - **Try it free:** every computer gets one trial goal.
-- **Get Pro:** buy a key at [juw12.gumroad.com/l/cairn-pro](https://juw12.gumroad.com/l/cairn-pro), paste it in
-  *Autopilot -> Activate*. The key is checked with Gumroad's public license API and stored in `~/.cairn/license.json`
-  (never in your brain or repo). Offline? A verified key keeps working for 30 days.
+- **Buy in the app:** *Autopilot -> Cairn Pro* shows the plans (30 days or lifetime) and an embedded checkout
+  (card or PayPal). Pro turns on the moment the payment completes; the receipt is kept in `~/.cairn/license.json`
+  (never in your brain or repo).
+- **Pro keys:** a key (`CAIRN1...`) is signed by the seller and checked offline by the app, so it works without
+  internet and cannot be made up. Use one to move Pro to another computer: *Autopilot -> Have a Pro key?*
 - **What runs where:** Autopilot drives [OpenCode](https://opencode.ai) on your own machine with whatever model you
-  configured there. Cairn sends nothing anywhere except the license check to Gumroad.
+  configured there. The only outside call Cairn makes for Pro is the checkout itself, when you choose to buy.
 - **Make it yours:** add `brain/autopilot.md` with your standing defaults ("big files go to E:", "always add tests",
   "publish to GitHub when done") and Autopilot follows them on every goal.
 
-Cairn is MIT-licensed, so you can read exactly what Autopilot does (`cairn/autopilot.py`). Pro buys you the convenience,
-updates and the knowledge that the project keeps going.
+**Selling it (maintainer):** `cairn pro keygen --install` makes the signing key once (private half stays in
+`~/.cairn/seller/`, back it up), `cairn pro issue --email buyer@x.com --plan lifetime` prints a key, prices live in
+`PLANS` in `cairn/pro.py`, and `cairn pro sell --paypal-client-id <id>` (the public id of a PayPal REST app) switches
+the in-app checkout on in one step.
+
+Cairn is MIT-licensed, so you can read exactly what Autopilot and Pro do (`cairn/autopilot.py`, `cairn/pro.py`). The
+lock is honest, not DRM: Pro buys you the convenience, updates and the knowledge that the project keeps going.
 
 ## Use it
 

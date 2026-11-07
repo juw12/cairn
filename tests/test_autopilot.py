@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from cairn.autopilot import Autopilot, License, PlanError, parse_reply
+from cairn.pro import generate_keypair, issue_key
 from cairn.brain import Brain
 from cairn.server import make_server
 
@@ -34,8 +35,13 @@ class FakeEngine:
         return reply, session_id or "ses_fake", ""
 
 
-def verify_ok(key, product_id):
-    return {"valid": key == "GOOD-KEY", "email": "buyer@example.com", "reason": "" if key == "GOOD-KEY" else "That key is not valid."}
+TEST_SELLER = generate_keypair(1024)  # a throwaway seller key; small is fine for tests
+TEST_PUBLIC = {"n": TEST_SELLER["n"], "e": TEST_SELLER["e"]}
+GOOD_KEY = issue_key("buyer@example.com", "lifetime", TEST_SELLER)
+
+
+def test_license(home):
+    return License(home, public_key=TEST_PUBLIC, paypal_client_id="")
 
 
 def wait_for(predicate, timeout=5.0):
@@ -55,7 +61,7 @@ class AutopilotTests(unittest.TestCase):
         self.brain.root.mkdir(parents=True)
         self.brain.init()
         self.brain.create("decision", "Use SQLite for reports", body="We store reports in SQLite.")
-        self.license = License(self.home, verify=verify_ok, product_id="prod_123")
+        self.license = test_license(self.home)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -99,7 +105,7 @@ class AutopilotTests(unittest.TestCase):
             pilot.start("second goal")
         with self.assertRaises(ValueError):
             self.license.activate("BAD-KEY")
-        status = self.license.activate("GOOD-KEY")
+        status = self.license.activate(GOOD_KEY)
         self.assertTrue(status["pro"])
         self.assertEqual(pilot.start("second goal")["plan"], "pro")
         self.assertFalse(self.license.deactivate()["pro"])
@@ -125,7 +131,7 @@ class AutopilotApiTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.brain = Brain(self.tmp)
         self.brain.init()
-        license = License(self.tmp / "home", verify=verify_ok, product_id="prod_123")
+        license = test_license(self.tmp / "home")
         license.use_trial()  # trial already spent
         pilot = Autopilot(self.brain, engine=FakeEngine([]), license=license, home=self.tmp / "home")
         self.server = make_server(self.brain, port=0, autopilot=pilot)
@@ -154,7 +160,7 @@ class AutopilotApiTests(unittest.TestCase):
         self.assertEqual(status, 402)
         status, data = self.call("POST", "/api/autopilot/license", {"key": "BAD-KEY"})
         self.assertEqual(status, 400)
-        status, data = self.call("POST", "/api/autopilot/license", {"key": "GOOD-KEY"})
+        status, data = self.call("POST", "/api/autopilot/license", {"key": GOOD_KEY})
         self.assertEqual(status, 200)
         self.assertTrue(data["pro"])
         status, job = self.call("POST", "/api/autopilot/start", {"goal": "do a thing"})
