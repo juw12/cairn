@@ -14,7 +14,30 @@ const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true" class="icon"><rect x="9
 const SPEAK = '<svg viewBox="0 0 24 24" aria-hidden="true" class="icon sm"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>';
 const KIND_LABEL = { log: "Log", task: "Task", idea: "Idea", decision: "Decision", note: "Note", mood: "Mood" };
 
+const HINT_KEY = "cairn.voicelog.hinted";
+// Languages the browsers' speech engines handle well; "" follows the browser.
+export const LANGS = [
+  ["", "Browser language"],
+  ["en-US", "English (US)"],
+  ["en-GB", "English (UK)"],
+  ["id-ID", "Bahasa Indonesia"],
+  ["zh-TW", "中文 (台灣)"],
+  ["zh-CN", "中文 (中国)"],
+  ["ja-JP", "日本語"],
+  ["ko-KR", "한국어"],
+  ["es-ES", "Español"],
+  ["fr-FR", "Français"],
+  ["de-DE", "Deutsch"],
+  ["nl-NL", "Nederlands"],
+  ["pt-BR", "Português (Brasil)"],
+  ["hi-IN", "हिन्दी"],
+];
+// "Hey Cairn …" (and what speech engines often hear instead).
+const WAKE_RE = /\b(?:hey|hi|ok|okay)[,\s]+(?:cairn|cairns|karen|kern|kaine|cairo)\b[,.!?]*\s*(.*)$/i;
+const online = () => navigator.onLine !== false;
+
 let recognizer = null;
+let wakeRecognizer = null;
 let listening = false;
 let wantListening = false;
 let undoStack = [];
@@ -23,9 +46,9 @@ let journalWired = null;
 
 export function prefs() {
   try {
-    return { autoListen: true, keepListening: false, review: false, lang: "", ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
+    return { autoListen: true, keepListening: false, review: false, lang: "", wake: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
   } catch {
-    return { autoListen: true, keepListening: false, review: false, lang: "" };
+    return { autoListen: true, keepListening: false, review: false, lang: "", wake: false };
   }
 }
 
@@ -61,8 +84,18 @@ export function initVoiceLog() {
   fab.setAttribute("aria-label", "Log your day by voice or typing (L)");
   fab.title = "Log your day (L)";
   fab.innerHTML = `${MIC}<span class="log-fab-label">Log</span>`;
+  if (!localStorage.getItem(HINT_KEY)) {
+    fab.insertAdjacentHTML("beforeend", `<span class="log-fab-hint" aria-hidden="true">Tap or press <kbd>L</kbd>, then just talk</span>`);
+  }
   fab.addEventListener("click", () => openLogSheet());
   $("#app").appendChild(fab);
+  const redraw = () => {
+    updateVoiceUi();
+    syncWake();
+  };
+  window.addEventListener("online", redraw);
+  window.addEventListener("offline", redraw);
+  document.addEventListener("visibilitychange", () => syncWake());
   document.addEventListener("click", (event) => {
     if (event.target.closest?.("[data-log-open]")) openLogSheet();
     const memory = event.target.closest?.(".home-log-memory[data-jl-day]");
@@ -78,6 +111,86 @@ export function syncLogFab() {
   const streak = dl.streaks(days(), today());
   fab.classList.toggle("logged", streak.loggedToday);
   fab.dataset.streak = streak.current ? String(streak.current) : "";
+  syncWake();
+}
+
+// ============================================================ "Hey Cairn": optional background wake word
+
+export function syncWake() {
+  const want = prefs().wake && canWrite() && speechSupported() && !$(".log-sheet") && document.visibilityState !== "hidden";
+  const fab = $("#log-fab");
+  fab?.classList.toggle("wake-on", !!want);
+  if (fab) fab.title = want ? "Log your day (L). Listening for “Hey Cairn”" : "Log your day (L)";
+  if (want && !wakeRecognizer) startWake();
+  if (!want && wakeRecognizer) stopWake();
+}
+
+function startWake() {
+  const Engine = Recognition();
+  if (!Engine) return;
+  let engine;
+  try {
+    engine = new Engine();
+  } catch {
+    return;
+  }
+  wakeRecognizer = engine;
+  engine.lang = prefs().lang || navigator.language || "en-US";
+  engine.continuous = true;
+  engine.interimResults = false;
+  engine.onresult = (event) => {
+    for (let i = event.resultIndex ?? 0; i < event.results.length; i++) {
+      const result = event.results[i];
+      if (!result.isFinal) continue;
+      const match = WAKE_RE.exec(result[0]?.transcript || "");
+      if (match) return wake(match[1].trim());
+    }
+  };
+  engine.onerror = (event) => {
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      setPref("wake", false);
+      toast("Microphone blocked, so “Hey Cairn” is off. Allow the mic in the site settings to use it.");
+    }
+  };
+  engine.onend = () => {
+    if (wakeRecognizer !== engine) return;
+    wakeRecognizer = null;
+    setTimeout(syncWake, 400);
+  };
+  try {
+    engine.start();
+  } catch {
+    wakeRecognizer = null;
+  }
+}
+
+function stopWake() {
+  const engine = wakeRecognizer;
+  wakeRecognizer = null;
+  try {
+    engine?.abort ? engine.abort() : engine?.stop();
+  } catch {
+    /* not running */
+  }
+}
+
+async function wake(rest) {
+  stopWake();
+  openLogSheet({ listen: !rest });
+  if (rest) {
+    await handleUtterance(rest);
+    if (prefs().keepListening && speechSupported() && !listening) startListening();
+  }
+}
+
+// Spoken names become @mentions when the person has been @mentioned before ("lunch with Sam" -> "@sam").
+export function linkPeople(text) {
+  const known = new Set();
+  for (const info of days().values()) for (const entry of info.entries) for (const person of entry.people || []) known.add(person);
+  if (!known.size) return text;
+  return text.replace(/(^|[\s,(])([A-Za-z][A-Za-z.'-]*)(?=$|[\s,.!?)])/g, (whole, lead, word) =>
+    known.has(word.toLowerCase()) ? `${lead}@${word.toLowerCase()}` : whole,
+  );
 }
 
 // ============================================================ the log sheet
@@ -91,6 +204,9 @@ export function openLogSheet({ listen } = {}) {
     $("#log-text")?.focus();
     return;
   }
+  localStorage.setItem(HINT_KEY, "1");
+  $(".log-fab-hint")?.remove();
+  stopWake();
   const wrap = document.createElement("div");
   wrap.className = "modal-wrap log-wrap";
   wrap.innerHTML = `<section class="log-sheet" role="dialog" aria-modal="true" aria-labelledby="log-title" tabindex="-1"></section>`;
@@ -123,6 +239,7 @@ export function closeLogSheet() {
   wrap.remove();
   document.body.classList.remove("log-open");
   $("#log-fab")?.focus();
+  setTimeout(syncWake, 300);
 }
 
 function drawSheet() {
@@ -152,7 +269,7 @@ function drawSheet() {
         ${MIC}<span class="log-ring" aria-hidden="true"></span>
       </button>
       <div class="log-voice-text">
-        <strong id="log-status">${supported ? (listening ? "Listening… speak naturally" : "Tap the mic and talk") : "No voice in this browser: type below"}</strong>
+        <strong id="log-status">${statusText()}</strong>
         <p id="log-live" class="log-live" aria-live="polite">${supported ? "Try “finished the export fix”, “todo call the bank”, “mood good” or “read it back”." : "Type below instead. Chrome, Edge and Safari support voice input."}</p>
       </div>
     </div>
@@ -187,6 +304,10 @@ function drawSheet() {
       <label class="check"><input type="checkbox" data-pref="keepListening" ${p.keepListening ? "checked" : ""}> Keep listening</label>
       <label class="check"><input type="checkbox" data-pref="review" ${p.review ? "checked" : ""}> Review before saving</label>
       <label class="check"><input type="checkbox" data-pref="autoListen" ${p.autoListen ? "checked" : ""}> Start the mic when I open this</label>
+      <label class="check" title="Keeps the microphone on while Cairn is open and opens this sheet when you say “Hey Cairn …”"><input type="checkbox" data-pref="wake" ${p.wake ? "checked" : ""} ${supported ? "" : "disabled"}> Listen for “Hey Cairn”</label>
+      <label class="log-lang">Language
+        <select data-pref-select="lang" aria-label="Speech language">${LANGS.map(([code, name]) => `<option value="${code}" ${code === (p.lang || "") ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
+      </label>
       <details class="log-help">
         <summary>Voice commands</summary>
         <ul>
@@ -198,6 +319,8 @@ function drawSheet() {
           <li><b>“read it back”</b>, <b>“what did I do yesterday”</b> → read aloud</li>
           <li><b>“weekly review”</b>, <b>“open today”</b>, <b>“open my memories”</b></li>
           <li><b>“stop”</b> → stop listening</li>
+          <li><b>“Hey Cairn, …”</b> from any screen (turn on “Listen for Hey Cairn”) → opens this and logs the rest</li>
+          <li>Names you have written as <b>@sam</b> before are linked when you say them</li>
         </ul>
       </details>
     </footer>`;
@@ -266,9 +389,23 @@ async function onSheetClick(event) {
 }
 
 function onSheetChange(event) {
+  const select = event.target.closest("[data-pref-select]");
+  if (select) {
+    setPref(select.dataset.prefSelect, select.value);
+    feedback(`Speech language: ${LANGS.find(([code]) => code === select.value)?.[1] || select.value}.`);
+    if (listening) {
+      stopListening(true);
+      setTimeout(() => startListening(), 200);
+    }
+    return;
+  }
   const pref = event.target.closest("[data-pref]");
   if (!pref) return;
   setPref(pref.dataset.pref, pref.checked);
+  if (pref.dataset.pref === "wake") {
+    feedback(pref.checked ? "Say “Hey Cairn, …” on any screen to log." : "No longer listening for “Hey Cairn”.");
+    syncWake();
+  }
   if (pref.dataset.pref === "keepListening" && !pref.checked && listening) feedback("Will stop after the next entry.");
 }
 
@@ -308,7 +445,7 @@ export async function handleUtterance(raw, { typed = false } = {}) {
     }
     return null;
   }
-  const intent = dl.voiceIntent(raw);
+  const intent = dl.voiceIntent(typed ? raw : linkPeople(raw));
   switch (intent.kind) {
     case "empty":
       return intent;
@@ -452,6 +589,7 @@ export function startListening() {
   const Engine = Recognition();
   if (!Engine) return feedback("Voice isn't available in this browser. Type instead.");
   wantListening = true;
+  stopWake();
   try {
     recognizer = new Engine();
   } catch {
@@ -517,6 +655,12 @@ export function stopListening(user = false) {
   updateVoiceUi();
 }
 
+function statusText() {
+  if (!speechSupported()) return "No voice in this browser: type below";
+  if (!online()) return "Offline: voice may not work, typing always does";
+  return listening ? "Listening… speak naturally" : "Tap the mic and talk";
+}
+
 function updateVoiceUi() {
   const box = $(".log-voice");
   if (!box) return;
@@ -527,7 +671,8 @@ function updateVoiceUi() {
     mic.setAttribute("aria-label", listening ? "Stop listening" : "Start listening");
   }
   const status = $("#log-status");
-  if (status && speechSupported()) status.textContent = listening ? "Listening… speak naturally" : "Tap the mic and talk";
+  if (status) status.textContent = statusText();
+  $(".log-voice")?.classList.toggle("is-offline", !online());
 }
 
 export function readAloud(offset = 0) {
@@ -571,7 +716,8 @@ export function journalView() {
   const all = days();
   const now = today();
   const streak = dl.streaks(all, now);
-  const series = dl.moodSeries(all, now, 30);
+  const range = state.moodRange === 90 ? 90 : 30;
+  const series = dl.moodSeries(all, now, range);
   const avg = dl.averageMood(series);
   const weekFrom = dl.weekStart(now);
   let weekEntries = 0;
@@ -585,28 +731,28 @@ export function journalView() {
   const recent = [...all.keys()].sort().reverse().filter((d) => all.get(d).entries.length).slice(0, 5);
   const todayInfo = all.get(now);
   const related = todayInfo ? dl.relatedDays(all, todayInfo.entries, now, 4) : [];
-  const { tags, links } = dl.mentions(all, dl.addDays(now, -29), now);
+  const { tags, links, people } = dl.mentions(all, dl.addDays(now, -29), now);
   return `${pageHead("Journal & memories", "Your daily log, one Markdown page per day. Tap the mic button (or press L) to log by voice; everything lands in brain/journal/ as plain text.", actions)}
     <section class="memory-stats">
       <div class="stat-card"><span class="stat-num">${streak.current}</span><span class="stat-label">day streak${streak.loggedToday ? "" : editable && streak.current ? " · log today to keep it" : ""}</span></div>
       <div class="stat-card"><span class="stat-num">${streak.longest}</span><span class="stat-label">longest streak</span></div>
       <div class="stat-card"><span class="stat-num">${[...all.values()].filter((i) => i.entries.length).length}</span><span class="stat-label">days logged · ${plural(totalEntries, "entry", "entries")}</span></div>
       <div class="stat-card"><span class="stat-num">${weekEntries}</span><span class="stat-label">entries this week</span></div>
-      <div class="stat-card"><span class="stat-num">${avg === null ? "–" : `${dl.MOODS[Math.round(avg) - 1].emoji} ${avg.toFixed(1)}`}</span><span class="stat-label">mood, last 30 days</span></div>
+      <div class="stat-card"><span class="stat-num">${avg === null ? "–" : `${dl.MOODS[Math.round(avg) - 1].emoji} ${avg.toFixed(1)}`}</span><span class="stat-label">mood, last ${range} days</span></div>
     </section>
     <div class="memory-grid">
       <section class="card memory-card heat-card">
         <div class="card-head"><h2>Every day</h2><span class="muted">${plural(18, "week")}</span></div>
         ${heatmapHtml(all, now)}
         <div class="heat-legend"><span>Less</span><i class="heat l0"></i><i class="heat l1"></i><i class="heat l2"></i><i class="heat l3"></i><span>More</span></div>
-        <div class="card-head" style="margin-top:14px"><h2>Mood</h2><span class="muted">30 days</span></div>
+        <div class="card-head" style="margin-top:14px"><h2>Mood</h2><span class="seg" role="group" aria-label="Mood range">${[30, 90].map((n) => `<button type="button" class="seg-btn ${range === n ? "on" : ""}" data-jl-range="${n}" aria-pressed="${range === n}">${n}d</button>`).join("")}</span></div>
         ${moodChart(series)}
       </section>
       <section class="card memory-card">
         <div class="card-head"><h2>Look back</h2></div>
         <ul class="lookbacks">${dl.lookBacks(all, now).map(lookBackRow).join("")}</ul>
         ${related.length ? `<div class="card-head" style="margin-top:12px"><h2>Linked to today</h2></div><ul class="related-days">${related.map((r) => `<li><button class="link-btn" data-jl-day="${r.day}">${esc(dl.prettyDay(r.day, "short"))}</button> <span class="muted">${r.shared.map(esc).join(", ")}</span></li>`).join("")}</ul>` : ""}
-        ${tags.length || links.length ? `<div class="card-head" style="margin-top:12px"><h2>On your mind</h2><span class="muted">30 days</span></div><div class="tags">${tags.slice(0, 6).map(([t, n]) => `<button class="tag" data-jl-search="#${esc(t)}">#${esc(t)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${links.slice(0, 6).map(([l, n]) => `<button class="tag" data-jl-search="${esc(l)}">${esc(core.resolveLink(state.notes, l)?.title || l)} <span class="muted">&nbsp;${n}</span></button>`).join("")}</div>` : ""}
+        ${tags.length || links.length || people.length ? `<div class="card-head" style="margin-top:12px"><h2>On your mind</h2><span class="muted">30 days</span></div><div class="tags">${people.slice(0, 6).map(([p, n]) => `<button class="tag person" data-jl-search="@${esc(p)}">@${esc(p)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${tags.slice(0, 6).map(([t, n]) => `<button class="tag" data-jl-search="#${esc(t)}">#${esc(t)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${links.slice(0, 6).map(([l, n]) => `<button class="tag" data-jl-search="${esc(l)}">${esc(core.resolveLink(state.notes, l)?.title || l)} <span class="muted">&nbsp;${n}</span></button>`).join("")}</div>` : ""}
       </section>
     </div>
     <section class="card memory-card">
@@ -651,7 +797,7 @@ function moodChart(series) {
   const area = `${path} L${known[known.length - 1].x.toFixed(1)} 70 L${known[0].x.toFixed(1)} 70 Z`;
   const rows = [1, 3, 5].map((score) => `<line x1="${left}" x2="${width}" y1="${yOf(score)}" y2="${yOf(score)}" class="grid"/>
     <text x="2" y="${yOf(score) + 5}" class="face">${dl.MOODS[score - 1].emoji}</text>`).join("");
-  return `<svg class="mood-chart" viewBox="0 0 ${width} 92" role="img" aria-label="Mood over the last 30 days, average ${(known.reduce((sum, pt) => sum + pt.p.score, 0) / known.length).toFixed(1)} out of 5">
+  return `<svg class="mood-chart" viewBox="0 0 ${width} 92" role="img" aria-label="Mood over the last ${series.length} days, average ${(known.reduce((sum, pt) => sum + pt.p.score, 0) / known.length).toFixed(1)} out of 5">
     ${rows}
     <path d="${area}" class="area"/>
     <path d="${path}" class="line"/>
@@ -661,12 +807,16 @@ function moodChart(series) {
   </svg>`;
 }
 
+function lookBackItem(e) {
+  return `<li>${e.time ? `<span class="entry-time">${esc(e.time)}</span> ` : ""}${e.mood ? e.mood.emoji + " " : ""}${inline(e.text.replace(/^(Task|Idea|Decision|Note):\s*/, "$1: ").replace(/^Mood:\s*\S+\s*/, ""))}</li>`;
+}
+
 function lookBackRow({ label, day, info }) {
   const entries = info?.entries || [];
   return `<li class="lookback ${entries.length ? "" : "empty"}">
     <div class="lookback-head"><strong>${esc(label)}</strong> <button class="link-btn muted" data-jl-day="${day}">${esc(dl.prettyDay(day, "short"))}</button></div>
     ${entries.length
-      ? `<ul>${entries.slice(0, 3).map((e) => `<li>${e.mood ? e.mood.emoji + " " : ""}${inline(e.text.replace(/^(Task|Idea|Decision|Note):\s*/, "$1: ").replace(/^Mood:\s*\S+\s*/, ""))}</li>`).join("")}${entries.length > 3 ? `<li class="muted">and ${entries.length - 3} more</li>` : ""}</ul>`
+      ? `<ul>${entries.slice(0, 3).map(lookBackItem).join("")}</ul>${entries.length > 3 ? `<details class="lookback-more"><summary>and ${entries.length - 3} more</summary><ul>${entries.slice(3).map(lookBackItem).join("")}</ul></details>` : ""}`
       : `<p class="muted">Nothing logged.</p>`}
   </li>`;
 }
@@ -709,6 +859,11 @@ export function wireJournal() {
       $("#journal-results").innerHTML = searchResults(days(), state.journalQuery);
       input.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
+    }
+    const rangeButton = event.target.closest("[data-jl-range]");
+    if (rangeButton) {
+      state.moodRange = Number(rangeButton.dataset.jlRange);
+      return render();
     }
     const action = event.target.closest("[data-jl]");
     if (!action) return;
