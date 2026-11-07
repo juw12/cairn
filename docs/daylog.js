@@ -6,6 +6,7 @@ const ENTRY_RE = /^- (?:(\d{1,2}:\d{2})\s+)?(.*\S.*)$/;
 const KIND_RE = /^(Task|Idea|Decision|Note|Mood):\s*(.*)$/;
 const TAG_RE = /(^|\s)#([A-Za-z0-9][A-Za-z0-9_/-]*)/g;
 const LINK_RE = /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g;
+const PERSON_RE = /(^|[\s(])@([A-Za-z][A-Za-z0-9_.-]*[A-Za-z0-9]|[A-Za-z])/g;
 
 export const MOODS = [
   { score: 1, label: "awful", words: ["awful", "terrible", "horrible", "miserable", "exhausted"] },
@@ -105,7 +106,7 @@ export function parseEntries(body) {
       const score = /\((\d)\/5\)/.exec(text);
       mood = score ? MOODS[Number(score[1]) - 1] || null : moodFromWords(kindMatch[2]);
     }
-    entries.push({ line: index, time, text, kind, mood, tags: tagsIn(text), links: linksIn(text) });
+    entries.push({ line: index, time, text, kind, mood, tags: tagsIn(text), links: linksIn(text), people: peopleIn(text) });
   });
   return entries;
 }
@@ -115,6 +116,16 @@ export function tagsIn(text) {
   for (const match of String(text).matchAll(TAG_RE)) {
     const tag = match[2].toLowerCase();
     if (!out.includes(tag)) out.push(tag);
+  }
+  return out;
+}
+
+// @people mentioned in an entry ("lunch with @sam"), lower-cased, without the @.
+export function peopleIn(text) {
+  const out = [];
+  for (const match of String(text).replace(LINK_RE, "").matchAll(PERSON_RE)) {
+    const person = match[2].toLowerCase();
+    if (!out.includes(person)) out.push(person);
   }
   return out;
 }
@@ -311,22 +322,25 @@ export function searchEntries(days, query, limit = 60) {
 export function mentions(days, fromDay, toDay) {
   const tags = new Map();
   const links = new Map();
+  const people = new Map();
   for (const [day, info] of days) {
     if (day < fromDay || day > toDay) continue;
     for (const entry of info.entries) {
       for (const tag of entry.tags) tags.set(tag, (tags.get(tag) || 0) + 1);
       for (const link of entry.links) links.set(link, (links.get(link) || 0) + 1);
+      for (const person of entry.people || []) people.set(person, (people.get(person) || 0) + 1);
     }
   }
   const top = (map) => [...map.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
-  return { tags: top(tags), links: top(links) };
+  return { tags: top(tags), links: top(links), people: top(people) };
 }
 
 // Days (other than `exclude`) whose entries mention the same #tags or [[links]] as `entries`.
 export function relatedDays(days, entries, exclude, limit = 5) {
   const tags = new Set(entries.flatMap((e) => e.tags).filter((t) => !t.startsWith("mood")));
   const links = new Set(entries.flatMap((e) => e.links));
-  if (!tags.size && !links.size) return [];
+  const people = new Set(entries.flatMap((e) => e.people || []));
+  if (!tags.size && !links.size && !people.size) return [];
   const out = [];
   for (const day of [...days.keys()].sort().reverse()) {
     if (day === exclude) continue;
@@ -334,6 +348,7 @@ export function relatedDays(days, entries, exclude, limit = 5) {
     for (const entry of days.get(day).entries) {
       for (const tag of entry.tags) if (tags.has(tag) && !shared.includes("#" + tag)) shared.push("#" + tag);
       for (const link of entry.links) if (links.has(link) && !shared.includes(link)) shared.push(link);
+      for (const person of entry.people || []) if (people.has(person) && !shared.includes("@" + person)) shared.push("@" + person);
     }
     if (shared.length) out.push({ day, shared });
     if (out.length >= limit) break;
@@ -356,7 +371,7 @@ export function weeklyReview(days, notes, anyDayInWeek) {
   const avg = moods.length ? moods.reduce((a, b) => a + b, 0) / moods.length : null;
   const created = notes.filter((n) => n.type !== "journal" && typeof n.meta?.created === "string" && n.meta.created >= start && n.meta.created <= end);
   const done = notes.filter((n) => n.type === "task" && n.status === "done" && typeof n.meta?.done === "string" && n.meta.done >= start && n.meta.done <= end);
-  const { tags, links } = mentions(days, start, end);
+  const { tags, links, people } = mentions(days, start, end);
   const lines = [];
   lines.push(`Week ${week} of ${year}: ${prettyDay(start, "short")} to ${prettyDay(end, "short")}.`, "");
   lines.push("## Summary", "");
@@ -381,8 +396,9 @@ export function weeklyReview(days, notes, anyDayInWeek) {
     for (const note of done) if (!created.includes(note)) lines.push(`- Done: [[${note.slug}|${note.title}]]`);
     lines.push("");
   }
-  if (tags.length || links.length) {
+  if (tags.length || links.length || people.length) {
     lines.push("## Mentioned most", "");
+    if (people.length) lines.push(`- People: ${people.slice(0, 8).map(([p, n]) => `@${p} (${n})`).join(", ")}`);
     if (tags.length) lines.push(`- Tags: ${tags.slice(0, 8).map(([t, n]) => `#${t} (${n})`).join(", ")}`);
     if (links.length) lines.push(`- Notes: ${links.slice(0, 8).map(([l, n]) => `[[${l}]] (${n})`).join(", ")}`);
     lines.push("");

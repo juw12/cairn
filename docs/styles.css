@@ -1528,4 +1528,31 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .vibe-figures .figure .label { font-size: 13px; }
 @media (max-width: 600px) {
   :is(.vibe-log-form, .fb-form, .fb-row, .vibe-end) :is(.input, .select, .btn) { min-height: 40px; }
+
+/* round 2: wake word, first-run hint, language, offline, people, mood range */
+.log-fab.wake-on::before {
+  content: ""; position: absolute; left: 12px; top: 8px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--journal, #4f8a6e); box-shadow: 0 0 0 2px var(--bg); animation: wake-blink 2.4s ease-in-out infinite;
+}
+@keyframes wake-blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.log-fab-hint {
+  position: absolute; bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+  padding: 7px 12px; border-radius: 10px; background: var(--ink); color: var(--bg); font: 500 13px/1.3 var(--font);
+  box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .5); animation: hint-in .4s ease-out both;
+}
+.log-fab-hint::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border: 6px solid transparent; border-top-color: var(--ink); }
+.log-fab-hint kbd { font: 600 11px/1 var(--mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, var(--bg) 22%, transparent); color: inherit; border: 0; }
+@keyframes hint-in { from { opacity: 0; transform: translate(-50%, 6px); } }
+.log-lang { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.log-lang select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 3px 6px; max-width: 170px; }
+.log-voice.is-offline #log-status { color: var(--accent); }
+.tag.person { background: color-mix(in srgb, var(--journal, #4f8a6e) 14%, var(--sunken)); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg-btn { border: 0; background: transparent; color: var(--muted); font: 500 12px/1 var(--mono); padding: 4px 8px; cursor: pointer; }
+.seg-btn.on { background: var(--ink); color: var(--bg); }
+.lookback-more summary { cursor: pointer; color: var(--muted); font-size: 13px; padding-left: 18px; }
+.lookback-more ul { margin-top: 4px; }
+.lookbacks .entry-time { font: 11px var(--mono); color: var(--muted); }
+@media (prefers-reduced-motion: reduce) {
+  .log-fab.wake-on::before, .log-fab-hint { animation: none; }
 }

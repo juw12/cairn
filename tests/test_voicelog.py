@@ -290,5 +290,123 @@ class VoiceLogTests(unittest.TestCase):
         self.assertEqual(self.errors, [])
 
 
+    # ------------------------------------------------------------------ round 2: wake word, language, offline, people
+
+    def test_hey_cairn_wake_word_opens_the_sheet_and_logs_the_rest(self):
+        page = self.open()
+        page.evaluate("localStorage.setItem('cairn.voicelog', JSON.stringify({ wake: true }))")
+        page.reload()
+        page.wait_for_selector("#log-fab.wake-on")
+        page.wait_for_function("() => window.__recognizer && window.__recognizer.running && window.__recognizer.continuous")
+        self.assertEqual(page.locator(".log-sheet").count(), 0)
+        # Speech that does not start with the wake word is ignored.
+        self.say(page, "just chatting with someone nearby")
+        page.wait_for_timeout(150)
+        self.assertEqual(page.locator(".log-sheet").count(), 0)
+        self.say(page, "hey cairn finished the export")
+        page.wait_for_selector(".log-sheet")
+        page.wait_for_function(
+            "(p) => (window.cairn.state.files.find((f) => f.path === p)?.text || '').includes('Finished the export')",
+            arg=f"journal/{self.today}.md",
+        )
+        self.assertNotIn("just chatting", self.journal_text(page))
+        self.assertNotIn("hey cairn", self.journal_text(page).lower())
+        # Closing the sheet goes back to waiting for the wake word.
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".log-sheet", state="detached")
+        page.wait_for_function("() => window.__recognizer && window.__recognizer.running && window.__recognizer.continuous")
+        self.assertEqual(self.errors, [])
+
+    def test_wake_word_is_off_by_default_and_toggles_from_the_sheet(self):
+        page = self.open()
+        self.assertEqual(page.locator("#log-fab.wake-on").count(), 0)
+        page.click("#log-fab")
+        page.wait_for_selector(".log-sheet")
+        page.check(".log-sheet [data-pref='wake']")
+        self.assertTrue(page.evaluate("JSON.parse(localStorage.getItem('cairn.voicelog')).wake"))
+        page.keyboard.press("Escape")
+        page.wait_for_selector("#log-fab.wake-on")
+        self.assertEqual(self.errors, [])
+
+    def test_language_picker_saves_and_is_used_by_the_recognizer(self):
+        page = self.open()
+        self.open_sheet_listening(page)
+        page.select_option(".log-sheet [data-pref-select='lang']", "fr-FR")
+        self.assertEqual(page.evaluate("JSON.parse(localStorage.getItem('cairn.voicelog')).lang"), "fr-FR")
+        page.wait_for_function("() => window.__recognizer && window.__recognizer.running && window.__recognizer.lang === 'fr-FR'")
+        self.assertEqual(self.errors, [])
+
+    def test_offline_status_says_typing_still_works(self):
+        page = self.open()
+        page.context.set_offline(True)
+        page.click("#log-fab")
+        page.wait_for_selector(".log-sheet")
+        page.wait_for_function("() => /offline/i.test(document.querySelector('#log-status')?.textContent || '')")
+        self.assertEqual(page.locator(".log-voice.is-offline").count(), 1)
+        page.fill("#log-text", "wrote notes on the train")
+        page.keyboard.press("Enter")
+        page.wait_for_function(
+            "(p) => (window.cairn.state.files.find((f) => f.path === p)?.text || '').includes('Wrote notes on the train')",
+            arg=f"journal/{self.today}.md",
+        )
+        page.context.set_offline(False)
+        page.wait_for_function("() => !/offline/i.test(document.querySelector('#log-status')?.textContent || '')")
+
+    def test_first_run_hint_shows_once(self):
+        page = self.open()
+        self.assertEqual(page.locator("#log-fab .log-fab-hint").count(), 1)
+        page.click("#log-fab")
+        page.wait_for_selector(".log-sheet")
+        self.assertEqual(page.locator(".log-fab-hint").count(), 0)
+        page.keyboard.press("Escape")
+        page.reload()
+        page.wait_for_selector("#log-fab")
+        page.wait_for_timeout(100)
+        self.assertEqual(page.locator(".log-fab-hint").count(), 0)
+
+    def test_people_are_found_chipped_and_linked_from_speech(self):
+        page = self.open()
+        found = page.evaluate(
+            """async () => {
+              const dl = await import('./daylog.js');
+              return {
+                people: dl.peopleIn('Coffee with @Sam and @ana-lu, mail me at a@b.com'),
+                entry: dl.parseEntries(dl.appendEntry('', '09:00', 'Call @sam about #beta')).map((e) => e.people)[0],
+              };
+            }"""
+        )
+        self.assertEqual(found["people"], ["sam", "ana-lu"])
+        self.assertEqual(found["entry"], ["sam"])
+        page.click('#nav [data-go="journal"]')
+        page.wait_for_selector(".memory-stats")
+        chip = page.locator(".tag.person[data-jl-search='@sam']")
+        self.assertEqual(chip.count(), 1)
+        chip.click()
+        page.wait_for_selector("#journal-results .search-hits li")
+        self.assertEqual(page.input_value("#journal-search"), "@sam")
+        # A spoken name of someone already @mentioned becomes a mention.
+        self.open_sheet_listening(page)
+        self.say(page, "lunch with Sam by the river")
+        page.wait_for_function(
+            "(p) => (window.cairn.state.files.find((f) => f.path === p)?.text || '').includes('Lunch with @sam by the river')",
+            arg=f"journal/{self.today}.md",
+        )
+        self.assertEqual(self.errors, [])
+
+    def test_mood_range_and_look_back_details(self):
+        page = self.open()
+        page.click('#nav [data-go="journal"]')
+        page.wait_for_selector(".memory-stats")
+        self.assertEqual(page.get_attribute("[data-jl-range='30']", "aria-pressed"), "true")
+        page.click("[data-jl-range='90']")
+        page.wait_for_selector("[data-jl-range='90'][aria-pressed='true']")
+        self.assertIn("90", page.get_attribute(".mood-chart", "aria-label") or "")
+        self.assertRegex(page.inner_text(".lookbacks"), r"\d\d:\d\d")
+        if page.locator(".lookback-more").count():
+            page.click(".lookback-more summary")
+            self.assertTrue(page.evaluate("document.querySelector('.lookback-more').open"))
+        self.assertEqual(self.errors, [])
+
+
 if __name__ == "__main__":
     unittest.main()

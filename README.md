@@ -198,9 +198,11 @@ Press the round **Log** button at the bottom of any screen, or <kbd>L</kbd>. The
 | *read today*, *what did I do yesterday* | reads it back aloud |
 | *open today*, *weekly review*, *stop* | opens the page, writes the review, stops listening |
 
-"Hey Cairn" in front is fine and ignored. **Keep listening** logs line after line hands-free; **Review before saving** puts what you said in the box first. Speech recognition is the browser's own (Chrome, Edge, Safari); in browsers without it the mic is greyed out and the box works the same with typed prefixes (`todo:`, `idea:`, `mood:`). Nothing is sent anywhere by Cairn, and read-only brains never show the button.
+"Hey Cairn" in front is fine and ignored. **Keep listening** logs line after line hands-free; **Review before saving** puts what you said in the box first. Pick the **speech language** in the sheet (English, 中文, Bahasa Indonesia, Español, Français, Deutsch and more). Turn on **Listen for "Hey Cairn"** and the mic waits in the background while Cairn is open: say *"Hey Cairn, finished the export"* on any screen and the line is logged (a small dot on the button shows it is listening; it pauses when the tab is hidden). Write `@sam` to tag a person; once someone has been @mentioned, saying "lunch with Sam" links them too, and Journal lists the people on your mind.
 
-**Journal** turns the pages into memory: your streak, a heatmap of the last 18 weeks, a mood chart, what you wrote yesterday, a week, a month and a year ago, the tags and notes that were on your mind, days that share links with today, and search across every entry. **Weekly review** collects the week's entries, moods, finished tasks and new notes into `journal/2026-W45.md`, a normal note that shows up on the Map and in backlinks.
+Speech recognition is the browser's own (Chrome, Edge, Safari) and usually needs a connection; offline, the sheet says so and typing always works. In browsers without it the mic is greyed out and the box works the same with typed prefixes (`todo:`, `idea:`, `mood:`). Nothing is sent anywhere by Cairn, and read-only brains never show the button.
+
+**Journal** turns the pages into memory: your streak, a heatmap of the last 18 weeks, a mood chart (30 or 90 days), what you wrote yesterday, a week, a month and a year ago, the people, tags and notes that were on your mind, days that share links with today, and search across every entry. **Weekly review** collects the week's entries, moods, finished tasks and new notes into `journal/2026-W45.md`, a normal note that shows up on the Map and in backlinks.
 
 ### Share your brain and explore others
 
@@ -341,6 +343,9 @@ and suggested links work the same in both, and Cairn remembers which one you lik
 cairn init                               # create brain/ (never overwrites)
 cairn add "todo: ship v1 #release"       # capture from the terminal
 cairn add "decision: use SQLite"         # → brain/decisions/0001-use-sqlite.md
+cairn log "fixed the GPX bug #beta"     # a timestamped line in today's journal page
+cairn log "todo: book the train"        # the task, linked from the log
+cairn log                               # show today's log (--day yesterday, --days 7)
 cairn list --type task --status doing
 cairn todos                              # TODO/FIXME/HACK comments in the code
 cairn context                            # write brain/CONTEXT.md
@@ -386,6 +391,8 @@ Add one line to `AGENTS.md`, `CLAUDE.md` or `.github/copilot-instructions.md`:
 ```
 Read brain/CONTEXT.md before starting. Decisions in brain/decisions/ marked "accepted" are binding.
 ```
+
+`CONTEXT.md` also has a short **Lately** section with the last three days of the journal, so the assistant knows what you were just doing.
 
 ## Why
 

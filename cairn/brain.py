@@ -259,6 +259,19 @@ class Brain:
         mtime = self.write(relative, text, None)
         return {"path": relative, "text": text, "mtime": mtime}
 
+    # ------------------------------------------------------------ journal
+
+    def log(self, text: str, day: str, time: str) -> dict:
+        """Append "- HH:MM text" to journal/<day>.md under "## Log", creating the page if needed."""
+        relative = f"{core.FOLDERS['journal']}/{day}.md"
+        if self.resolve(relative).exists():
+            current = self.read(relative)
+            body = core.append_log(core.parse_note(current["text"])["body"], time, text)
+            updated = core.update_note_text(current["text"], None, body)
+            mtime = self.write(relative, updated, current["mtime"])
+            return {"path": relative, "text": updated, "mtime": mtime}
+        return self.create("journal", day, [], core.append_log("", time, text), day)
+
     # ------------------------------------------------------------ code inbox
 
     def scan_code(self, limit: int = MAX_TODOS) -> list[dict]:

@@ -33,8 +33,77 @@ def cmd_add(brain: Brain, args) -> int:
         return 2
     brain.init()
     captured = core.parse_capture(text)
+    if captured["type"] == "journal":
+        match = core._CAPTURE_RE.match(text)
+        page = brain.log(match.group(2).strip() if match else text, _today(), _now_time())
+        print(f"Logged to brain/{page['path']}")
+        return 0
     note = brain.create(captured["type"], captured["title"] or _today(), captured["tags"], captured["body"], _today())
     print(f"Added {captured['type']}: brain/{note['path']}")
+    return 0
+
+
+def _now_time() -> str:
+    return dt.datetime.now().strftime("%H:%M")
+
+
+def _resolve_day(value: str | None) -> str:
+    if not value or value == "today":
+        return _today()
+    if value == "yesterday":
+        return (dt.date.today() - dt.timedelta(days=1)).isoformat()
+    dt.date.fromisoformat(value)  # raises ValueError on a bad date
+    return value
+
+
+_LOG_KINDS = {"task": "Task", "idea": "Idea", "decision": "Decision", "note": "Note"}
+
+
+def cmd_log(brain: Brain, args) -> int:
+    try:
+        day = _resolve_day(args.day)
+    except ValueError:
+        print(f"Not a date: {args.day} (use YYYY-MM-DD, today or yesterday)", file=sys.stderr)
+        return 2
+    text = " ".join(args.text).strip()
+    if not text:
+        return _show_log(brain, day, max(1, args.days))
+    brain.init()
+    match = core._CAPTURE_RE.match(text)
+    prefix = match.group(1).lower() if match else ""
+    kind = core.CAPTURE_PREFIXES.get(prefix)
+    if kind in _LOG_KINDS:
+        captured = core.parse_capture(text)
+        note = brain.create(kind, captured["title"] or day, captured["tags"], captured["body"], _today())
+        slug = note["path"].rsplit("/", 1)[-1][:-3]
+        line = f"{_LOG_KINDS[kind]}: [[{slug}|{captured['title']}]]"
+        print(f"Added {kind}: brain/{note['path']}")
+    else:
+        line = match.group(2).strip() if kind == "journal" else text
+    page = brain.log(line, day, _now_time())
+    print(f"Logged to brain/{page['path']}")
+    return 0
+
+
+def _show_log(brain: Brain, day: str, days: int) -> int:
+    pages = {n["slug"]: n for n in brain.notes() if n["type"] == "journal"}
+    start = dt.date.fromisoformat(day)
+    shown = 0
+    for offset in range(days):
+        current = (start - dt.timedelta(days=offset)).isoformat()
+        note = pages.get(current)
+        entries = core.log_entries(note["body"]) if note else []
+        if days > 1 and not entries:
+            continue
+        label = dt.date.fromisoformat(current).strftime("%A")
+        print(f"{current} ({label})")
+        if not entries:
+            print('  Nothing logged. Add a line: cairn log "what happened"')
+        for entry in entries:
+            print(f"  {entry['time'] or '  ·  ':>5}  {core.plain_log_text(entry['text'])}")
+        shown += 1
+    if not shown:
+        print("Nothing logged in that range.")
     return 0
 
 
@@ -242,6 +311,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="create the brain/ folder layout")
     add_parser = sub.add_parser("add", help='capture: cairn add "todo: ship v1 #release"')
     add_parser.add_argument("text", nargs="+")
+    log_parser = sub.add_parser(
+        "log",
+        help='daily log: cairn log "fixed the GPX bug" (no text: show today)',
+        description="Add a timestamped line to today's journal page, or show it. Prefixes work like the app: "
+        "todo:, idea:, decision: and note: create that note and log a link to it.",
+    )
+    log_parser.add_argument("text", nargs="*")
+    log_parser.add_argument("--day", help="YYYY-MM-DD, today or yesterday (default: today)")
+    log_parser.add_argument("--days", type=int, default=1, help="show the last N days")
     list_parser = sub.add_parser("list", help="list notes")
     list_parser.add_argument("--type", choices=core.TYPES)
     list_parser.add_argument("--status")
@@ -299,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = {
         "init": cmd_init,
         "add": cmd_add,
+        "log": cmd_log,
         "list": cmd_list,
         "todos": cmd_todos,
         "context": cmd_context,

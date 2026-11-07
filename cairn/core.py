@@ -636,6 +636,76 @@ def scan_todos(text: str, path: str) -> list[dict]:
     return items
 
 
+# ---------------------------------------------------------------- journal (daily log)
+
+_LOG_LINE_RE = re.compile(r"^- (?:(\d{1,2}:\d{2})\s+)?(.*\S.*)$")
+_LOG_LINK_RE = re.compile(r"\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]")
+
+
+def log_entries(body: str) -> list[dict]:
+    """Bullets of a journal page as [{time, text}] ("- 09:12 text" or "- text")."""
+    entries = []
+    for line in body.replace("\r\n", "\n").split("\n"):
+        match = _LOG_LINE_RE.match(line)
+        if not match:
+            continue
+        text = match.group(2).strip()
+        if re.fullmatch(r"\[[ xX]\]\s*", text):
+            continue
+        entries.append({"time": match.group(1) or "", "text": text})
+    return entries
+
+
+def plain_log_text(text: str) -> str:
+    """[[slug|Title]] -> Title, markup stripped, spaces collapsed."""
+    text = _LOG_LINK_RE.sub(lambda m: m.group(2) or m.group(1).split("/")[-1], text)
+    text = re.sub(r"[*_`]", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def append_log(body: str, time: str, text: str) -> str:
+    """Add "- HH:MM text" under the page's "## Log" heading (created if missing); same rules as the web app."""
+    line = f"- {time} {text}".rstrip()
+    source = re.sub(r"\n- \s*(?=\n|$)", "", body.replace("\r\n", "\n"))
+    if not re.search(r"^## Log\s*$", source, re.M):
+        trimmed = source.rstrip()
+        return f"{trimmed + chr(10) * 2 if trimmed else ''}## Log\n\n{line}\n"
+    lines = source.split("\n")
+    start = next(i for i, value in enumerate(lines) if re.match(r"^## Log\s*$", value))
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if re.match(r"^#{1,2}\s", lines[i]):
+            end = i
+            break
+    insert_at = end
+    while insert_at > start + 1 and lines[insert_at - 1].strip() == "":
+        insert_at -= 1
+    lines.insert(insert_at, line)
+    if insert_at == start + 1:
+        lines.insert(insert_at, "")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def recent_log(notes: list[dict], today: str, days: int = 3) -> list[dict]:
+    """The latest journal days (up to today) that have entries: [{day, path, entries}] newest first."""
+    pages = [
+        n for n in notes
+        if n["type"] == "journal" and _DAY_RE.match(n["slug"]) and n["slug"] <= today
+    ]
+    out = []
+    for note in sorted(pages, key=lambda n: (n["slug"], n["path"]), reverse=True):
+        entries = log_entries(note["body"])
+        if entries and all(item["day"] != note["slug"] for item in out):
+            out.append({"day": note["slug"], "path": note["path"], "entries": entries})
+        if len(out) >= days:
+            break
+    return out
+
+
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
 # ---------------------------------------------------------------- context pack
 
 
@@ -689,6 +759,15 @@ def context_pack(notes: list[dict], project: str, today: str) -> str:
             out.extend(bullet(n) for n in items)
         else:
             out.append("_Nothing yet._")
+        out.append("")
+    lately = recent_log(notes, today)
+    if lately:
+        out.append("## Lately (from the journal)")
+        out.append("")
+        for item in lately:
+            shown = [_clip(plain_log_text(e["text"]), 80) for e in item["entries"][:4]]
+            more = len(item["entries"]) - len(shown)
+            out.append(f"- **{item['day']}**: {'; '.join(shown)}" + (f" (+{more} more)" if more else ""))
         out.append("")
     out.append("## How to use this file")
     out.append("")
