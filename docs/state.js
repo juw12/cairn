@@ -113,6 +113,8 @@ export function saveNote(path, changes) {
     if (changes.title !== undefined && changes.title !== note.title) properties.title = changes.title;
     if (changes.status !== undefined && changes.status !== note.status) properties.status = changes.status;
     if (changes.tags !== undefined && JSON.stringify(changes.tags) !== JSON.stringify(note.tags)) properties.tags = changes.tags;
+    // Any other front-matter property (the editor's Properties panel); core.REMOVE deletes one.
+    for (const [key, value] of Object.entries(changes.properties || {})) properties[key] = value;
     const original = fileByPath(path)?.text ?? "";
     const text = core.updateNoteText(original, properties, changes.body);
     if (text === original) return noteByPath(path);

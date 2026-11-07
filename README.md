@@ -185,6 +185,30 @@ write the link, double-click a missing note (a link to a note that doesn't exist
 *Watch it grow* replays the map in the order your notes were written. Daily notes named `2026-11-05.md`
 show up in Journal, wherever they live in the vault.
 
+### Writing notes
+
+The editor speaks Obsidian-flavoured Markdown, so a vault reads the same in both apps:
+
+- **Markdown:** callouts (`> [!tip]`, foldable with `+`/`-`), `==highlights==`, task lists you can tick in
+  the preview, nested lists, tables, footnotes, `%%comments%%`, inline `#tags` (click one to filter Notes),
+  images and attachments (`![[diagram.png|300]]`, PDFs) and note embeds (`![[note#Heading]]`).
+- **Write, Split or Preview**, with a live word count. In the editor, type `[[` for link suggestions (add `#` to
+  pick a heading); Enter continues lists; Ctrl+B, Ctrl+I and Ctrl+E (toggle preview) work as you'd expect.
+- **Under every note:** an outline of its headings, backlinks, links out, and *unlinked mentions* you can turn
+  into links in one click. Hover any link for a preview of the note.
+- **Properties:** edit, add or remove any front-matter key, not just the built-in ones.
+- **Rename** a note and every link to it is rewritten. Links to missing notes are shown dimmed; click one to create it.
+- **Find things:** Notes has a list or a folder tree, a ★ Bookmarks filter, and search operators: `tag:release`,
+  `path:ideas/`, `file:`, `type:`, `status:`, `line:`, `"exact phrase"` and `-exclude`.
+- **Templates:** notes in `Templates/` (or `_templates/`) appear in the command palette (Ctrl+K), as a new note or
+  inserted into the open one; `{{title}}`, `{{date:YYYY-MM-DD}}` and `{{time}}` are filled in. The palette also
+  has *Random note* and *Rename*.
+- **First run:** a short guided tour points at each part of the app. Skip it any time; replay it with the **?**
+  button at the bottom of the sidebar or *Take the tour* in the palette.
+
+Not there (on purpose, for now): community plugins, Canvas, rendered math and Mermaid diagrams (they show as
+code), and tabs.
+
 ### Keep a separate brain in sync with a vault
 
 When your notes live in a project's `brain/` folder (or a GitHub repo) and you also keep an Obsidian vault,

@@ -4,6 +4,7 @@ import * as core from "./core.js";
 import { renderMarkdown, escapeHtml as esc } from "./md.js";
 import { $, $$, STATUS_HINT, STATUS_LABEL, TYPE_META, byRecent, checklist, emptyState, icon, pageHead, plural, relativeTime, rowItem, snippetOf, statusPill, tagChips, toast, today } from "./ui.js";
 import { fileByPath, guide, markGuide, noteByPath, readOnly, saveNote, state } from "./state.js";
+import { bookmarks, countNotes, folderTree, searchNotes } from "./vault.js";
 import { render } from "./app.js";
 
 // ============================================================ views
@@ -173,25 +174,50 @@ export function decisions() {
     ${all.length ? groups : `<div class="card">${emptyState("decision", "No decisions yet", "Capture one with “decision: use SQLite” or press New decision. Each one gets a numbered file and a template.")}</div>`}`;
 }
 
+function folderHtml(folder, depth = 0) {
+  const folders = [...folder.folders.values()].sort((a, b) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1));
+  const notes = [...folder.notes].sort((a, b) => (a.path.toLowerCase() < b.path.toLowerCase() ? -1 : 1));
+  const closed = state.closedFolders || (state.closedFolders = new Set());
+  return `${folders
+    .map((child) => `<details class="folder" data-folder="${esc(child.path)}" ${closed.has(child.path) ? "" : "open"} style="--depth:${depth}">
+        <summary>${icon("folder", "sm")}<span class="name">${esc(child.name)}</span><span class="count">${countNotes(child)}</span></summary>
+        ${folderHtml(child, depth + 1)}
+      </details>`)
+    .join("")}${notes
+    .map((note) => `<button class="tree-note" data-open="${esc(note.path)}" style="--depth:${depth}" title="${esc(note.path)}"><span class="type-icon t-${note.type}">${icon(TYPE_META[note.type].icon, "sm")}</span><span class="name">${esc(note.path.split("/").pop().replace(/\.md$/i, ""))}</span>${note.title !== note.slug ? `<span class="muted title">${esc(note.title)}</span>` : ""}</button>`)
+    .join("")}`;
+}
+
 export function notesView() {
-  const filters = [["all", "All"], ["note", "Notes"], ["idea", "Ideas"], ["task", "Tasks"], ["decision", "Decisions"], ["journal", "Journal"]];
-  const query = state.notesQuery.trim().toLowerCase();
+  const filters = [["all", "All"], ["note", "Notes"], ["idea", "Ideas"], ["task", "Tasks"], ["decision", "Decisions"], ["journal", "Journal"], ["bookmarks", "Bookmarks"]];
+  const query = state.notesQuery.trim();
   const tagCounts = new Map();
   for (const note of state.notes) for (const tag of note.tags) tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
   const topTags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 12);
-  const items = state.notes
-    .filter((n) => state.notesFilter === "all" || n.type === state.notesFilter)
-    .filter((n) => !state.notesTag || n.tags.includes(state.notesTag))
-    .filter((n) => !query || n.title.toLowerCase().includes(query) || n.body.toLowerCase().includes(query) || n.tags.some((t) => t.includes(query)))
-    .sort(byRecent);
-  return `${pageHead("Notes", "Everything in the brain, newest first. Link notes with [[file-name]]; backlinks show up in each note.",
+  const starred = state.notesFilter === "bookmarks" ? bookmarks() : null;
+  const filtered = state.notes
+    .filter((n) => state.notesFilter === "all" || (starred ? starred.includes(n.path) : n.type === state.notesFilter))
+    .filter((n) => !state.notesTag || n.tags.includes(state.notesTag));
+  const items = (query ? searchNotes(filtered, query) : filtered).sort(starred && !query ? (a, b) => starred.indexOf(a.path) - starred.indexOf(b.path) : byRecent);
+  const layout = state.notesLayout === "folders" ? "folders" : "list";
+  const empty = starred && !query
+    ? emptyState("star", "No bookmarks yet", "Open a note and press the star to keep it one click away.")
+    : emptyState("search", "Nothing matches", "Try another word, or clear the filters. Search understands tag:, path:, file:, type:, status:, \"exact phrase\" and -exclude.");
+  return `${pageHead("Notes", "Everything in the brain. Link notes with [[file-name]]; backlinks show up in each note.",
     `<button class="btn primary" data-action="new" data-type="note">${icon("plus")} New note</button>`)}
     <div class="toolbar">
-      <div class="segmented" role="tablist" aria-label="Filter by type">${filters.map(([id, label]) => `<button class="${state.notesFilter === id ? "on" : ""}" data-filter="${id}" role="tab" aria-selected="${state.notesFilter === id}">${label}</button>`).join("")}</div>
-      <label class="search-field">${icon("search", "sm")}<span class="sr-only">Search notes</span><input class="input" id="notes-search" placeholder="Search titles, text and tags" value="${esc(state.notesQuery)}"></label>
+      <div class="segmented" role="tablist" aria-label="Filter by type">${filters.map(([id, label]) => `<button class="${state.notesFilter === id ? "on" : ""}" data-filter="${id}" role="tab" aria-selected="${state.notesFilter === id}">${id === "bookmarks" ? icon("star", "sm") : ""}${label}</button>`).join("")}</div>
+      <label class="search-field">${icon("search", "sm")}<span class="sr-only">Search notes</span><input class="input" id="notes-search" placeholder="Search… try tag:release or path:ideas/" value="${esc(state.notesQuery)}"></label>
+      <div class="segmented layout-toggle" role="tablist" aria-label="Layout">
+        <button class="${layout === "list" ? "on" : ""}" data-notes-layout="list" role="tab" aria-selected="${layout === "list"}" title="List">${icon("list", "sm")}<span class="sr-only">List</span></button>
+        <button class="${layout === "folders" ? "on" : ""}" data-notes-layout="folders" role="tab" aria-selected="${layout === "folders"}" title="Folders">${icon("folder", "sm")}<span class="sr-only">Folders</span></button>
+      </div>
     </div>
     ${topTags.length ? `<div class="tags" style="margin-bottom:14px">${topTags.map(([tag, count]) => `<button class="tag ${state.notesTag === tag ? "on" : ""}" data-tag="${esc(tag)}">#${esc(tag)} <span class="muted">&nbsp;${count}</span></button>`).join("")}</div>` : ""}
-    <div class="card list" id="notes-list">${items.length ? items.map(listRow).join("") : emptyState("search", "Nothing matches", "Try another word, or clear the filters.")}</div>`;
+    ${query ? `<p class="muted search-summary">${plural(items.length, "note")} match <code>${esc(query)}</code></p>` : ""}
+    ${layout === "folders"
+      ? `<div class="card tree" id="notes-tree">${items.length ? folderHtml(folderTree(items)) : empty}</div>`
+      : `<div class="card list" id="notes-list">${items.length ? items.map(listRow).join("") : empty}</div>`}`;
 }
 
 export function journal() {

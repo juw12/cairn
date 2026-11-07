@@ -21,6 +21,15 @@ CODE_EXTENSIONS = {
     ".yaml", ".toml", ".ini", ".f90", ".f", ".r", ".dart", ".ex", ".exs", ".hs", ".clj",
 }
 MAX_FILE_BYTES = 1_000_000
+MAX_ATTACHMENT_BYTES = 50_000_000
+# Attachments notes can embed (![[photo.png]]); served by /api/raw with their type.
+ATTACHMENT_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+    ".webp": "image/webp", ".svg": "image/svg+xml", ".bmp": "image/bmp", ".avif": "image/avif",
+    ".pdf": "application/pdf", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+    ".csv": "text/csv", ".txt": "text/plain",
+}
 MAX_TODOS = 500
 LOCAL_WRITE_TIMEOUT = 120  # add/commit of a big vault on a machine with busy antivirus
 NETWORK_TIMEOUT = 180  # pull / push / clone; sign-in prompts from Git Credential Manager count too
@@ -134,6 +143,43 @@ class Brain:
 
     def relative(self, path: Path) -> str:
         return path.relative_to(self.dir).as_posix()
+
+    def _inside(self, path: Path) -> bool:
+        return path == self.dir or self.dir in path.parents
+
+    def find_attachment(self, target: str, from_note: str = "") -> Path | None:
+        """An image or other attachment a note embeds, found the way Obsidian finds it.
+
+        Tries the path next to the note, then from the brain root, then any file with that name
+        (shallowest first). Only files inside the brain with an allowed extension are returned.
+        """
+        name = (target or "").strip().replace("\\", "/")
+        if not name or "\x00" in name or name.startswith("/") or (len(name) > 1 and name[1] == ":"):
+            return None
+        while name.startswith("./"):
+            name = name[2:]
+        if Path(name).suffix.lower() not in ATTACHMENT_TYPES:
+            return None
+        folder = from_note.replace("\\", "/").rsplit("/", 1)[0] if "/" in (from_note or "") else ""
+        for candidate in ([f"{folder}/{name}"] if folder else []) + [name]:
+            path = (self.dir / candidate).resolve()
+            if self._inside(path) and path.is_file():
+                return path
+        wanted = name.rsplit("/", 1)[-1].lower()
+        best = None
+        for current, dirs, names in os.walk(self.dir):
+            dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
+            depth = len(Path(current).relative_to(self.dir).parts)
+            if best is not None and depth >= best[0]:
+                continue
+            for entry in names:
+                if entry.lower() == wanted:
+                    best = (depth, Path(current) / entry)
+                    break
+        if best is None:
+            return None
+        path = best[1].resolve()
+        return path if self._inside(path) else None
 
     # ------------------------------------------------------------ files
 

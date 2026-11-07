@@ -100,6 +100,12 @@ export class ServerStore {
     return this.request("GET", "api/desktop");
   }
 
+  // Images and other attachments are served by the local server, which finds them the way
+  // Obsidian does (next to the note, from the brain root, or anywhere by file name).
+  async assetUrls(target, from = "") {
+    return [`api/raw?path=${encodeURIComponent(target)}&from=${encodeURIComponent(from)}`];
+  }
+
   async desktopAction(action, payload = {}) {
     return this.request("POST", "api/desktop", { ...payload, action });
   }
@@ -226,6 +232,38 @@ export class FolderStore {
     return { mtime: (await handle.getFile()).lastModified };
   }
 
+  async assetUrls(target, from = "") {
+    const name = target.trim().replaceAll("\\", "/").replace(/^\.\//, "");
+    const folder = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : "";
+    const tryPath = async (path) => {
+      try {
+        const file = await (await this.fileHandle(path)).getFile();
+        return URL.createObjectURL(file);
+      } catch {
+        return null;
+      }
+    };
+    for (const option of [folder ? `${folder}/${name}` : null, name]) {
+      if (!option || option.split("/").includes("..")) continue;
+      const url = await tryPath(option);
+      if (url) return [url];
+    }
+    // Anywhere in the brain by file name, shallowest first.
+    const base = name.split("/").pop().toLowerCase();
+    let best = null;
+    const walk = async (dir, prefix, depth) => {
+      for await (const [entry, handle] of dir.entries()) {
+        if (handle.kind === "directory") {
+          if (!entry.startsWith(".") && !SKIP_DIRS.has(entry) && depth < 8) await walk(handle, `${prefix}${entry}/`, depth + 1);
+        } else if (entry.toLowerCase() === base && (!best || best.depth > depth)) {
+          best = { handle, depth };
+        }
+      }
+    };
+    await walk(await this.brainDir(), "", 0);
+    return best ? [URL.createObjectURL(await best.handle.getFile())] : [];
+  }
+
   async remove(path) {
     let dir = await this.brainDir();
     const parts = path.split("/");
@@ -324,6 +362,10 @@ export class DemoStore {
   async todos() {
     return DEMO_TODOS;
   }
+
+  async assetUrls() {
+    return [];
+  }
 }
 
 // ------------------------------------------------------------ someone's public brain on GitHub (read-only)
@@ -362,6 +404,18 @@ export class GitHubStore {
 
   async list() {
     return this.files.map(({ path, text, mtime }) => ({ path, text, mtime }));
+  }
+
+  // Public repos serve files from raw.githubusercontent.com; private ones need a token, so those
+  // attachments show as a chip instead.
+  async assetUrls(target, from = "") {
+    const { owner, name, branch } = this.repo;
+    const clean = target.trim().replaceAll("\\", "/").replace(/^\.\//, "");
+    const folder = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : "";
+    const options = [...new Set([folder ? `${folder}/${clean}` : null, clean].filter(Boolean))];
+    return options
+      .filter((path) => !path.split("/").includes(".."))
+      .map((path) => `https://raw.githubusercontent.com/${owner}/${name}/${encodeURIComponent(branch || "main")}/${this.root}${path}`.replace(/ /g, "%20"));
   }
 
   assertWritable() {

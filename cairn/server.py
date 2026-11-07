@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .brain import Brain, ConflictError, PathError, SyncError
+from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
 
@@ -91,8 +91,42 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------ routes
 
+    def _serve_attachment(self):
+        """GET /api/raw?path=&from=: an image or file a note embeds.
+
+        Plain <img> tags can't send the X-Cairn header, so this one route only checks the Host
+        header, and it can only return files inside the brain with an attachment extension.
+        Responses are sandboxed (an SVG can't run script) and can't be embedded cross-site.
+        """
+        if not self._host_ok():
+            return self._error(HTTPStatus.FORBIDDEN, "unexpected Host header")
+        query = parse_qs(urlparse(self.path).query)
+        target = (query.get("path") or [""])[0]
+        from_note = (query.get("from") or [""])[0]
+        path = self.brain.find_attachment(target, from_note)
+        if path is None:
+            return self._error(HTTPStatus.NOT_FOUND, "no such attachment")
+        size = path.stat().st_size
+        if size > MAX_ATTACHMENT_BYTES:
+            return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "attachment too large")
+        data = path.read_bytes()
+        content_type = ATTACHMENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
+        self.send_response(200)
+        self.send_header("Content-Type", content_type + ("; charset=utf-8" if content_type.startswith("text/") else ""))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if path.suffix.lower() == ".svg":
+            # Opened on its own, an SVG is a page on this origin; sandbox it so it can't run script.
+            self.send_header("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         route = urlparse(self.path).path
+        if route == "/api/raw":
+            return self._serve_attachment()
         if route.startswith("/api/"):
             if not self._api_guard():
                 return

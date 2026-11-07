@@ -12,10 +12,12 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
-import { addSpark, closeDrawer, flushPending, openNote, promote, renderDrawer, useHeld } from "./drawer.js";
+import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, createMissing, flushPending, openNote, promote, renameOpenNote, renderDrawer, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { showWelcome } from "./welcome.js";
+import { maybeStartTour, startTour } from "./tour.js";
+import { initHoverPreview } from "./hover.js";
 
 // ============================================================ shell rendering
 
@@ -93,6 +95,7 @@ export function renderSidebarFoot() {
   parts.push(`
     <div class="foot-row">
       <button class="btn sm ghost" data-action="theme" aria-label="Toggle theme">${icon(theme === "dark" ? "sun" : "moon", "sm")} ${theme === "dark" ? "Light" : "Dark"}</button>
+      <button class="btn sm ghost icon-only" data-action="tour" aria-label="Take the tour" title="Take the tour">${icon("help", "sm")}</button>
       ${state.info?.desktop
         ? `<button class="btn sm ghost" data-action="settings">${icon("gear", "sm")} Settings</button>`
         : `<a class="btn sm ghost" href="${REPO_URL}" target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>`}
@@ -158,7 +161,26 @@ function wireGlobal() {
     const open = target.closest("[data-open]");
     if (open && !target.closest("[data-action]")) {
       event.preventDefault();
-      return openNote(open.dataset.open);
+      return openNote(open.dataset.open, { heading: open.dataset.heading || null });
+    }
+    const missing = target.closest("[data-missing]");
+    if (missing) {
+      event.preventDefault();
+      return createMissing(missing.dataset.missing);
+    }
+    const tagLink = target.closest("[data-tag-link]");
+    if (tagLink) {
+      event.preventDefault();
+      if (state.open) closeDrawer();
+      state.notesQuery = `tag:${tagLink.dataset.tagLink}`;
+      state.notesFilter = "all";
+      state.notesTag = null;
+      return setView("notes");
+    }
+    const notesLayout = target.closest("[data-notes-layout]");
+    if (notesLayout) {
+      state.notesLayout = notesLayout.dataset.notesLayout;
+      return renderView();
     }
     const filter = target.closest("[data-filter]");
     if (filter) {
@@ -184,7 +206,7 @@ function wireGlobal() {
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
-    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim"];
+    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add"];
     if (readOnly() && mutating.includes(action)) {
       toast("This brain is read-only. Ask to join to contribute.");
       return;
@@ -211,6 +233,10 @@ function wireGlobal() {
       },
       spark: addSpark,
       promote,
+      rename: renameOpenNote,
+      bookmark: () => bookmarkOpenNote(),
+      "prop-add": addProperty,
+      tour: startTour,
       delete: async () => {
         const note = noteByPath(state.open);
         if (!note) return;
@@ -271,6 +297,15 @@ function wireGlobal() {
       }
     }
   });
+
+  // Folder tree: remember which folders were collapsed across re-renders.
+  document.addEventListener("toggle", (event) => {
+    const folder = event.target.closest?.("details[data-folder]");
+    if (!folder) return;
+    state.closedFolders ||= new Set();
+    if (folder.open) state.closedFolders.delete(folder.dataset.folder);
+    else state.closedFolders.add(folder.dataset.folder);
+  }, true);
 
   document.addEventListener("change", (event) => {
     const move = event.target.closest("[data-move]");
@@ -421,6 +456,7 @@ export async function start(store) {
   refreshTodos();
   refreshGit();
   initObsidian();
+  maybeStartTour();
 }
 
 async function boot() {
@@ -432,6 +468,7 @@ async function boot() {
     $("#capture-input").placeholder = "Capture…";
   }
   wireGlobal();
+  initHoverPreview();
 
   const params = new URLSearchParams(location.search);
   const brainParam = params.get("brain");
