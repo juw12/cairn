@@ -700,7 +700,7 @@ def context_pack(notes: list[dict], project: str, today: str) -> str:
 # ---------------------------------------------------------------- vibe sessions and feedback
 
 # A session log line: `- 14:02 pass: pytest (12s)`. Anything else in the body is free text.
-LOG_KINDS = ("start", "note", "prompt", "pass", "fail", "commit", "end")
+LOG_KINDS = ("start", "note", "prompt", "pass", "fail", "commit", "skill", "end")
 _LOG_LINE_RE = re.compile(r"^\s*[-*]\s+(\d{1,2}:\d{2})\s+([a-z]+):\s*(.*)$")
 _STAMP_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})")
 FINISHED = ("shipped", "partial", "dropped")
@@ -714,6 +714,20 @@ def session_log(body: str) -> list[dict]:
         if match and match.group(2) in LOG_KINDS:
             entries.append({"time": match.group(1).zfill(5), "kind": match.group(2), "text": match.group(3).strip()})
     return entries
+
+
+_SKILL_RE = re.compile(r"^/([A-Za-z0-9][A-Za-z0-9_-]*)")
+
+
+def skill_name(text: str) -> str:
+    """`/refine app cairn · 6.5 -> 8.7` -> `/refine` (slash commands like /refine, /council, /ambitious-founder)."""
+    match = _SKILL_RE.match(text.strip())
+    return "/" + match.group(1).lower() if match else ""
+
+
+def log_kind(text: str, kind: str = "note") -> str:
+    """A plain note that starts with a slash command is a skill run."""
+    return "skill" if kind == "note" and skill_name(text) else kind
 
 
 def stamp_minutes(stamp) -> int | None:
@@ -767,6 +781,11 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
     passed = sum(1 for e in logs if e["kind"] == "pass")
     failed = sum(1 for e in logs if e["kind"] == "fail")
     ratings = [r for r in (feedback_rating(f) for f in feedback) if r is not None]
+    skills: dict[str, int] = {}
+    for entry in logs:
+        name = skill_name(entry["text"]) if entry["kind"] == "skill" else ""
+        if name:
+            skills[name] = skills.get(name, 0) + 1
     end = dt.date.fromisoformat(today)
     daily = []
     for offset in range(days - 1, -1, -1):
@@ -798,5 +817,6 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
         "feedback_addressed": sum(1 for f in feedback if f["status"] == "addressed"),
         "rating": int(10 * sum(ratings) / len(ratings) + 0.5) / 10 if ratings else None,
         "ratings": [ratings.count(stars) for stars in range(1, 6)],
+        "skills": skills,
         "daily": daily,
     }

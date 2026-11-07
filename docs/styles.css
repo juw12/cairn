@@ -1234,3 +1234,12 @@ pre.math { white-space: pre-wrap; }
   .log-row { grid-template-columns: 40px 56px minmax(0, 1fr); gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+.vibe-live.also { padding-top: 14px; }
+.vibe-live.also h2 { font-size: 22px; }
+.log-row.k-skill .kind { color: var(--feedback); font-weight: 600; }
+.skill-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
+.skill-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 8px; border: 1px solid var(--line); border-radius: 13px; font-size: 12.5px; }
+.skill-chip code { background: none; padding: 0; color: var(--feedback); }
+.skill-chip b { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--feedback-soft); color: var(--feedback); font-size: 11.5px; line-height: 18px; text-align: center; }
+.session-row .meta .icon { vertical-align: -2px; }

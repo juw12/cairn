@@ -200,6 +200,26 @@ async function mapLimited(items, limit, task) {
   return results;
 }
 
+// One folder's entries as [{ type: "file" | "dir", name, path, sha }], or null when nothing changed since
+// `etag`. A folder's sha changes whenever anything inside it does, and a 304 Not Modified doesn't count
+// against a signed-in rate limit, so polling this is cheap.
+export async function listFolderIfChanged(repo, folderPath, etag = "") {
+  const url = `${API}/repos/${repo.owner}/${repo.name}/contents/${encodePath(folderPath)}?ref=${encodeURIComponent(repo.branch)}`;
+  let response;
+  try {
+    response = await authFetch(url, { cache: "no-store", headers: etag ? { "If-None-Match": etag } : {} });
+  } catch (error) {
+    throw new GitHubError(error.message || "Can't reach GitHub.");
+  }
+  if (response.status === 304) return null;
+  const nextEtag = response.headers.get("etag") || "";
+  if (response.status === 404) return { etag: nextEtag, items: [] };
+  if (!response.ok) throw new GitHubError(`GitHub answered ${response.status}.`);
+  const data = await response.json();
+  const items = (Array.isArray(data) ? data : []).map(({ type, name, path, sha }) => ({ type, name, path, sha }));
+  return { etag: nextEtag, items };
+}
+
 // ------------------------------------------------------------ writes (signed in only)
 
 // Latest text and sha of one file, or null if it doesn't exist.

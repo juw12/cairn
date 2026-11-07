@@ -132,6 +132,7 @@ steps; feedback lives in `brain/feedback/` with an optional 1-5 rating.
 ```sh
 cairn vibe start "add dark mode" --agent claude   # opens a live session
 cairn vibe log "asked for a theme toggle" --kind prompt
+cairn vibe skill /refine "6.5 -> 8.7"              # skill runs: /refine, /council, /ambitious-founder, /precedent...
 cairn vibe check -- python -m pytest               # runs your tests, logs pass/fail with the summary line
 cairn vibe end --result shipped "toggle works"     # records commits and +/- lines since the start
 cairn feedback "toggle is hard to find on mobile" --rating 3 --from @alice
@@ -139,8 +140,15 @@ cairn vibe status                                  # the same stats in the termi
 ```
 
 Paste the instructions from the Vibe page into `AGENTS.md` or `CLAUDE.md` and your assistant reports its own
-progress. With the local app the page updates within seconds: new steps, commits and changed files appear as they
-happen. Stats: sessions, time, ship rate, checks passing, a 14-day activity chart, open feedback and the average
+progress. Any logged step that starts with a slash command counts as a skill run, and the page tallies them.
+
+- **Parallel agents:** run several sessions at once (one per terminal or git worktree). `start` prints the
+  session's slug; set `CAIRN_SESSION` to it in that terminal (or pass `--session`) and every command goes there.
+- **Live everywhere:** the local app updates within seconds, with commits and changed files counted since the
+  session started (exactly, from the commit it began on). A folder opened in Chrome or Edge refreshes every few
+  seconds. A GitHub brain you're signed in to refreshes every 20 seconds with conditional requests, so unchanged
+  checks don't use up your rate limit.
+- **Demo:** *Load a sample week* on the Vibe page of the [demo](https://juw12.github.io/cairn/?demo=1). Stats: sessions, time, ship rate, checks passing, a 14-day activity chart, open feedback and the average
 rating. No streaks, no leaderboards: everything is evidence you can open as a file.
 
 ### Share your brain and explore others

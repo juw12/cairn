@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import sys
 import time
 
@@ -167,17 +168,25 @@ def cmd_vibe(brain: Brain, args) -> int:
     brain.init()
     try:
         if args.action == "start":
+            others = vibe.live_sessions(brain)
             note = vibe.start(brain, " ".join(args.text), task=args.task or "", agent=args.agent or "")
+            slug = note["path"].rsplit("/", 1)[-1][:-3]
             print(f"Live: brain/{note['path']}  (open Cairn > Vibe to watch it)")
-        elif args.action == "log":
-            vibe.log(brain, " ".join(args.text), kind=args.kind)
+            if others:
+                print(f"{len(others)} other session(s) are live too. In this terminal, point every command at this one:")
+                print(f"  {'$env:CAIRN_SESSION = ' + repr(slug) if os.name == 'nt' else 'export CAIRN_SESSION=' + slug}"
+                      f"   (or add --session {slug})")
+        elif args.action in ("log", "skill"):
+            text = " ".join(args.text)
+            kind = "skill" if args.action == "skill" else args.kind
+            vibe.log(brain, text, kind=kind, session=args.session or "")
             print("Logged.")
         elif args.action == "check":
-            code, _ = vibe.check(brain, args.text)
+            code, _ = vibe.check(brain, args.text, session_slug=args.session or "")
             print(f"{'PASS' if code == 0 else 'FAIL'} logged to the live session.")
             return code
         elif args.action == "end":
-            note = vibe.end(brain, args.result, " ".join(args.text))
+            note = vibe.end(brain, args.result, " ".join(args.text), session_slug=args.session or "")
             print(f"Ended as {args.result}: brain/{note['path']}")
         else:
             print(vibe.stats_text(brain))
@@ -266,11 +275,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Live progress for AI-assisted coding, kept in brain/sessions/. Tell your assistant to run "
         "`cairn vibe log` after each step and `cairn vibe check -- <tests>` to record results; the app shows it as it happens.",
     )
-    vibe_parser.add_argument("action", choices=["start", "log", "check", "end", "status"])
+    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status"])
     vibe_parser.add_argument("text", nargs="*", help="goal / log text / end summary; for check, the command after --")
-    vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit")
+    vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--task", help="start: link a task, e.g. ship-v1")
     vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor")
+    vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest)")
     vibe_parser.add_argument("--result", default="shipped", choices=["shipped", "partial", "dropped"], help="end: the outcome")
     feedback_parser = sub.add_parser("feedback", help='record feedback: cairn feedback "toggle is hard to find" --rating 3')
     feedback_parser.add_argument("text", nargs="+")

@@ -92,6 +92,34 @@ class SignInTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ G3, G4
 
+    def test_vibe_follows_a_github_brain_live_when_signed_in(self):
+        page = self.open(f"?brain={REPO}#/board", session=session_json())
+        page.wait_for_selector(".board")
+        # An agent on another machine pushes a live session while you watch.
+        self.mock.set_text(REPO, "brain/sessions/2026-11-07-remote-agent.md",
+                           "---\ntitle: Remote agent\ntype: session\nstatus: live\nstarted: 2026-11-07T09:00\n---\n## Log\n\n- 09:00 start: Remote agent\n- 09:05 skill: /refine 6.0 -> 8.8\n")
+        page.click('#nav [data-go="vibe"]')
+        page.wait_for_function("() => document.querySelector('.vibe-live h2')?.innerText.includes('Remote agent')", timeout=8000)
+        self.assertIn("Following GitHub", page.inner_text(".vibe-live"))
+        # Later polls are conditional: GitHub answers 304 for an unchanged folder, which costs no rate limit.
+        for _ in range(50):
+            if any(listing["conditional"] for listing in self.mock.listings):
+                break
+            page.wait_for_timeout(100)
+        self.assertTrue(any(listing["conditional"] for listing in self.mock.listings))
+        self.mock.set_text(REPO, "brain/sessions/2026-11-07-remote-agent.md",
+                           self.mock.text(REPO, "brain/sessions/2026-11-07-remote-agent.md") + "- 09:20 pass: pytest · 40 passed\n")
+        page.wait_for_function("() => document.querySelector('.vibe-log')?.innerText.includes('40 passed')", timeout=8000)
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_on_someone_elses_brain_signed_out_does_not_poll(self):
+        page = self.open(f"?brain={REPO}", wait=".ro-banner")
+        page.click('#nav [data-go="vibe"]')
+        page.wait_for_selector(".vibe-figures")
+        page.wait_for_timeout(400)
+        self.assertEqual(self.mock.listings, [])
+        self.assertEqual(self.errors, [])
+
     def test_sign_in_then_create_edit_move_delete_on_github(self):
         page = self.open(f"?brain={REPO}", wait=".ro-banner")
         self.assertTrue(page.locator("#capture-form").is_hidden())

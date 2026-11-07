@@ -674,7 +674,7 @@ export function contextPack(notes, project, today) {
 // ------------------------------------------------------------ vibe sessions and feedback
 
 // A session log line: `- 14:02 pass: pytest (12s)`. Anything else in the body is free text.
-export const LOG_KINDS = ["start", "note", "prompt", "pass", "fail", "commit", "end"];
+export const LOG_KINDS = ["start", "note", "prompt", "pass", "fail", "commit", "skill", "end"];
 const LOG_LINE_RE = /^\s*[-*]\s+(\d{1,2}:\d{2})\s+([a-z]+):\s*(.*)$/;
 const STAMP_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/;
 export const FINISHED = ["shipped", "partial", "dropped"];
@@ -688,6 +688,19 @@ export function sessionLog(body) {
     }
   }
   return entries;
+}
+
+const SKILL_RE = /^\/([A-Za-z0-9][A-Za-z0-9_-]*)/;
+
+// `/refine app cairn · 6.5 -> 8.7` -> `/refine` (slash commands like /refine, /council, /ambitious-founder).
+export function skillName(text) {
+  const match = SKILL_RE.exec(String(text).trim());
+  return match ? `/${match[1].toLowerCase()}` : "";
+}
+
+// A plain note that starts with a slash command is a skill run.
+export function logKind(text, kind = "note") {
+  return kind === "note" && skillName(text) ? "skill" : kind;
 }
 
 // `2026-11-07T14:02` -> minutes on a common clock (only differences are meaningful).
@@ -738,6 +751,11 @@ export function vibeStats(notes, today, days = 14) {
   const failed = logs.filter((e) => e.kind === "fail").length;
   const ratings = feedback.map(feedbackRating).filter((r) => r !== null);
   const sum = (list, fn) => list.reduce((total, item) => total + fn(item), 0);
+  const skills = {};
+  for (const entry of logs) {
+    const name = entry.kind === "skill" ? skillName(entry.text) : "";
+    if (name) skills[name] = (skills[name] || 0) + 1;
+  }
   const [year, month, day] = today.split("-").map(Number);
   const end = Date.UTC(year, month - 1, day);
   const daily = [];
@@ -771,6 +789,7 @@ export function vibeStats(notes, today, days = 14) {
     feedback_addressed: feedback.filter((f) => f.status === "addressed").length,
     rating: ratings.length ? Math.floor((10 * ratings.reduce((a, b) => a + b, 0)) / ratings.length + 0.5) / 10 : null,
     ratings: [1, 2, 3, 4, 5].map((stars) => ratings.filter((r) => r === stars).length),
+    skills,
     daily,
   };
 }

@@ -61,17 +61,29 @@ def _notes(brain: Brain) -> list[dict]:
     return [core.note_from_file(f["path"], f["text"], f["mtime"]) for f in vibe_files(brain)]
 
 
-def live_session(brain: Brain) -> dict | None:
+def live_sessions(brain: Brain) -> list[dict]:
+    """Every live session, oldest first. Parallel agents (one per terminal or worktree) each keep one."""
     live = [n for n in _notes(brain) if n["type"] == "session" and n["status"] == "live"]
-    live.sort(key=lambda n: (str(n["meta"].get("started", "")), n["path"]))
+    return sorted(live, key=lambda n: (str(n["meta"].get("started", "")), n["path"]))
+
+
+def live_session(brain: Brain, slug: str = "") -> dict | None:
+    """The session to write to: `slug` (or $CAIRN_SESSION) if given, else the newest live one."""
+    live = live_sessions(brain)
+    wanted = (slug or os.environ.get("CAIRN_SESSION", "")).strip().removesuffix(".md").rsplit("/", 1)[-1]
+    if wanted:
+        return next((n for n in live if n["slug"] == wanted), None)
     return live[-1] if live else None
 
 
-def _require_live(brain: Brain) -> dict:
-    session = live_session(brain)
-    if not session:
-        raise VibeError('No live session. Start one with: cairn vibe start "what you are building"')
-    return session
+def _require_live(brain: Brain, slug: str = "") -> dict:
+    session = live_session(brain, slug)
+    if session:
+        return session
+    wanted = slug or os.environ.get("CAIRN_SESSION", "")
+    if wanted:
+        raise VibeError(f"No live session called {wanted!r}. Live now: {', '.join(n['slug'] for n in live_sessions(brain)) or 'none'}")
+    raise VibeError('No live session. Start one with: cairn vibe start "what you are building"')
 
 
 def _save(brain: Brain, note: dict, changes: dict | None = None, line: str = "") -> dict:
@@ -91,9 +103,6 @@ def start(brain: Brain, title: str, task: str = "", agent: str = "") -> dict:
     title = _one_line(title)
     if not title:
         raise VibeError("Give the session a goal, e.g. cairn vibe start \"add dark mode\"")
-    running = live_session(brain)
-    if running:
-        raise VibeError(f"{running['title']!r} is still live ({running['path']}). End it first: cairn vibe end")
     today = dt.date.today().isoformat()
     existing = [f["path"] for f in brain.files()]
     path = core.note_path("session", title, existing, today)
@@ -110,18 +119,18 @@ def start(brain: Brain, title: str, task: str = "", agent: str = "") -> dict:
     return brain.read(path)
 
 
-def log(brain: Brain, text: str, kind: str = "note") -> dict:
+def log(brain: Brain, text: str, kind: str = "note", session: str = "") -> dict:
     if kind not in core.LOG_KINDS:
         raise VibeError(f"Unknown kind {kind!r}; use one of {', '.join(core.LOG_KINDS)}")
     text = _one_line(text)
     if not text:
         raise VibeError("Nothing to log.")
-    return _save(brain, _require_live(brain), line=f"{kind}: {text}")
+    return _save(brain, _require_live(brain, session), line=f"{core.log_kind(text, kind)}: {text}")
 
 
-def check(brain: Brain, command: list[str], echo=print) -> tuple[int, dict]:
+def check(brain: Brain, command: list[str], echo=print, session_slug: str = "") -> tuple[int, dict]:
     """Run a command (tests, build, lint), stream its output and log pass/fail with its last line."""
-    session = _require_live(brain)
+    session = _require_live(brain, session_slug)
     if not command:
         raise VibeError("Give a command to run, e.g. cairn vibe check -- python -m pytest")
     shown = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
@@ -147,10 +156,10 @@ def check(brain: Brain, command: list[str], echo=print) -> tuple[int, dict]:
     return code, saved
 
 
-def end(brain: Brain, result: str = "shipped", summary: str = "") -> dict:
+def end(brain: Brain, result: str = "shipped", summary: str = "", session_slug: str = "") -> dict:
     if result not in RESULTS:
         raise VibeError(f"Result must be one of {', '.join(RESULTS)}")
-    session = _require_live(brain)
+    session = _require_live(brain, session_slug)
     changes = {"status": result, "ended": now_stamp()}
     activity = git_activity(brain, str(session["meta"].get("started", "")), str(session["meta"].get("base", "")))
     if activity["available"]:
@@ -258,10 +267,11 @@ def git_activity(brain: Brain, since: str = "", base: str = "") -> dict:
 
 def stats_text(brain: Brain) -> str:
     stats = core.vibe_stats(brain.notes(), dt.date.today().isoformat())
-    live = live_session(brain)
+    live = live_sessions(brain)
     hours, minutes = divmod(stats["minutes"], 60)
+    skills = ", ".join(f"{name} x{count}" for name, count in sorted(stats["skills"].items(), key=lambda kv: -kv[1]))
     lines = [
-        f"Live now: {live['title']} (since {live['meta'].get('started', '?')})" if live else "Live now: nothing",
+        "Live now: " + ("; ".join(f"{n['title']} [{n['slug']}] since {n['meta'].get('started', '?')}" for n in live) or "nothing"),
         f"Sessions: {stats['sessions']} · shipped {stats['shipped']} · partial {stats['partial']} · dropped {stats['dropped']}"
         + (f" · ship rate {stats['ship_rate']}%" if stats["ship_rate"] is not None else ""),
         f"Time vibing: {hours}h {minutes:02d}m · prompts {stats['prompts']}",
@@ -270,5 +280,6 @@ def stats_text(brain: Brain) -> str:
         f"Code: {stats['commits']} commits · +{stats['added']} −{stats['removed']}",
         f"Feedback: {stats['feedback']} · {stats['feedback_open']} open · {stats['feedback_addressed']} addressed"
         + (f" · avg {stats['rating']}/5" if stats["rating"] is not None else ""),
+        f"Skills: {skills or 'none yet'}",
     ]
     return "\n".join(lines)

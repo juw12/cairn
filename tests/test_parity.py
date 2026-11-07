@@ -53,7 +53,7 @@ EDITS = [
     [{"status": "doing", "tags": []}, "x [[link]]\n"],
 ]
 VIBE_NOTES = {
-    "sessions/2026-11-04-dark-mode.md": "---\ntitle: Dark mode\ntype: session\nstatus: shipped\nstarted: 2026-11-04T23:40\nended: 2026-11-05T00:55\ncommits: 3\nadded: 120\nremoved: 8\n---\n## Log\n\n- 23:40 start: Dark mode\n- 23:50 prompt: add a toggle\n- 9:05 fail: pytest (12s)\n- 00:40 pass: pytest\n* 00:41 pass: again\n- 00:42 bogus: ignored\n- not a log line\n- 00:55 end: shipped\n",
+    "sessions/2026-11-04-dark-mode.md": "---\ntitle: Dark mode\ntype: session\nstatus: shipped\nstarted: 2026-11-04T23:40\nended: 2026-11-05T00:55\ncommits: 3\nadded: 120\nremoved: 8\n---\n## Log\n\n- 23:40 start: Dark mode\n- 23:50 prompt: add a toggle\n- 9:05 fail: pytest (12s)\n- 00:40 pass: pytest\n* 00:41 pass: again\n- 00:42 bogus: ignored\n- 00:43 skill: /refine app cairn · 6.5 -> 8.7\n- 00:44 skill: /Council verdict ship\n- 00:45 skill: no slash\n- 00:46 skill: /refine again\n- not a log line\n- 00:55 end: shipped\n",
     "sessions/2026-11-05-sync.md": "---\ntitle: Sync\ntype: session\nstatus: dropped\nstarted: 2026-11-05T10:00\nended: 2026-11-05T09:00\ncommits: two\n---\n- 10:00 fail: npm test\n",
     "sessions/2026-11-05-live.md": "---\ntitle: Live one\ntype: session\nstatus: live\nstarted: 2026-02-30T10:00\ncreated: 2026-11-05\n---\n",
     "feedback/a.md": "---\ntitle: Hard to find\ntype: feedback\nrating: 3\n---\n",
@@ -61,6 +61,7 @@ VIBE_NOTES = {
     "feedback/c.md": "---\ntitle: Meh\ntype: feedback\nstatus: planned\nrating: 9\n---\n",
     "feedback/d.md": "---\ntitle: Ok\ntype: feedback\nstatus: wontfix\nrating: 4\n---\n",
 }
+SKILL_CASES = [["/refine app cairn", "note"], ["  /ambitious-founder idea", "note"], ["/council", "prompt"], ["not /skill", "note"], ["/-bad", "note"], ["/Precedent limits", "note"]]
 CODE = "x = 1  # TODO: fix\n// FIXME(juwen): leak */\n<!-- HACK temp -->\n-- XXX sql\nprint('TODO no')\n  * TODO in docblock\n"
 
 
@@ -101,6 +102,8 @@ def python_results(demo_files, vault_files):
             "stats": core.vibe_stats(vn, "2026-11-05", 7),
             "empty": core.vibe_stats([], "2026-03-01", 3),
             "path": core.note_path("session", "Dark mode", ["sessions/2026-11-05-dark-mode.md"], "2026-11-05"),
+            "kinds": [core.log_kind(t, k) for t, k in SKILL_CASES],
+            "names": [core.skill_name(t) for t, _ in SKILL_CASES],
         })([core.note_from_file(p, t, 0) for p, t in VIBE_NOTES.items()]),
     }
 
@@ -148,6 +151,8 @@ async ([inputs, demoFiles, vaultFiles]) => {
       stats: core.vibeStats(vn, '2026-11-05', 7),
       empty: core.vibeStats([], '2026-03-01', 3),
       path: core.notePath('session', 'Dark mode', ['sessions/2026-11-05-dark-mode.md'], '2026-11-05'),
+      kinds: inputs.skills.map(([t, k]) => core.logKind(t, k)),
+      names: inputs.skills.map(([t]) => core.skillName(t)),
     }))(Object.entries(inputs.vibe).map(([p, t]) => core.noteFromFile(p, t, 0))),
   };
 }
@@ -176,6 +181,7 @@ class ParityTests(unittest.TestCase):
                     "vault": VAULT_NOTES,
                     "sync": SYNC_CASES,
                     "vibe": VIBE_NOTES,
+                    "skills": SKILL_CASES,
                 }
                 actual = page.evaluate(JS_HARNESS, [inputs, demo, vault])
                 browser.close()

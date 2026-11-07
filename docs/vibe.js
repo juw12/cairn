@@ -11,13 +11,14 @@ import { renderNav, renderView } from "./app.js";
 
 const POLL_MS = 3000;
 const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped" };
-const KIND_LABEL = { start: "start", note: "note", prompt: "prompt", pass: "pass", fail: "fail", commit: "commit", end: "end" };
 const AGENT_HOOK = [
   'Before you start:  cairn vibe start "<goal>" --agent <your name>',
   'After each step:   cairn vibe log "<what you just did>"',
   "Log my prompts:    cairn vibe log \"<prompt>\" --kind prompt",
+  "After a skill:     cairn vibe skill /refine \"6.5 -> 8.7\"   (/council, /ambitious-founder, /precedent...)",
   "Run tests with:    cairn vibe check -- <test command>",
   "When finished:     cairn vibe end --result shipped|partial|dropped \"<one-line summary>\"",
+  "Parallel agents:   set CAIRN_SESSION=<session slug> in each terminal (start prints it)",
 ].join("\n");
 
 let pollTimer = null;
@@ -33,10 +34,15 @@ function startedKey(note) {
   return `${note.meta.started || note.meta.created || ""} ${note.path}`;
 }
 
+// Every live session, newest first: parallel agents (one per terminal or worktree) each keep their own.
+export function liveSessions() {
+  return state.notes
+    .filter((n) => n.type === "session" && n.status === "live")
+    .sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
+}
+
 export function liveSession() {
-  const live = state.notes.filter((n) => n.type === "session" && n.status === "live");
-  live.sort((a, b) => (startedKey(a) < startedKey(b) ? -1 : 1));
-  return live.at(-1) || null;
+  return liveSessions()[0] || null;
 }
 
 function elapsedMinutes(note) {
@@ -74,10 +80,6 @@ function noteLink(value) {
 // ============================================================ actions
 
 export async function startSession() {
-  if (liveSession()) {
-    toast("A session is already live. End it first.");
-    return;
-  }
   const value = await ask({
     title: "Start a vibe session",
     text: "What are you building right now? Your assistant can log steps to it with cairn vibe log.",
@@ -108,20 +110,21 @@ async function appendLog(path, line, changes = {}) {
   await saveNote(path, { ...changes, body });
 }
 
-export async function logStep(kind, text) {
-  const live = liveSession();
+export async function logStep(kind, text, path = "") {
+  const live = path ? noteByPath(path) : liveSession();
   text = oneLine(text);
-  if (!live || !text || !core.LOG_KINDS.includes(kind)) return;
-  await appendLog(live.path, `${kind}: ${text}`);
+  if (!live || live.status !== "live" || !text || !core.LOG_KINDS.includes(kind)) return;
+  await appendLog(live.path, `${core.logKind(text, kind)}: ${text}`);
   renderView();
-  $("#vibe-log-text")?.focus();
+  $(`.vibe-log-form[data-session="${CSS.escape(live.path)}"] input`)?.focus();
 }
 
-export async function endSession(result) {
-  const live = liveSession();
-  if (!live || !core.FINISHED.includes(result)) return;
+export async function endSession(result, path = "") {
+  const live = path ? noteByPath(path) : liveSession();
+  if (!live || live.status !== "live" || !core.FINISHED.includes(result)) return;
   const properties = { ended: stamp() };
-  const git = state.vibeGit;
+  // Git churn is repo-wide, so it only belongs to the session the poller follows (the newest).
+  const git = live.path === liveSession()?.path ? state.vibeGit : null;
   if (git?.available) {
     properties.commits = String(git.commits.length);
     properties.added = String(git.commits.reduce((total, c) => total + c.added, git.added));
@@ -152,6 +155,44 @@ export async function addFeedback(form) {
   renderView();
 }
 
+// The demo starts with no sessions; this fills in a believable week so the page can be explored.
+export async function loadSampleSessions() {
+  const day = (offset) => {
+    const d = new Date();
+    d.setDate(d.getDate() - offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const samples = [
+    [6, "Offline route cache", "shipped", "09:10", "10:40", 4, 310, 40, ["prompt: cache tiles per route corridor", "fail: pytest (14s) · 2 failed", "skill: /refine app trailmix · 6.4 -> 8.6", "pass: pytest (13s) · 48 passed"]],
+    [4, "Elevation chart tooltips", "partial", "20:05", "21:00", 2, 95, 12, ["prompt: tooltips follow the cursor", "skill: /council tooltips ux · 7.1", "pass: npm test (6s) · 31 passed"]],
+    [3, "Try a WebGL renderer", "dropped", "14:00", "14:45", 1, 60, 60, ["skill: /precedent map renderers · MapLibre already solves this", "fail: npm test (7s) · 9 failed"]],
+    [1, "Share a live trip link", "shipped", "10:00", "11:30", 5, 420, 31, ["skill: /ambitious-founder share link · would pay: 4/10 buyers", "prompt: signed link, no account", "pass: pytest (12s) · 52 passed"]],
+  ];
+  const slugs = [];
+  for (const [offset, title, status, start, end, commits, added, removed, steps] of samples) {
+    const log = [`- ${start} start: ${title}`, ...steps.map((s) => `- ${start} ${s}`), `- ${end} end: ${status}`].join("\n");
+    const note = await createNote({
+      type: "session",
+      title,
+      status,
+      extraMeta: { started: `${day(offset)}T${start}`, ended: `${day(offset)}T${end}`, agent: "claude", commits: String(commits), added: String(added), removed: String(removed) },
+      body: `## Goal\n\n${title}\n\n## Log\n\n${log}\n`,
+    });
+    slugs.push(note.slug);
+  }
+  const feedback = [
+    ["The share link opened first time, no account needed", "5", "@ben", slugs[3], "addressed"],
+    ["Tooltips jitter on Android", "3", "@dan", slugs[1], "new"],
+    ["Offline maps saved me on the ridge", "5", "beta tester", slugs[0], "addressed"],
+  ];
+  for (const [title, rating, from, about, status] of feedback) {
+    await createNote({ type: "feedback", title, status, extraMeta: { from, rating, about: `[[${about}]]` }, body: "" });
+  }
+  toast("Loaded a sample week: 4 sessions and 3 pieces of feedback.");
+  renderNav();
+  renderView();
+}
+
 export function copyAgentHook() {
   navigator.clipboard?.writeText(AGENT_HOOK).then(
     () => toast("Copied. Paste it into AGENTS.md, CLAUDE.md or your assistant's instructions."),
@@ -160,6 +201,10 @@ export function copyAgentHook() {
 }
 
 // ============================================================ live updates (local app)
+
+function pollMs() {
+  return window.CAIRN_TEST_POLL_MS || state.store?.vibePollMs || POLL_MS;
+}
 
 function stopPolling() {
   clearInterval(pollTimer);
@@ -195,22 +240,25 @@ async function poll() {
   if (changed && state.view === "vibe") {
     renderNav();
     renderView();
-  } else if (live) {
-    const clockEl = $("#vibe-elapsed");
-    if (clockEl) clockEl.textContent = duration(elapsedMinutes(live));
+  } else {
+    for (const clockEl of $$(".vibe-elapsed")) {
+      const note = noteByPath(clockEl.dataset.path);
+      if (note) clockEl.textContent = duration(elapsedMinutes(note));
+    }
   }
 }
 
 export function wireVibe() {
   if (canPoll() && !pollTimer) {
-    pollTimer = setInterval(poll, POLL_MS);
+    pollTimer = setInterval(poll, pollMs());
     poll();
   }
-  const logForm = $("#vibe-log-form");
-  logForm?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    logStep(logForm.elements.kind.value, logForm.elements.text.value).catch((error) => toast(error.message, { error: true }));
-  });
+  for (const logForm of $$(".vibe-log-form")) {
+    logForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      logStep(logForm.elements.kind.value, logForm.elements.text.value, logForm.dataset.session).catch((error) => toast(error.message, { error: true }));
+    });
+  }
   const feedbackForm = $("#fb-form");
   if (feedbackForm) {
     // Keep what's typed if a live update re-renders the view mid-sentence.
@@ -235,15 +283,18 @@ export function wireVibe() {
 // ============================================================ view
 
 function logRow(entry) {
-  const mark = entry.kind === "pass" ? icon("check", "sm") : entry.kind === "fail" ? icon("x", "sm") : "";
-  return `<li class="log-row k-${entry.kind}"><span class="t">${esc(entry.time)}</span><span class="kind">${mark}${KIND_LABEL[entry.kind]}</span><span class="txt">${esc(entry.text)}</span></li>`;
+  const mark = entry.kind === "pass" ? icon("check", "sm") : entry.kind === "fail" ? icon("x", "sm") : entry.kind === "skill" ? icon("sparkle", "sm") : "";
+  return `<li class="log-row k-${entry.kind}"><span class="t">${esc(entry.time)}</span><span class="kind">${mark}${entry.kind}</span><span class="txt">${esc(entry.text)}</span></li>`;
 }
 
 function gitPanel(git) {
   if (!canPoll()) {
-    return `<p class="muted small">Live code changes and commits show up when Cairn runs on this computer (<code>python -m cairn</code> or the desktop app).</p>`;
+    return `<p class="muted small">Steps your assistant logs update live when Cairn runs on this computer (<code>python -m cairn</code> or the desktop app), from a folder you opened in Chrome or Edge, or from GitHub when you're signed in.</p>`;
   }
-  if (!git) return `<p class="muted small">Reading git…</p>`;
+  if (!git) return `<p class="muted small">Connecting…</p>`;
+  if (git.browser) return `<p class="muted small">${icon("refresh", "sm")} Following the folder: new steps appear within seconds. Commits and changed files need Cairn running on this computer.</p>`;
+  if (git.github && git.signedOut) return `<p class="muted small">Sign in to follow this brain live: Cairn checks GitHub every 20 seconds, and unchanged checks don't count against your limit.</p>`;
+  if (git.github) return `<p class="muted small">${icon("refresh", "sm")} Following GitHub: steps appear about 20 seconds after they're pushed.</p>`;
   if (!git.available) return `<p class="muted small">Not a git repository, so there are no commits to show.</p>`;
   const added = git.commits.reduce((t, c) => t + c.added, git.added);
   const removed = git.commits.reduce((t, c) => t + c.removed, git.removed);
@@ -262,12 +313,20 @@ function gitPanel(git) {
     ${commits}`;
 }
 
-function liveCard(live) {
-  if (!live) {
+function liveCards() {
+  const live = liveSessions();
+  if (!live.length) {
+    const sample = !readOnly() && state.info?.canLoadSample && !state.notes.some((n) => n.type === "session")
+      ? ` <button class="btn sm" data-action="vibe-sample">${icon("play", "sm")} Load a sample week</button>`
+      : "";
     return `<section class="vibe-live idle">
-      <p>${icon("zap")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here, or from your terminal: <code>cairn vibe start "add dark mode"</code>.`}</p>
+      <p>${icon("zap")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here, or from your terminal: <code>cairn vibe start "add dark mode"</code>.`}${sample}</p>
     </section>`;
   }
+  return live.map((session, index) => liveCard(session, index === 0, live.length)).join("");
+}
+
+function liveCard(live, newest = true, total = 1) {
   const log = core.sessionLog(live.body);
   const checks = log.filter((e) => e.kind === "pass" || e.kind === "fail");
   const lastCheck = checks.at(-1);
@@ -277,36 +336,37 @@ function liveCard(live) {
     ? ""
     : `<div class="vibe-end" role="group" aria-label="End the session">
         <span class="muted small">End as</span>
-        ${core.FINISHED.map((r) => `<button class="btn sm${r === "shipped" ? " primary" : ""}" data-action="vibe-end" data-result="${r}">${RESULT_LABEL[r]}</button>`).join("")}
+        ${core.FINISHED.map((r) => `<button class="btn sm${r === "shipped" ? " primary" : ""}" data-action="vibe-end" data-result="${r}" data-path="${esc(live.path)}">${RESULT_LABEL[r]}</button>`).join("")}
       </div>`;
   const logForm = readOnly()
     ? ""
-    : `<form class="vibe-log-form" id="vibe-log-form" autocomplete="off">
+    : `<form class="vibe-log-form" data-session="${esc(live.path)}" autocomplete="off">
         <select class="select" name="kind" aria-label="Kind of step">
-          ${["note", "prompt", "pass", "fail", "commit"].map((k) => `<option value="${k}">${k}</option>`).join("")}
+          ${["note", "prompt", "skill", "pass", "fail", "commit"].map((k) => `<option value="${k}">${k}</option>`).join("")}
         </select>
-        <input class="input" id="vibe-log-text" name="text" placeholder="Log a step… (your assistant can: cairn vibe log)">
+        <input class="input" name="text" aria-label="Step" placeholder="Log a step, or a skill like /refine 6.5 -> 8.7">
         <button class="btn" type="submit">Log</button>
       </form>`;
-  return `<section class="vibe-live" aria-label="Live session">
+  const skills = [...new Set(log.filter((e) => e.kind === "skill").map((e) => core.skillName(e.text)).filter(Boolean))];
+  const code = newest
+    ? `<div><h3>Code${total > 1 ? " <span class=\"muted small\">(whole repo, since this session started)</span>" : ""}</h3>${gitPanel(state.vibeGit)}</div>`
+    : "";
+  return `<section class="vibe-live${newest ? "" : " also"}" aria-label="Live session: ${esc(live.title)}">
     <header>
       <div>
-        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>Live · <span id="vibe-elapsed">${duration(elapsedMinutes(live))}</span>${lastCheck ? ` · last check <span class="check-${lastCheck.kind}">${lastCheck.kind === "pass" ? "passed" : "failed"}</span>` : ""}</p>
+        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>Live · <span class="vibe-elapsed" data-path="${esc(live.path)}">${duration(elapsedMinutes(live))}</span>${lastCheck ? ` · last check <span class="check-${lastCheck.kind}">${lastCheck.kind === "pass" ? "passed" : "failed"}</span>` : ""}</p>
         <h2><a href="#" data-open="${esc(live.path)}">${esc(live.title)}</a></h2>
-        <p class="muted small">${[agent, task ? `for ${task}` : ""].filter(Boolean).join(" · ")}</p>
+        <p class="muted small">${[agent, task ? `for ${task}` : "", skills.length ? `skills ${skills.map((s) => `<code>${esc(s)}</code>`).join(" ")}` : "", total > 1 ? `<code>CAIRN_SESSION=${esc(live.slug)}</code>` : ""].filter(Boolean).join(" · ")}</p>
       </div>
       ${controls}
     </header>
-    <div class="vibe-live-grid">
+    <div class="${newest ? "vibe-live-grid" : ""}">
       <div>
         <h3>Progress</h3>
-        <ol class="vibe-log" reversed>${log.slice(-14).reverse().map(logRow).join("") || `<li class="muted small">No steps yet.</li>`}</ol>
+        <ol class="vibe-log" reversed>${log.slice(newest ? -14 : -6).reverse().map(logRow).join("") || `<li class="muted small">No steps yet.</li>`}</ol>
         ${logForm}
       </div>
-      <div>
-        <h3>Code</h3>
-        ${gitPanel(state.vibeGit)}
-      </div>
+      ${code}
     </div>
   </section>`;
 }
@@ -349,6 +409,17 @@ function activity(stats) {
   </section>`;
 }
 
+function skillsBlock(stats) {
+  const entries = Object.entries(stats.skills).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  const body = entries.length
+    ? `<div class="skill-chips">${entries.map(([name, count]) => `<span class="skill-chip"><code>${esc(name)}</code><b>${count}</b></span>`).join("")}</div>`
+    : `<p class="empty">No skill runs yet. Log one with <code>cairn vibe skill /refine "6.5 -> 8.7"</code> or type <code>/council …</code> in a session's log.</p>`;
+  return `<section class="column-block vibe-skills">
+    <header><h2>Skills</h2><span class="muted small">${plural(entries.reduce((t, [, c]) => t + c, 0), "run")}</span></header>
+    ${body}
+  </section>`;
+}
+
 function sessionRow(note) {
   const log = core.sessionLog(note.body);
   const passed = log.filter((e) => e.kind === "pass").length;
@@ -356,8 +427,10 @@ function sessionRow(note) {
   const minutes = note.status === "live" ? elapsedMinutes(note) : core.sessionMinutes(note);
   const added = Number(note.meta.added) || 0;
   const removed = Number(note.meta.removed) || 0;
+  const skillRuns = log.filter((e) => e.kind === "skill").length;
   const bits = [
     duration(minutes),
+    skillRuns ? `${icon("sparkle", "sm")}${skillRuns}` : "",
     passed || failed ? `<span class="check-pass">✓${passed}</span> <span class="check-fail">✗${failed}</span>` : "",
     added || removed ? `<b class="plus">+${added}</b> <b class="minus">−${removed}</b>` : "",
   ].filter(Boolean);
@@ -426,7 +499,6 @@ function feedbackForm(sessions) {
 
 export function vibeView() {
   const stats = core.vibeStats(state.notes, today());
-  const live = liveSession();
   const sessions = state.notes.filter((n) => n.type === "session").sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
   const order = { new: 0, planned: 1, addressed: 2, wontfix: 3 };
   const feedback = state.notes
@@ -435,14 +507,15 @@ export function vibeView() {
   const head = pageHead(
     "Vibe",
     "Live progress of your AI coding sessions, what came out of them, and what people said about it. Every session and every piece of feedback is a Markdown file in <code>brain/</code>.",
-    live ? "" : `<button class="btn primary" data-action="vibe-start">${icon("zap")} Start session</button>`,
+    `<button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("zap")} ${liveSession() ? "Start another" : "Start session"}</button>`,
   );
   return `${head}
-    ${liveCard(live)}
+    ${liveCards()}
     ${figures(stats)}
     <div class="vibe-cols">
       <div>
         ${activity(stats)}
+        ${skillsBlock(stats)}
         <section class="column-block">
           <header><h2>Sessions</h2><span class="muted small">${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped</span></header>
           ${sessions.length ? `<div class="rows">${sessions.slice(0, 30).map(sessionRow).join("")}</div>` : `<p class="empty">No sessions yet. Each one becomes a file in brain/sessions/.</p>`}

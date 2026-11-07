@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -49,10 +50,6 @@ class VibeCliTests(unittest.TestCase):
         self.assertEqual((note["title"], note["status"]), ("Add dark mode", "live"))
         self.assertEqual((note["meta"]["agent"], note["meta"]["task"]), ("claude", "[[ship-v1]]"))
 
-        code, _, err = run_cli(self.root, "vibe", "start", "Another")
-        self.assertEqual(code, 2)
-        self.assertIn("still live", err)
-
         self.assertEqual(run_cli(self.root, "vibe", "log", "asked", "for", "a", "toggle", "--kind", "prompt")[0], 0)
         passed, _, _ = run_cli(self.root, "vibe", "check", "--", sys.executable, "-c", "print('3 passed')")
         failed, _, _ = run_cli(self.root, "vibe", "check", "--", sys.executable, "-c", "import sys; print('1 failed'); sys.exit(3)")
@@ -71,6 +68,36 @@ class VibeCliTests(unittest.TestCase):
 
         stats = core.vibe_stats(self.brain.notes(), note["meta"]["created"])
         self.assertEqual((stats["sessions"], stats["partial"], stats["passed"], stats["failed"], stats["prompts"]), (1, 1, 1, 1, 1))
+
+    def test_parallel_sessions_skills_and_session_targeting(self):
+        run_cli(self.root, "vibe", "start", "Map tiles")
+        code, out, _ = run_cli(self.root, "vibe", "start", "Share link")
+        self.assertEqual(code, 0)
+        self.assertIn("CAIRN_SESSION", out)
+        live = vibe.live_sessions(self.brain)
+        self.assertEqual([n["title"] for n in live], ["Map tiles", "Share link"])
+        older = live[0]["slug"]
+        # Default: the newest; --session or $CAIRN_SESSION picks another.
+        run_cli(self.root, "vibe", "log", "newest gets this")
+        run_cli(self.root, "vibe", "skill", "/refine 6.5 -> 8.7", "--session", older)
+        os.environ["CAIRN_SESSION"] = older
+        try:
+            run_cli(self.root, "vibe", "log", "/council verdict ship")
+            run_cli(self.root, "vibe", "end", "--result", "dropped")
+        finally:
+            del os.environ["CAIRN_SESSION"]
+        code, _, err = run_cli(self.root, "vibe", "log", "x", "--session", "nope")
+        self.assertEqual(code, 2)
+        self.assertIn("No live session called", err)
+        by_title = {n["title"]: n for n in self.brain.notes() if n["type"] == "session"}
+        older_log = core.session_log(by_title["Map tiles"]["body"])
+        self.assertEqual([e["kind"] for e in older_log], ["start", "skill", "skill", "end"])
+        self.assertEqual(by_title["Map tiles"]["status"], "dropped")
+        self.assertEqual(by_title["Share link"]["status"], "live")
+        self.assertIn("newest gets this", by_title["Share link"]["body"])
+        stats = core.vibe_stats(self.brain.notes(), by_title["Map tiles"]["meta"]["created"])
+        self.assertEqual(stats["skills"], {"/refine": 1, "/council": 1})
+        self.assertIn("/refine x1", run_cli(self.root, "vibe", "status")[1])
 
     def test_log_without_a_live_session_explains(self):
         code, _, err = run_cli(self.root, "vibe", "log", "hello")

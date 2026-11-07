@@ -11,6 +11,7 @@
 import { isBrainFile, scanTodos } from "./core.js";
 import { DEMO_FILES, DEMO_TODOS } from "./demo.js";
 import * as gh from "./github.js";
+import * as auth from "./auth.js";
 
 export class ConflictError extends Error {
   constructor(text, mtime) {
@@ -221,6 +222,27 @@ export class FolderStore {
     return out.sort((a, b) => (a.path < b.path ? -1 : 1));
   }
 
+  // Session and feedback files, re-read every few seconds by the Vibe view. Enumerating two small folders is
+  // the fallback Chrome recommends when a FileSystemObserver isn't available. No git from a browser.
+  async vibe() {
+    const files = [];
+    const brain = await this.brainDir();
+    for (const folder of ["sessions", "feedback"]) {
+      let dir;
+      try {
+        dir = await brain.getDirectoryHandle(folder);
+      } catch {
+        continue;
+      }
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind !== "file" || !name.endsWith(".md")) continue;
+        const file = await handle.getFile();
+        files.push({ path: `${folder}/${name}`, text: await file.text(), mtime: file.lastModified });
+      }
+    }
+    return { files, git: { available: false, browser: true } };
+  }
+
   async write(path, text, mtime) {
     let existing = null;
     try {
@@ -410,6 +432,38 @@ export class GitHubStore {
 
   async list() {
     return this.files.map(({ path, text, mtime }) => ({ path, text, mtime }));
+  }
+
+  // Signed in, the Vibe view polls the brain folder with a conditional request (304s cost nothing against the
+  // rate limit). Only when the sha of sessions/ or feedback/ changes are they listed, and only files whose
+  // sha changed are fetched, the way git itself compares trees. Signed out there's no live polling.
+  get vibePollMs() {
+    return 20000;
+  }
+
+  async vibe() {
+    if (!auth.session()) return { files: [], git: { available: false, github: true, signedOut: true } };
+    this.folderShas ||= new Map();
+    const files = [];
+    const top = await gh.listFolderIfChanged(this.repo, this.root.replace(/\/$/, ""), this.rootEtag || "");
+    if (!top) return { files, git: { available: false, github: true } };
+    this.rootEtag = top.etag;
+    for (const folder of ["sessions", "feedback"]) {
+      const dir = top.items.find((item) => item.type === "dir" && item.name === folder);
+      if (!dir || this.folderShas.get(folder) === dir.sha) continue;
+      const listing = await gh.listFolderIfChanged(this.repo, dir.path);
+      if (!listing) continue;
+      this.folderShas.set(folder, dir.sha);
+      for (const item of listing.items.filter((entry) => entry.type === "file" && entry.name.endsWith(".md"))) {
+        const path = item.path.slice(this.root.length);
+        if (this.shas.get(path) === item.sha) continue;
+        const latest = await gh.readFile(this.repo, item.path);
+        if (!latest) continue;
+        this.shas.set(path, latest.sha);
+        files.push({ path, text: latest.text, mtime: Date.now() });
+      }
+    }
+    return { files, git: { available: false, github: true } };
   }
 
   // Public repos serve files from raw.githubusercontent.com; private ones need a token, so those

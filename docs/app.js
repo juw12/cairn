@@ -12,7 +12,7 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
-import { copyAgentHook, endSession, liveSession, startSession, vibeView, wireVibe } from "./vibe.js";
+import { copyAgentHook, endSession, liveSessions, loadSampleSessions, startSession, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -41,7 +41,7 @@ function counts() {
     journal: by("journal"),
     map: "",
     code: state.todos ? state.todos.length : "",
-    vibe: liveSession() ? "live" : "",
+    vibe: ((n) => (n > 1 ? `${n} live` : n ? "live" : ""))(liveSessions().length),
     context: "",
     obsidian: "",
     canvas: canvasCount() || "",
@@ -230,7 +230,7 @@ function wireGlobal() {
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
-    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add", "vibe-start", "vibe-end"];
+    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add", "vibe-start", "vibe-end", "vibe-sample"];
     if (readOnly() && mutating.includes(action)) {
       toast("This brain is read-only. Ask to join to contribute.");
       return;
@@ -274,7 +274,8 @@ function wireGlobal() {
       },
       "todo-task": () => todoToTask(actionEl.dataset.source),
       "vibe-start": startSession,
-      "vibe-end": () => endSession(actionEl.dataset.result),
+      "vibe-end": () => endSession(actionEl.dataset.result, actionEl.dataset.path),
+      "vibe-sample": loadSampleSessions,
       "vibe-copy-hook": copyAgentHook,
       "copy-context": () => copyText(core.contextPack(state.notes, state.info.project, today()), "Context pack copied"),
       "save-context": saveContext,
