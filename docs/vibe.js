@@ -60,7 +60,7 @@ function duration(minutes) {
 
 function stars(rating) {
   if (!rating) return "";
-  return `<span class="stars" aria-label="${rating} out of 5">${"★".repeat(rating)}<span>${"★".repeat(5 - rating)}</span></span>`;
+  return `<span class="stars" aria-label="${rating} out of 5">${"★".repeat(rating)}<span>${"☆".repeat(5 - rating)}</span></span>`;
 }
 
 function linkTarget(value) {
