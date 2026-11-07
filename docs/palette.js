@@ -11,6 +11,7 @@ import { syncObsidian } from "./obsidian.js";
 import { fillTemplate, searchNotes, searchScore, templates } from "./vault.js";
 import { startTour } from "./tour.js";
 import { showShortcuts } from "./shortcuts.js";
+import { openLogSheet, readAloud, weeklyReview } from "./voicelog.js";
 import { render, setView } from "./app.js";
 
 function commands() {
@@ -25,6 +26,8 @@ function commands() {
       { label: "New note from template", kind: "Create", icon: "template", run: newFromTemplate },
       { label: "New canvas", kind: "Create", icon: "canvas", run: newCanvas },
       { label: "Open today’s journal", kind: "Create", icon: "journal", run: openToday },
+      { label: "Log by voice or typing", kind: "Journal  L", icon: "journal", run: () => openLogSheet() },
+      { label: "Weekly review of the journal", kind: "Journal", icon: "sparkle", run: () => weeklyReview() },
     );
     if (state.open) {
       list.push(
@@ -64,6 +67,8 @@ function commands() {
       setView("notes");
     } },
     { label: "Rescan code for TODOs", kind: "Project", icon: "code", run: () => setView("code") || refreshTodos() },
+    { label: "Read today’s log aloud", kind: "Journal", icon: "journal", run: () => readAloud(0) },
+    { label: "Journal & memories", kind: "Journal", icon: "journal", run: () => setView("journal") },
     { label: "Toggle light / dark theme", kind: "App", icon: "moon", run: toggleTheme },
     { label: "Take the tour", kind: "Help", icon: "help", run: startTour },
     { label: "Keyboard shortcuts", kind: "Help  ?", icon: "help", run: showShortcuts },

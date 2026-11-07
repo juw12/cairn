@@ -7,6 +7,7 @@
 //   gitStatus() / gitCommit(msg) / gitSync() -> server only
 //   desktop() / desktopAction(action, payload) -> the desktop app only (info.desktop)
 
+import { addDays, addMonths, dayOf } from "./daylog.js";
 import { isBrainFile, scanTodos } from "./core.js";
 import { DEMO_FILES, DEMO_TODOS } from "./demo.js";
 import * as gh from "./github.js";
@@ -297,6 +298,31 @@ export class FolderStore {
 
 const DEMO_KEY = "cairn.demo.v1";
 
+// Recent journal days for the demo, dated relative to today so the streak, heatmap, mood chart and
+// look-backs (a week / month / year ago) have something to show. Plain "## Log" pages like any other.
+const DEMO_DAYS = [
+  [-1, ["09:12 Standup: GPX import is the last beta blocker #beta", "13:40 Paired with Sam on the segment bug, found the timezone issue", "Mood: 🙂 good (4/5)", "18:05 Task: [[gpx-import|GPX import]] is close, tests pass locally"]],
+  [-2, ["10:02 Five beta hikers confirmed for the weekend test #beta", "15:30 Weather overlay looks great on the elevation profile", "Mood: 😄 great (5/5)"]],
+  [-3, ["08:50 Read the interview notes again, offline is the #1 ask #research", "16:20 Decided to keep the map corridor at 2 km", "Mood: 😐 okay (3/5)"]],
+  [-5, ["11:15 Tile sizes are fine: 40 km route is 26 MB #maps", "Mood: 🙂 good (4/5)"]],
+  [-7, ["09:30 Kicked off the beta plan with the team #beta", "14:00 Idea: share a live trip link with family", "Mood: 🙂 good (4/5)"]],
+  [-10, ["17:45 Long day, the PMTiles build kept failing #maps", "Mood: 🙁 low (2/5)"]],
+  [-14, ["10:10 First hike test on the Ridge trail, map held up offline", "Mood: 😄 great (5/5)"]],
+  ["month", ["12:00 Wrote the first [[user-interviews]] summary #research", "Mood: 🙂 good (4/5)"]],
+  ["year", ["19:30 Sketched the first idea for an offline hiking app", "Mood: 😄 great (5/5)"]],
+];
+
+function demoJournalDays() {
+  const files = {};
+  const base = dayOf();
+  for (const [offset, lines] of DEMO_DAYS) {
+    const day = offset === "month" ? addMonths(base, -1) : offset === "year" ? addMonths(base, -12) : addDays(base, offset);
+    const body = lines.map((line) => (/^\d{2}:\d{2} /.test(line) ? `- ${line}` : `- 20:00 ${line}`)).join("\n");
+    files[`journal/${day}.md`] = `---\ntitle: ${day}\ntype: journal\ncreated: ${day}\n---\n## Log\n\n${body}\n`;
+  }
+  return files;
+}
+
 export class DemoStore {
   constructor() {
     this.files = this.load();
@@ -318,6 +344,9 @@ export class DemoStore {
     for (const file of DEMO_FILES) {
       stamp += 60_000;
       files[file.path] = { text: file.text, mtime: stamp };
+    }
+    for (const [path, text] of Object.entries(demoJournalDays())) {
+      if (!files[path]) files[path] = { text, mtime: stamp - 3_600_000 };
     }
     return files;
   }
