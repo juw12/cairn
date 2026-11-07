@@ -456,7 +456,14 @@ export async function start(store) {
   refreshTodos();
   refreshGit();
   initObsidian();
-  maybeStartTour();
+  if (resumeAfterUpdate) {
+    const note = resumeAfterUpdate;
+    resumeAfterUpdate = null;
+    if (note.open && state.notes?.some?.((n) => n.path === note.open)) openNote(note.open);
+    toast("Cairn updated to the latest version.");
+  } else {
+    maybeStartTour();
+  }
 }
 
 async function boot() {
@@ -525,6 +532,63 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
+// ============================================================ desktop auto-update
+// The desktop app downloads updates in the background and calls applyUpdate(). It waits until
+// you pause (nothing typed or clicked for a while, no dialog open), saves, then reloads the page
+// (new web app) or asks for a quick restart (new Python part) and reopens the same view and note.
+
+const UPDATE_NOTE = "cairn.updated";
+let lastInput = Date.now();
+let updateTimer = null;
+let resumeAfterUpdate = takeUpdateNote();
+
+for (const type of ["keydown", "pointerdown", "input", "wheel"]) {
+  window.addEventListener(type, () => { lastInput = Date.now(); }, { capture: true, passive: true });
+}
+
+function takeUpdateNote() {
+  try {
+    const raw = localStorage.getItem(UPDATE_NOTE);
+    if (!raw) return null;
+    localStorage.removeItem(UPDATE_NOTE);
+    const note = JSON.parse(raw);
+    if (!note || Date.now() - note.at > 10 * 60 * 1000) return null;
+    if (note.hash && !location.hash) history.replaceState(null, "", note.hash);
+    return note;
+  } catch {
+    return null;
+  }
+}
+
+function readyForUpdate(restart) {
+  if (document.hidden) return true;
+  const idleMs = window.CAIRN_UPDATE_IDLE_MS ?? (restart ? 120_000 : 30_000);
+  if (Date.now() - lastInput < idleMs) return false;
+  return !document.querySelector(".modal-wrap, .palette-wrap, .tour, .link-suggest");
+}
+
+async function applyUpdate({ restart = false } = {}) {
+  clearTimeout(updateTimer);
+  if (!readyForUpdate(restart)) {
+    updateTimer = setTimeout(() => applyUpdate({ restart }), window.CAIRN_UPDATE_RETRY_MS ?? 15_000);
+    return "waiting";
+  }
+  await flushPending();
+  localStorage.setItem(UPDATE_NOTE, JSON.stringify({ hash: location.hash, open: state.open || null, at: Date.now() }));
+  if (!restart) {
+    location.reload();
+    return "reloading";
+  }
+  try {
+    const result = await state.store.desktopAction("restart");
+    if (result?.restarting) return "restarting";
+  } catch {
+    // fall through: nothing to restart for, so nothing to resume either
+  }
+  localStorage.removeItem(UPDATE_NOTE);
+  return "skipped";
+}
+
 // reload(): the desktop app calls this after a background sync brought in someone else's edits.
-window.cairn = { state, core, rerender: () => renderView(), reload: () => reloadBrain() };
+window.cairn = { state, core, rerender: () => renderView(), reload: () => reloadBrain(), applyUpdate };
 boot();

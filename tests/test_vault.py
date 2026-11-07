@@ -323,6 +323,24 @@ class VaultFeatureTests(unittest.TestCase):
 
     # ------------------------------------------------------------ first-run tour
 
+    def test_update_waits_for_a_pause_then_reloads_in_place(self):
+        page = self.open()
+        page.evaluate("history.replaceState(null, '', location.pathname + '#/notes')")  # what a desktop page looks like
+        self.open_note(page, "notes/alpha.md")
+        page.evaluate("window.CAIRN_UPDATE_IDLE_MS = 60000; window.CAIRN_UPDATE_RETRY_MS = 200")
+        page.keyboard.press("Shift")
+        self.assertEqual(page.evaluate("window.cairn.applyUpdate()"), "waiting", "never reloads while you're busy")
+        page.wait_for_timeout(500)
+        self.assertEqual(page.locator(".drawer").count(), 1)
+        with page.expect_navigation():
+            page.evaluate("window.CAIRN_UPDATE_IDLE_MS = 0")  # the next retry finds you idle
+        page.wait_for_selector(".toast >> text=Cairn updated")
+        page.wait_for_selector(".drawer")
+        self.assertIn("Alpha", page.inner_text(".drawer"))
+        self.assertTrue(page.evaluate("location.hash").startswith("#/notes"))
+        self.assertIsNone(page.evaluate("localStorage.getItem('cairn.updated')"))
+        self.assertEqual(self.errors, [])
+
     def test_tour_runs_once_on_first_open(self):
         page = self.open(tour=True)
         page.wait_for_selector(".tour .tour-card")

@@ -309,5 +309,133 @@ class StartMenuShortcutTests(unittest.TestCase):
         self.assertIsNone(self.config.get("shortcutStamp"))
         self.assertIn("could not tag", log.call_args.args[0])
 
+
+@unittest.skipUnless(HAS_GIT, "git not installed")
+class AutoUpdateTests(unittest.TestCase):
+    """Updates install themselves: web-only changes reload the page, Python changes restart quietly."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.origin = self.tmp / "origin.git"
+        self.dev = self.tmp / "dev"
+        self.app = self.tmp / "app"
+        subprocess.run(["git", "init", "-q", "--bare", str(self.origin)], check=True)
+        subprocess.run(["git", "init", "-q", str(self.dev)], check=True)
+        for key, value in (("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")):
+            git(self.dev, "config", key, value)
+        self.commit({"docs/app.js": "v1", "cairn/server.py": "v1", "Cairn.pyw": "v1"}, "first")
+        git(self.dev, "branch", "-M", "main")
+        git(self.dev, "remote", "add", "origin", str(self.origin))
+        git(self.dev, "push", "-q", "-u", "origin", "main")
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(self.app)], check=True)
+        for patcher in (mock.patch.object(desktop, "APP_ROOT", self.app), mock.patch.object(desktop, "log")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.config = desktop.Config(self.tmp / "config.json")
+        self.hooks = desktop.DesktopHooks(self.config)
+
+    def commit(self, files, message):
+        for name, text in files.items():
+            path = self.dev / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        git(self.dev, "add", "-A")
+        git(self.dev, "commit", "-q", "-m", message)
+
+    def publish(self, files, message):
+        self.commit(files, message)
+        git(self.dev, "push", "-q", "origin", "main")
+
+    def test_which_changes_need_a_restart(self):
+        self.assertFalse(desktop.needs_restart(["docs/app.js", "docs/styles.css", "README.md", "tests/test_x.py"]))
+        self.assertTrue(desktop.needs_restart(["docs/app.js", "cairn/desktop.py"]))
+        self.assertTrue(desktop.needs_restart(["Cairn.pyw"]))
+        self.assertTrue(desktop.needs_restart(["pyproject.toml"]))
+
+    def test_web_only_update_reloads_the_page_without_restarting(self):
+        self.assertEqual(self.hooks.pending_update(), "")
+        self.publish({"docs/app.js": "v2", "README.md": "new"}, "web change")
+        restart = mock.Mock()
+        self.hooks.request_restart = restart
+        result = self.hooks.update()
+        self.assertEqual(result, {"updated": True, "reload": True})
+        self.assertEqual(self.hooks.page_head, desktop.app_head())
+        self.assertNotEqual(self.hooks.loaded_head, self.hooks.page_head, "the Python code didn't change")
+        self.assertEqual(self.hooks.pending_update(), "", "nothing left to do")
+        self.assertFalse(self.hooks.update_waiting())
+        restart.assert_not_called()
+
+    def test_python_update_restarts(self):
+        self.publish({"docs/app.js": "v2"}, "web change")
+        self.hooks.update()
+        self.publish({"cairn/server.py": "v2"}, "server change")
+        restarted = threading.Event()
+        self.hooks.request_restart = restarted.set
+        result = self.hooks.update()
+        self.assertEqual(result, {"updated": True, "restarting": True})
+        self.assertTrue(restarted.wait(5))
+        self.assertTrue(self.hooks.update_waiting())
+
+    def test_page_can_only_ask_for_a_restart_when_one_is_due(self):
+        restart = mock.Mock()
+        self.hooks.request_restart = restart
+        self.assertEqual(self.hooks.act("restart", {}), {"restarting": False})
+        self.publish({"cairn/server.py": "v2"}, "server change")
+        git(self.app, "pull", "-q", "--ff-only")
+        with mock.patch.object(desktop.threading, "Timer") as timer:
+            self.assertEqual(self.hooks.act("restart", {}), {"restarting": True})
+        timer.assert_called_once_with(0.3, restart)
+
+    def test_auto_update_setting(self):
+        self.assertTrue(self.hooks.state()["autoUpdate"])
+        self.assertEqual(self.hooks.act("auto-update", {"on": False}), {"autoUpdate": False})
+        self.assertFalse(self.hooks.state()["autoUpdate"])
+
+    def make_app(self, visible):
+        app = desktop.DesktopApp.__new__(desktop.DesktopApp)
+        app.hooks = self.hooks
+        app.visible = visible
+        app.window = mock.Mock()
+        app.restart = mock.Mock()
+        return app
+
+    def test_background_loop_reloads_the_page_for_web_updates(self):
+        self.publish({"docs/app.js": "v2"}, "web change")
+        app = self.make_app(visible=True)
+        self.assertFalse(app.apply_update())
+        script = app.window.evaluate_js.call_args.args[0]
+        self.assertIn("applyUpdate({restart: false})", script)
+        self.assertIn("location.reload()", script, "pages from before auto-update still pick it up")
+        app.restart.assert_not_called()
+
+    def test_background_loop_restarts_at_once_when_in_the_tray(self):
+        self.publish({"cairn/server.py": "v2"}, "server change")
+        app = self.make_app(visible=False)
+        self.assertTrue(app.apply_update())
+        app.restart.assert_called_once_with()
+        app.window.evaluate_js.assert_not_called()
+
+    def test_background_loop_waits_for_an_idle_moment_when_the_window_is_open(self):
+        self.publish({"cairn/server.py": "v2"}, "server change")
+        app = self.make_app(visible=True)
+        self.assertFalse(app.apply_update())
+        app.restart.assert_not_called()
+        script = app.window.evaluate_js.call_args.args[0]
+        self.assertIn("applyUpdate({restart: true})", script)
+        self.assertNotIn("location.reload()", script)
+
+    def test_restart_remembers_whether_the_window_was_open(self):
+        app = desktop.DesktopApp.__new__(desktop.DesktopApp)
+        app.visible = True
+        app.quit = mock.Mock()
+        app.restart()
+        self.assertTrue(app.restart_requested)
+        self.assertTrue(app.restart_visible)
+        app.visible = False
+        app.restart()
+        self.assertFalse(app.restart_visible)
+
+
 if __name__ == "__main__":
     unittest.main()

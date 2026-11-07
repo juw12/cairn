@@ -95,8 +95,11 @@ Cairn in its own window. After that, everything happens inside the app:
 - **One Sync button.** It saves your edits, gets everyone else's and sends yours (commit + pull + push). It also
   runs on its own every 10 minutes. If two people changed the same lines, nothing is lost: your edits stay
   committed locally and Cairn tells you.
-- **Always there.** Closing the window keeps Cairn in the tray; it starts with Windows and updates itself.
-  **Settings** turns each of these on or off and checks for updates.
+- **Always there.** Closing the window keeps Cairn in the tray and it starts with Windows.
+- **Updates itself, no restarts.** Cairn checks for a new version every 20 minutes. Changes to the app's
+  screens are swapped in with a quick reload the moment you pause (your open note stays open); the rarer
+  changes to its engine restart Cairn quietly while it's in the tray, or after a couple of idle minutes,
+  and bring the window back where you were. **Settings** turns each of these on or off.
 
 **1. Local app from the terminal.** Python 3.10+, no dependencies:
 

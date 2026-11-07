@@ -285,6 +285,7 @@ export async function openSettings() {
       <button class="btn sm" data-settings="switch">${icon("folder", "sm")} Open another brain</button>
       ${info.autostartSupported ? `<label class="check"><input type="checkbox" data-settings="autostart" ${info.autostart ? "checked" : ""}> Start with Windows <span class="muted">(opens quietly in the tray)</span></label>` : ""}
       <label class="check"><input type="checkbox" data-settings="auto-sync" ${info.autoSync ? "checked" : ""}> Sync automatically every 10 minutes <span class="muted">(when the brain is linked to GitHub)</span></label>
+      ${info.updates ? `<label class="check"><input type="checkbox" data-settings="auto-update" ${info.autoUpdate !== false ? "checked" : ""}> Update automatically <span class="muted">(in the background; no restart needed)</span></label>` : ""}
       <div class="settings-update">
         <span>Cairn ${esc(info.version)}${info.build ? ` <span class="muted">· ${esc(info.build)}</span>` : ""}</span>
         ${info.updates ? `<button class="btn sm" data-settings="check-update">${icon("refresh", "sm")} Check for updates</button>` : `<span class="muted">Updates come with your package manager.</span>`}
