@@ -59,6 +59,160 @@ class WorkspaceTests(unittest.TestCase):
         page.click(f'.cv-card[data-cv-open="{CANVAS}"]')
         page.wait_for_selector(".cv-node")
 
+    # ------------------------------------------------------------ canvas: selection, clipboard, drop, references
+
+    def selected_ids(self, page):
+        return page.eval_on_selector_all("#cv-world [data-node].selected", "els => els.map((e) => e.dataset.node).sort()")
+
+    def test_marquee_selects_and_duplicate_copies_with_arrows(self):
+        page = self.open()
+        self.open_canvas(page)
+        wrap = page.locator("#cv-wrap").bounding_box()
+        goal = page.locator('[data-node="t-goal"]').bounding_box()
+        why = page.locator('[data-node="f-idea"]').bounding_box()
+        # Shift + drag from empty board across two cards selects both (and nothing is moved or panned).
+        view_before = page.evaluate("() => document.querySelector('#cv-world').style.transform")
+        page.keyboard.down("Shift")
+        page.mouse.move(wrap["x"] + 8, wrap["y"] + 8)
+        page.mouse.down()
+        page.mouse.move(goal["x"] + 20, why["y"] + 20, steps=6)
+        page.mouse.up()
+        page.keyboard.up("Shift")
+        chosen = self.selected_ids(page)
+        self.assertTrue({"t-goal", "f-idea"} <= set(chosen), chosen)
+        self.assertNotIn("g-beta", chosen)  # a group joins only when the box holds all of it
+        self.assertEqual(page.evaluate("() => document.querySelector('#cv-world').style.transform"), view_before)
+        self.assertIn(f"{len(chosen)} cards", page.text_content("#cv-select-bar"))
+        before = self.canvas_data(page)
+        page.keyboard.press("Control+d")
+        page.wait_for_timeout(700)
+        after = self.canvas_data(page)
+        self.assertEqual(len(after["nodes"]), len(before["nodes"]) + len(chosen))
+        copies = [n for n in after["nodes"] if n["id"] not in {m["id"] for m in before["nodes"]}]
+        originals = {n["id"]: n for n in before["nodes"]}
+        self.assertEqual(sorted(c["x"] for c in copies), sorted(originals[i]["x"] + 40 for i in chosen))
+        self.assertEqual(sorted(self.selected_ids(page)), sorted(c["id"] for c in copies))
+        # Undo removes the copies in one step.
+        page.keyboard.press("Control+z")
+        page.wait_for_timeout(700)
+        self.assertEqual(len(self.canvas_data(page)["nodes"]), len(before["nodes"]))
+        self.assertEqual(self.errors, [])
+
+    def test_copy_paste_cards_text_and_links(self):
+        page = self.open()
+        self.open_canvas(page)
+        group_id = "g-beta"
+        page.click('[data-node="t-goal"]', position={"x": 30, "y": 12})
+        # Copy puts the selection on the clipboard as JSON Canvas text (pasteable into Obsidian).
+        copied = page.evaluate("""() => {
+          const data = new DataTransfer();
+          document.dispatchEvent(new ClipboardEvent("copy", { clipboardData: data, bubbles: true, cancelable: true }));
+          return data.getData("text/plain");
+        }""")
+        fragment = json.loads(copied)
+        self.assertEqual([n["id"] for n in fragment["nodes"]], ["t-goal"])
+        self.assertEqual(fragment["edges"], [])
+        paste = """(text) => {
+          const data = new DataTransfer();
+          data.setData("text/plain", text);
+          document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+        }"""
+        before = len(self.canvas_data(page)["nodes"])
+        page.evaluate(paste, copied)
+        page.wait_for_timeout(700)
+        data = self.canvas_data(page)
+        self.assertEqual(len(data["nodes"]), before + 1)
+        pasted = data["nodes"][-1]
+        self.assertNotEqual(pasted["id"], "t-goal")
+        self.assertEqual(pasted["text"], fragment["nodes"][0]["text"])
+        # A web address becomes a link card, other text a text card, [[a note]] a note card.
+        page.evaluate(paste, "https://example.com/maps")
+        page.evaluate(paste, "Remember to test on a real trail")
+        page.evaluate(paste, "[[user-interviews]]")
+        page.wait_for_timeout(700)
+        tail = self.canvas_data(page)["nodes"][-3:]
+        self.assertEqual(tail[0]["type"], "link")
+        self.assertEqual(tail[0]["url"], "https://example.com/maps")
+        self.assertEqual(tail[1]["type"], "text")
+        self.assertEqual(tail[1]["text"], "Remember to test on a real trail")
+        self.assertEqual(tail[2]["type"], "file")
+        self.assertEqual(tail[2]["file"], "notes/user-interviews.md")
+        # Copying a group brings the cards inside it and the arrows between them.
+        page.keyboard.press("Escape")  # clear the selection so its toolbar doesn't cover the group label
+        page.click(f'[data-node="{group_id}"] .cv-group-label')
+        self.assertEqual(self.selected_ids(page), [group_id])
+        copied = page.evaluate("""() => {
+          const data = new DataTransfer();
+          document.dispatchEvent(new ClipboardEvent("copy", { clipboardData: data, bubbles: true, cancelable: true }));
+          return data.getData("text/plain");
+        }""")
+        self.assertGreaterEqual(len(json.loads(copied)["nodes"]), 4)
+        self.assertEqual(self.errors, [])
+
+    def test_notes_panel_places_and_drops_notes(self):
+        page = self.open()
+        self.open_canvas(page)
+        page.click('[data-cv="add-note"]')
+        page.wait_for_selector("#cv-panel:not([hidden])")
+        page.fill("#cv-panel-filter", "competitor")
+        self.assertEqual(page.locator("#cv-panel-list [data-cv-place]").count(), 1)
+        before = len(self.canvas_data(page)["nodes"])
+        page.click('#cv-panel-list [data-cv-place="notes/competitor-scan.md"]')
+        page.wait_for_timeout(700)
+        nodes = self.canvas_data(page)["nodes"]
+        self.assertEqual(len(nodes), before + 1)
+        self.assertEqual(nodes[-1]["file"], "notes/competitor-scan.md")
+        # Dropping a note (as the panel's drag does) puts it where it was dropped.
+        wrap = page.locator("#cv-wrap").bounding_box()
+        page.evaluate("""([x, y]) => {
+          const data = new DataTransfer();
+          data.setData("application/x-cairn-note", "notes/architecture.md");
+          const target = document.querySelector("#cv-wrap");
+          target.dispatchEvent(new DragEvent("dragover", { dataTransfer: data, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+          target.dispatchEvent(new DragEvent("drop", { dataTransfer: data, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+        }""", [wrap["x"] + 200, wrap["y"] + 150])
+        page.wait_for_timeout(700)
+        dropped = self.canvas_data(page)["nodes"][-1]
+        self.assertEqual(dropped["file"], "notes/architecture.md")
+        drop_world = page.evaluate("""([x, y]) => {
+          const world = document.querySelector("#cv-world").style.transform.match(/translate\\(([-\\d.]+)px, ([-\\d.]+)px\\) scale\\(([-\\d.]+)\\)/);
+          const rect = document.querySelector("#cv-wrap").getBoundingClientRect();
+          return [(x - rect.left - Number(world[1])) / Number(world[3]), (y - rect.top - Number(world[2])) / Number(world[3])];
+        }""", [wrap["x"] + 200, wrap["y"] + 150])
+        self.assertLess(abs(dropped["x"] + dropped["width"] / 2 - drop_world[0]), 15)
+        page.keyboard.press("Escape")
+        self.assertEqual(self.errors, [])
+
+    def test_canvases_count_as_backlinks_and_show_on_the_map(self):
+        page = self.open()
+        links = page.evaluate("""() => window.cairn.core.canvasLinks(
+          [
+            { path: "canvases/a.canvas", text: JSON.stringify({ nodes: [
+              { id: "1", type: "file", file: "tasks/gpx-import.md" },
+              { id: "2", type: "text", text: "see [[user-interviews]] and [[nowhere]]" },
+              { id: "3", type: "file", file: "tasks/gpx-import.md" } ] }) },
+            { path: "canvases/broken.canvas", text: "{ not json" },
+          ],
+          window.cairn.state.notes,
+        )""")
+        self.assertEqual(links, [
+            {"canvas": "canvases/a.canvas", "note": "tasks/gpx-import.md"},
+            {"canvas": "canvases/a.canvas", "note": "notes/user-interviews.md"},
+        ])
+        # The demo board holds tasks/gpx-import.md: its drawer lists the board under "On canvases".
+        page.click('#nav [data-go="notes"]')
+        page.click('#view [data-open="tasks/gpx-import.md"]')
+        page.wait_for_selector(".on-canvases [data-open-canvas]")
+        self.assertEqual(page.get_attribute(".on-canvases [data-open-canvas]", "data-open-canvas"), CANVAS)
+        page.click(".on-canvases [data-open-canvas]")
+        page.wait_for_selector(".cv-node")
+        self.assertEqual(page.evaluate("() => window.cairn.state.canvas"), CANVAS)
+        # The Map shows the board as a square joined to the notes it holds.
+        page.click('#nav [data-go="map"]')
+        page.wait_for_selector(f'.map-canvas[data-node="canvas:{CANVAS}"]')
+        self.assertGreaterEqual(page.locator(".map-edge-canvas").count(), 3)
+        self.assertEqual(self.errors, [])
+
     # ------------------------------------------------------------ canvas
 
     def test_canvas_renders_an_obsidian_board_and_keeps_its_format(self):
@@ -142,8 +296,9 @@ class WorkspaceTests(unittest.TestCase):
         path = "canvases/Ideas wall.canvas"
         self.assertEqual(self.canvas_data(page, path), {"nodes": [], "edges": []})
         page.click('[data-cv="add-note"]')
-        page.fill(".palette input", "ideas/offline-maps.md")
-        page.press(".palette input", "Enter")
+        page.wait_for_selector("#cv-panel:not([hidden])")
+        page.fill("#cv-panel-filter", "ideas/offline-maps.md")
+        page.press("#cv-panel-filter", "Enter")
         page.wait_for_timeout(800)
         nodes = self.canvas_data(page, path)["nodes"]
         self.assertEqual([n["file"] for n in nodes], ["ideas/offline-maps.md"])

@@ -438,6 +438,7 @@ export function renderDrawer() {
   if (!state.tabs.includes(note.path)) placeTab(note.path);
   const statuses = core.STATUSES[note.type];
   const backs = core.backlinks(state.notes, note.path).map(noteByPath).filter(Boolean);
+  const boards = core.canvasBacklinks(state.files, state.notes, note.path);
   const created = typeof note.meta.created === "string" ? note.meta.created : "";
   const source = typeof note.meta.source === "string" ? note.meta.source : "";
   const isIdea = note.type === "idea" && !readOnly();
@@ -493,6 +494,10 @@ export function renderDrawer() {
           <h3>Linked from</h3>
           ${backs.length ? backs.map((n) => rowItem(n, TYPE_META[n.type].label)).join("") : `<div class="empty">Nothing links here yet. Link to it from another note with <code>[[${esc(note.slug)}]]</code>.</div>`}
         </div>
+        ${boards.length ? `<div class="backlinks on-canvases">
+          <h3>On canvases</h3>
+          ${boards.map((path) => `<button class="row-item" data-open-canvas="${esc(path)}">${icon("canvas", "sm")}<span class="title">${esc(path.split("/").pop().replace(/\.canvas$/i, ""))}</span><span class="meta">Canvas</span></button>`).join("")}
+        </div>` : ""}
         ${outgoingHtml(note)}
         ${mentionsHtml()}
       </div>
@@ -503,6 +508,13 @@ export function renderDrawer() {
 }
 
 function wireDrawer(layer, note) {
+  for (const button of layer.querySelectorAll("[data-open-canvas]")) {
+    button.addEventListener("click", async () => {
+      closeDrawer();
+      const { openCanvas } = await import("./canvas.js");
+      openCanvas(button.dataset.openCanvas);
+    });
+  }
   $("#ed-title", layer).addEventListener("input", (e) => queueChange({ title: e.target.value.trim() || note.slug }));
   $("#ed-tags", layer).addEventListener("input", (e) =>
     queueChange({ tags: e.target.value.split(",").map((t) => t.trim().replace(/^#/, "").toLowerCase()).filter(Boolean) }),

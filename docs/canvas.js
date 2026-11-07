@@ -136,6 +136,7 @@ const board = {
   selected: new Set(),
   edge: null,
   editing: null,
+  panel: false,
   history: [],
   future: [],
   dirty: false,
@@ -223,7 +224,7 @@ function boardShell(path) {
         <span class="grow"></span>
         ${editable ? `<div class="cv-tools">
           ${tool("add-text", "pencil", "Card", "Add a text card (or double-click the board)")}
-          ${tool("add-note", "note", "Note", "Add a note from this brain")}
+          ${tool("add-note", "note", "Notes", "Show your notes: drag one onto the board, or click to place it")}
           ${tool("add-link", "link", "Link", "Add a web link")}
           ${tool("add-group", "columns", "Group", "Add a group to hold cards")}
         </div>` : ""}
@@ -238,9 +239,48 @@ function boardShell(path) {
       <div class="cv-wrap" id="cv-wrap" tabindex="0" role="application" aria-roledescription="canvas" aria-label="Canvas ${esc(canvasName(path))}. Tab to move between cards, arrow keys move the selection, Enter edits or opens.">
         <div class="cv-world" id="cv-world"></div>
         <div class="cv-select-bar" id="cv-select-bar" hidden></div>
-        <p class="cv-hint">${editable ? "Double-click to add a card · drag a dot on a card's edge to connect · " : ""}drag the board to pan · Ctrl + scroll to zoom</p>
+        <p class="cv-hint">${editable ? "Double-click to add a card · drag a dot on a card's edge to connect · " : ""}drag the board to pan · Shift + drag to select · Ctrl + scroll to zoom</p>
+        ${editable ? notesPanel() : ""}
       </div>
     </div>`;
+}
+
+// ============================================================ the notes panel (drag notes onto the board)
+
+function notesPanel() {
+  return `<aside class="cv-panel" id="cv-panel" aria-label="Notes to place on the canvas"${board.panel ? "" : " hidden"}>
+    <div class="cv-panel-head"><strong>Notes</strong><button class="btn sm ghost icon-only" data-cv="add-note" aria-label="Close notes">${icon("x", "sm")}</button></div>
+    <input class="input" id="cv-panel-filter" type="search" placeholder="Filter notes…" aria-label="Filter notes" autocomplete="off">
+    <div class="cv-panel-list" id="cv-panel-list">${panelItems("")}</div>
+    <p class="cv-panel-tip">Drag a note onto the board, or click it to drop it in the middle.</p>
+  </aside>`;
+}
+
+function panelItems(filter) {
+  const query = filter.trim().toLowerCase();
+  const notes = [...state.notes]
+    .filter((n) => !query || n.title.toLowerCase().includes(query) || n.path.toLowerCase().includes(query))
+    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+    .slice(0, 200);
+  if (!notes.length) return `<p class="cv-panel-empty muted">${query ? "No notes match." : "No notes yet."}</p>`;
+  return notes.map((n) => `<button class="cv-panel-item" draggable="true" data-cv-place="${esc(n.path)}" title="${esc(n.path)}">${icon("note", "sm")}<span>${esc(n.title)}</span></button>`).join("");
+}
+
+function togglePanel(open = !board.panel) {
+  board.panel = open;
+  const panel = $("#cv-panel");
+  if (!panel) return;
+  panel.hidden = !open;
+  if (open) $("#cv-panel-filter")?.focus({ preventScroll: true });
+  else $("#cv-wrap")?.focus({ preventScroll: true });
+}
+
+function placeNote(path, at = null) {
+  const note = noteByPath(path);
+  if (!note) return null;
+  const size = { width: 400, height: 300 };
+  const spot = at ? { x: at[0] - size.width / 2, y: at[1] - 40 } : {};
+  return addNode({ type: "file", file: vaultRelative(note.path), ...size, ...spot });
 }
 
 // ============================================================ drawing
@@ -356,10 +396,18 @@ function draw() {
   if (!world || !board.data) return;
   const groups = board.data.nodes.filter((n) => n.type === "group");
   const others = board.data.nodes.filter((n) => n.type !== "group");
+  // Rebuilding the cards removes the focused one; keep keyboard focus on the board so the next
+  // shortcut (paste again, Delete, undo) still reaches it.
+  const hadFocus = world.contains(document.activeElement);
+  const focusedId = hadFocus ? document.activeElement.closest("[data-node]")?.dataset.node : null;
   world.innerHTML = groups.map(nodeHtml).join("") + edgesSvg() + others.map(nodeHtml).join("");
   hydrateAssets(world, board.path);
   applyTransform();
   drawSelectBar();
+  if (hadFocus) {
+    const again = focusedId ? world.querySelector(`[data-node="${CSS.escape(focusedId)}"]`) : null;
+    (again || $("#cv-wrap"))?.focus({ preventScroll: true });
+  }
 }
 
 function redrawEdges() {
@@ -411,6 +459,7 @@ function drawSelectBar() {
     ${board.edge && !board.selected.size ? `<button class="btn sm ghost" data-cv="edge-label">${icon("pencil", "sm")} Label</button><button class="btn sm ghost" data-cv="edge-flip" title="Swap direction">${icon("refresh", "sm")}</button>` : ""}
     ${single?.type === "file" ? `<button class="btn sm ghost" data-cv="open-note">${icon("external", "sm")} Open</button>` : ""}
     ${single && (single.type === "text" || !single.type || single.type === "group" || single.type === "link") ? `<button class="btn sm ghost" data-cv="edit">${icon("pencil", "sm")} Edit</button>` : ""}
+    ${board.selected.size ? `<button class="btn sm ghost icon-only" data-cv="duplicate" aria-label="Duplicate" title="Duplicate (Ctrl+D) · copy and paste with Ctrl+C / Ctrl+V">${icon("copy", "sm")}</button>` : ""}
     <button class="btn sm ghost danger" data-cv="delete" title="Delete (Del)">${icon("trash", "sm")}</button>`;
   bar.hidden = false;
 }
@@ -532,14 +581,6 @@ function addNode(node, { edit = false } = {}) {
   });
   if (edit) startEditing(full.id);
   return full;
-}
-
-async function addNoteCard() {
-  const notes = [...state.notes].sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
-  if (!notes.length) return toast("No notes yet. Write one first, then place it here.");
-  const chosen = await pick(notes.map((n) => ({ label: n.title, kind: n.path, icon: "note", value: n })), "Add a note to the canvas…");
-  if (!chosen) return;
-  addNode({ type: "file", file: vaultRelative(chosen.path), width: 400, height: 300 });
 }
 
 async function addLinkCard() {
@@ -669,6 +710,20 @@ export function wireCanvas() {
   wrap.addEventListener("dblclick", onDoubleClick, { signal });
   wrap.addEventListener("wheel", onWheel, { passive: false, signal });
   wrap.addEventListener("keydown", onKey, { signal });
+  wrap.addEventListener("pointermove", (event) => {
+    const rect = wrap.getBoundingClientRect();
+    pointerWorld = toWorld(event.clientX - rect.left, event.clientY - rect.top);
+  }, { signal });
+  wrap.addEventListener("pointerleave", () => {
+    pointerWorld = null;
+  }, { signal });
+  wrap.addEventListener("dragover", onDragOver, { signal });
+  wrap.addEventListener("dragleave", () => wrap.classList.remove("drop-target"), { signal });
+  wrap.addEventListener("drop", onDrop, { signal });
+  document.addEventListener("copy", onCopy, { signal });
+  document.addEventListener("cut", onCopy, { signal });
+  document.addEventListener("paste", onPaste, { signal });
+  wirePanel(signal);
   window.addEventListener("beforeunload", () => flushCanvas(), { signal });
 }
 
@@ -744,7 +799,7 @@ async function onToolbar(event) {
   const actions = {
     back: closeCanvas,
     "add-text": () => addNode({ type: "text", text: "", width: 260, height: 140 }, { edit: true }),
-    "add-note": addNoteCard,
+    "add-note": () => togglePanel(),
     "add-link": addLinkCard,
     "add-group": () => addNode({ type: "group", label: "Group", width: 560, height: 380 }),
     "zoom-in": () => zoomCenter(1.25),
@@ -752,6 +807,7 @@ async function onToolbar(event) {
     "zoom-reset": () => zoomCenter(1 / board.view.zoom),
     fit: () => fit(),
     delete: deleteSelection,
+    duplicate: duplicateSelection,
     edit: () => single && startEditing(single.id),
     "open-note": () => single && startEditing(single.id),
     "edge-label": async () => {
@@ -775,8 +831,166 @@ async function onToolbar(event) {
   }
 }
 
+// ============================================================ copy, paste, duplicate, drop
+
+// The selection as a self-contained JSON Canvas fragment: selected cards, anything inside a selected
+// group, and the arrows between them. It goes to the system clipboard as plain JSON Canvas text, so a
+// copy can be pasted into another canvas (here or in Obsidian) or into a text editor.
+function selectionFragment() {
+  const ids = new Set(board.selected);
+  for (const node of selectedNodes()) {
+    if (node.type === "group") for (const other of board.data.nodes) if (inside(other, node)) ids.add(other.id);
+  }
+  const nodes = board.data.nodes.filter((n) => ids.has(n.id));
+  if (!nodes.length) return null;
+  const edges = board.data.edges.filter((e) => ids.has(e.fromNode) && ids.has(e.toNode));
+  return JSON.parse(JSON.stringify({ nodes, edges }));
+}
+
+let clip = null;
+let pointerWorld = null;
+
+// Paste a fragment with fresh ids so its top-left corner lands at `at` (world coordinates).
+function pasteFragment(data, at) {
+  if (readOnly() || !data?.nodes?.length) return;
+  const box = bounds(data.nodes);
+  const dx = snap(at[0] - box.x);
+  const dy = snap(at[1] - box.y);
+  const ids = new Map(data.nodes.map((n) => [n.id, newId()]));
+  const nodes = data.nodes.map((n) => ({ ...n, id: ids.get(n.id), x: n.x + dx, y: n.y + dy }));
+  const edges = (data.edges || [])
+    .filter((e) => ids.has(e.fromNode) && ids.has(e.toNode))
+    .map((e) => ({ ...e, id: newId(), fromNode: ids.get(e.fromNode), toNode: ids.get(e.toNode) }));
+  mutate(() => {
+    board.data.nodes = [...nodes.filter((n) => n.type === "group"), ...board.data.nodes, ...nodes.filter((n) => n.type !== "group")];
+    board.data.edges.push(...edges);
+    board.selected = new Set(nodes.map((n) => n.id));
+    board.edge = null;
+  });
+}
+
+function duplicateSelection() {
+  const data = selectionFragment();
+  if (!data || readOnly()) return;
+  const box = bounds(data.nodes);
+  pasteFragment(data, [box.x + 40, box.y + 40]);
+}
+
+// Where pasted or dropped things go: under the pointer if it's on the board, else the middle of the view.
+function landingSpot() {
+  return pointerWorld || viewCenter();
+}
+
+// Turn pasted or dropped text into cards: a JSON Canvas fragment keeps its layout, a web address
+// becomes a link card, a [[link]] or brain path becomes a note card, anything else a text card.
+function placeText(text, at) {
+  const value = String(text || "").trim();
+  if (!value || readOnly()) return false;
+  if (value.startsWith("{")) {
+    const data = parseCanvas(value);
+    if (data?.nodes?.length) {
+      const box = bounds(data.nodes);
+      pasteFragment(data, [at[0] - box.width / 2, at[1] - box.height / 2]);
+      return true;
+    }
+  }
+  if (/^https?:\/\/\S+$/i.test(value)) {
+    addNode({ type: "link", url: value, width: 400, height: 120, x: at[0] - 200, y: at[1] - 60 });
+    return true;
+  }
+  const wiki = value.match(/^!?\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]$/);
+  const target = wiki ? wiki[1].trim() : value;
+  const note = noteByPath(target) || (/^[^\n]{1,200}$/.test(target) ? resolveFrom(board.path)(target.replace(/\.md$/i, "")) : null);
+  if (note && (wiki || noteByPath(target))) {
+    placeNote(note.path, at);
+    return true;
+  }
+  const lines = value.split("\n").length;
+  addNode({ type: "text", text: value, width: 300, height: Math.min(400, 60 + lines * 22), x: at[0] - 150, y: at[1] - 40 });
+  return true;
+}
+
+const typingIn = (target) => Boolean(target?.closest?.(".cv-editor, input, textarea, [contenteditable]"));
+
+function boardHasFocus() {
+  const wrap = $("#cv-wrap");
+  return Boolean(wrap && (wrap === document.activeElement || wrap.contains(document.activeElement)));
+}
+
+function onCopy(event) {
+  if (!boardHasFocus() || typingIn(event.target) || board.editing) return;
+  const selection = window.getSelection();
+  if (selection && !selection.isCollapsed && selection.toString().trim()) return; // copying text from a card
+  const data = selectionFragment();
+  if (!data) return;
+  clip = data;
+  event.clipboardData?.setData("text/plain", serializeCanvas(data));
+  event.preventDefault();
+  if (event.type === "cut" && !readOnly()) deleteSelection();
+  else toast(`Copied ${plural(data.nodes.length, "card")}.`);
+}
+
+function onPaste(event) {
+  if (!boardHasFocus() || typingIn(event.target) || board.editing || readOnly()) return;
+  const text = event.clipboardData?.getData("text/plain") || "";
+  event.preventDefault();
+  if (text.trim()) placeText(text, landingSpot());
+  else if (clip) pasteFragment(clip, landingSpot());
+}
+
+const DROP_TYPES = ["application/x-cairn-note", "text/uri-list", "text/plain"];
+
+function onDragOver(event) {
+  if (readOnly() || !DROP_TYPES.some((t) => event.dataTransfer?.types?.includes(t))) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  $("#cv-wrap")?.classList.add("drop-target");
+}
+
+function onDrop(event) {
+  $("#cv-wrap")?.classList.remove("drop-target");
+  if (readOnly() || !event.dataTransfer) return;
+  event.preventDefault();
+  const rect = $("#cv-wrap").getBoundingClientRect();
+  const at = toWorld(event.clientX - rect.left, event.clientY - rect.top);
+  const notePath = event.dataTransfer.getData("application/x-cairn-note");
+  if (notePath && placeNote(notePath, at)) return;
+  const uri = (event.dataTransfer.getData("text/uri-list") || "").split("\n").find((line) => line && !line.startsWith("#"));
+  placeText(uri || event.dataTransfer.getData("text/plain"), at);
+}
+
+function wirePanel(signal) {
+  const panel = $("#cv-panel");
+  if (!panel) return;
+  const filter = $("#cv-panel-filter");
+  filter.addEventListener("input", () => {
+    $("#cv-panel-list").innerHTML = panelItems(filter.value);
+  }, { signal });
+  filter.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      togglePanel(false);
+    } else if (event.key === "Enter") {
+      const first = $("#cv-panel-list [data-cv-place]");
+      if (first) placeNote(first.dataset.cvPlace);
+    }
+  }, { signal });
+  panel.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-cv-place]");
+    if (item) placeNote(item.dataset.cvPlace);
+  }, { signal });
+  panel.addEventListener("dragstart", (event) => {
+    const item = event.target.closest("[data-cv-place]");
+    if (!item) return;
+    const note = noteByPath(item.dataset.cvPlace);
+    event.dataTransfer.setData("application/x-cairn-note", item.dataset.cvPlace);
+    event.dataTransfer.setData("text/plain", `[[${note ? note.slug : item.dataset.cvPlace}]]`);
+    event.dataTransfer.effectAllowed = "copy";
+  }, { signal });
+}
+
 function onDoubleClick(event) {
-  if (event.target.closest(".cv-editor, a, button")) return;
+  if (event.target.closest(".cv-editor, .cv-panel, a, button")) return;
   const nodeEl = event.target.closest("[data-node]");
   const onGroupBody = nodeEl?.classList.contains("cv-group") && !event.target.closest("[data-cv-label]");
   if (nodeEl && !onGroupBody) {
@@ -796,7 +1010,7 @@ function onDoubleClick(event) {
 }
 
 function onWheel(event) {
-  if (event.target.closest(".cv-editor")) return;
+  if (event.target.closest(".cv-editor, .cv-panel")) return;
   const scrollable = event.target.closest(".cv-content");
   if (scrollable && !event.ctrlKey && !event.metaKey && scrollable.scrollHeight > scrollable.clientHeight + 1) return;
   event.preventDefault();
@@ -815,7 +1029,7 @@ const pointers = new Map();
 
 function onPointerDown(event) {
   if (event.button === 2) return;
-  if (event.target.closest(".cv-editor, .cv-select-bar")) return;
+  if (event.target.closest(".cv-editor, .cv-select-bar, .cv-panel")) return;
   if (board.editing) finishEditing();
   const wrap = $("#cv-wrap");
   const rect = wrap.getBoundingClientRect();
@@ -925,6 +1139,39 @@ function onPointerDown(event) {
     redrawEdges();
     drawSelectBar();
     return;
+  } else if (event.shiftKey && event.pointerType !== "touch") {
+    // Shift + drag on the empty board: draw a box; every card it touches joins the selection
+    // (a group only when the box holds all of it, so sweeping across a group doesn't grab it).
+    event.preventDefault();
+    const base = new Set(board.selected);
+    const box = document.createElement("div");
+    box.className = "cv-marquee";
+    wrap.appendChild(box);
+    const sx = start.x - rect.left;
+    const sy = start.y - rect.top;
+    move = (e) => {
+      const ex = e.clientX - rect.left;
+      const ey = e.clientY - rect.top;
+      const left = Math.min(sx, ex);
+      const top = Math.min(sy, ey);
+      const width = Math.abs(ex - sx);
+      const height = Math.abs(ey - sy);
+      Object.assign(box.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+      const [x1, y1] = toWorld(left, top);
+      const [x2, y2] = toWorld(left + width, top + height);
+      const hits = board.data.nodes.filter((n) => {
+        if (n.type === "group") return n.x >= x1 && n.y >= y1 && n.x + n.width <= x2 && n.y + n.height <= y2;
+        return n.x < x2 && n.x + n.width > x1 && n.y < y2 && n.y + n.height > y1;
+      });
+      board.selected = new Set([...base, ...hits.map((n) => n.id)]);
+      board.edge = null;
+      for (const el of document.querySelectorAll("#cv-world [data-node]")) el.classList.toggle("selected", board.selected.has(el.dataset.node));
+    };
+    up = () => {
+      box.remove();
+      redrawEdges();
+      drawSelectBar();
+    };
   } else {
     // The empty board: clear the selection and pan.
     if (!event.shiftKey && (board.selected.size || board.edge)) {
@@ -997,7 +1244,7 @@ function startPinch(wrap, rect) {
 }
 
 function onKey(event) {
-  if (event.target.closest(".cv-editor") || board.editing) return;
+  if (event.target.closest(".cv-editor, .cv-panel") || board.editing) return;
   const mod = event.ctrlKey || event.metaKey;
   const key = event.key;
   if (mod && key.toLowerCase() === "z") {
@@ -1007,6 +1254,10 @@ function onKey(event) {
   if (mod && key.toLowerCase() === "y") {
     event.preventDefault();
     return undo(true);
+  }
+  if (mod && key.toLowerCase() === "d") {
+    event.preventDefault();
+    return duplicateSelection();
   }
   if (mod && key.toLowerCase() === "a") {
     event.preventDefault();
