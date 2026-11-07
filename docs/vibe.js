@@ -344,7 +344,7 @@ function liveCard(live, newest = true, total = 1) {
         <select class="select" name="kind" aria-label="Kind of step">
           ${["note", "prompt", "skill", "pass", "fail", "commit"].map((k) => `<option value="${k}">${k}</option>`).join("")}
         </select>
-        <input class="input" name="text" aria-label="Step" placeholder="Log a step, or a skill like /refine 6.5 -> 8.7">
+        <input class="input" name="text" aria-label="Step" placeholder="Log a step or a /skill">
         <button class="btn" type="submit">Log</button>
       </form>`;
   const skills = [...new Set(log.filter((e) => e.kind === "skill").map((e) => core.skillName(e.text)).filter(Boolean))];

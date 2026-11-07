@@ -1248,3 +1248,10 @@ pre.math { white-space: pre-wrap; }
 .skill-chip code { background: none; padding: 0; color: var(--feedback); }
 .skill-chip b { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--feedback-soft); color: var(--feedback); font-size: 12px; line-height: 18px; text-align: center; }
 .session-row .meta .icon { vertical-align: -2px; }
+/* vibe: secondary text one step louder than the app-wide --muted, still quieter than --ink-2 */
+.vibe-live, .vibe-figures, .vibe-cols, .vibe-hook { --muted: #59544b; }
+:root[data-theme="dark"] :is(.vibe-live, .vibe-figures, .vibe-cols, .vibe-hook) { --muted: #a9a296; }
+.vibe-figures .figure .label { font-size: 13px; }
+@media (max-width: 600px) {
+  :is(.vibe-log-form, .fb-form, .fb-row, .vibe-end) :is(.input, .select, .btn) { min-height: 40px; }
+}
