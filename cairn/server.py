@@ -22,6 +22,8 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__
 from .brain import Brain, ConflictError, PathError, SyncError
+from .obsidian import ObsidianSync
+from .obsidian import SyncError as ObsidianSyncError
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_CANDIDATES = [PACKAGE_DIR / "web", PACKAGE_DIR.parent / "docs"]
@@ -58,6 +60,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _error(self, status: int, message: str, **extra):
         self._send_json({"error": message, **extra}, status)
+
+    def _drain(self) -> None:
+        """Read an unused request body so Windows does not reset the connection before the reply."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if 0 < length <= MAX_BODY:
+            self.rfile.read(length)
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
@@ -106,6 +114,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"items": brain.scan_code()})
             elif route == "/api/git":
                 self._send_json(brain.git_status())
+            elif route == "/api/obsidian":
+                self._send_json(self.obsidian.status())
             elif route == "/api/desktop" and self.desktop is not None:
                 self._send_json(self.desktop.state())
             else:
@@ -146,6 +156,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "/api/init":
             return self._send_json({"created": self.brain.init()})
+        if route.startswith("/api/obsidian/"):
+            return self._obsidian(route.rsplit("/", 1)[-1])
         if route == "/api/git/commit":
             try:
                 body = self._body()
@@ -164,7 +176,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(self.desktop.act(str(body.get("action", "")), body))
             except (SyncError, ValueError, OSError) as error:
                 return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        self._drain()
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+
+    def _obsidian(self, action: str):
+        sync = self.obsidian
+        try:
+            with self.sync_lock:
+                if action == "link":
+                    body = self._body()
+                    sync.link(str(body.get("vault", "")), body.get("folder"))
+                    report = sync.sync()
+                elif action == "sync":
+                    report = sync.sync()
+                elif action == "unlink":
+                    return self._send_json({"status": sync.unlink(), "report": None})
+                else:
+                    return self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+            self._send_json({"status": sync.status(), "report": report})
+        except ObsidianSyncError as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
+        except (ValueError, TypeError, OSError) as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
 
     def _serve_static(self, route: str):
         if not self._host_ok():
@@ -194,6 +227,8 @@ def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop
         raise ValueError("Cairn only listens on localhost")
     handler = type("CairnHandler", (Handler,), {})
     handler.brain = brain
+    handler.obsidian = ObsidianSync(brain)
+    handler.sync_lock = threading.Lock()
     handler.desktop = desktop
     handler.web_dir = find_web_dir().resolve()
     server = ThreadingHTTPServer((host, port), handler)
@@ -205,6 +240,7 @@ def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop
 def switch_brain(server: ThreadingHTTPServer, brain: Brain) -> None:
     """Serve a different folder from now on (the desktop app's "Open a brain")."""
     server.RequestHandlerClass.brain = brain
+    server.RequestHandlerClass.obsidian = ObsidianSync(brain)
 
 
 def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:

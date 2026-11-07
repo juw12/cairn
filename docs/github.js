@@ -123,6 +123,17 @@ export async function discoverBrains() {
   return (data.items || []).map(slimRepo);
 }
 
+// Any public API read, cached like the rest: apiGet("/repos/juw12/cairn/pulls/3").
+export function apiGet(path) {
+  return getJson(`${API}${path}`);
+}
+
+// One public file's text, or null if it doesn't exist (used for vouch files in other people's repos).
+export async function rawText(owner, repo, branch, path) {
+  const response = await fetch(`${RAW}/${owner}/${repo}/${encodeURIComponent(branch)}/${encodePath(path)}`);
+  return response.ok ? response.text() : null;
+}
+
 export async function fetchRepo(owner, repo) {
   return slimRepo(await getJson(`${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`));
 }

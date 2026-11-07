@@ -72,7 +72,9 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | **Ideas wall** | Raw → Exploring → Ready → Parked. Drag ideas right as they firm up. **Spark** drops a thinking prompt into an idea; **Promote to task** creates a linked task. |
 | **Board** | To do → Doing → Done with drag and drop, checklists and progress bars. |
 | **Decisions** | Lightweight decision records (context, options, decision, consequences), numbered and reviewed in PRs like code. |
-| **Notes, Journal, Map** | Markdown editor with preview, `[[wikilinks]]`, backlinks, tags, a page per day and a graph of how everything connects. |
+| **Notes, Journal** | Markdown editor with preview, `[[wikilinks]]`, backlinks, tags and a page per day. |
+| **Map** | A live graph of every note: drag notes (they stay pinned), zoom, pinch, hover to light up neighbours with direction arrows, click for an inspector with summary and links in/out. **Shift-click** two notes for the path between them, **Alt-drag** one onto another to write a `[[link]]`, double-click a hollow "unwritten" link to create that note. Local graph (1-3 hops), search, colour by type / folder / cluster / status, tag hubs, orphan filter, a time-lapse of how the brain grew. Canvas-rendered, smooth with thousands of notes, and every note stays reachable by keyboard. |
+| **Obsidian sync** | Import an Obsidian vault and keep it in sync both ways. Files are mirrored as they are; nothing is converted. |
 | **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
 | **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
 | **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture. |
@@ -125,6 +127,21 @@ This repo dogfoods it: see [@juw12's profile](https://juw12.github.io/cairn/?u=j
 other people's brains are always read-only. Unsigned GitHub API calls are limited to 60 per hour per IP, so
 results are cached for 10 minutes.
 
+### Show proof of work
+
+Write a claim as a note with a `claim:` line and links to the work under `evidence:` (repos, merged
+pull requests, commits, releases). The **Proof** view and everyone's profile check each link on
+GitHub and show a level nobody can type in: L1 claimed, L2 backed by work you own, L3 used by others
+(merged into someone else's repo, forked or starred), L4 vouched (another person committed a vouch
+file in their own repo; the **Vouch** button prefills it). Keep your brain private and publish only
+the notes marked `publish: true`:
+
+```sh
+python -m cairn publish --to YOUR-NAME/brain --source "path/to/your/vault"
+```
+
+The full format is in [PROOF.md](PROOF.md).
+
 ### Edit your brain from any device
 
 Sign in with GitHub on the web app and your brain repo becomes editable from your phone, a borrowed laptop or
@@ -163,7 +180,28 @@ keep their line endings, so Obsidian and git see clean one-line diffs.
 The Map goes further than Obsidian's graph: filters, colour by type, folder, cluster or tag, local maps
 of depth 1 to 3, the shortest path between two notes, keyboard navigation (arrow keys walk the links,
 Enter opens, L for local), hubs, orphans and islands at a glance, and *suggested links*: notes that
-mention another note's title without linking it, linked in one click.
+mention another note's title without linking it, linked in one click. **Alt-drag** one note onto another to
+write the link, double-click a missing note (a link to a note that doesn't exist yet) to create it, and
+*Watch it grow* replays the map in the order your notes were written. Daily notes named `2026-11-05.md`
+show up in Journal, wherever they live in the vault.
+
+### Keep a separate brain in sync with a vault
+
+When your notes live in a project's `brain/` folder (or a GitHub repo) and you also keep an Obsidian vault,
+open **Obsidian sync** in the sidebar or run `cairn obsidian ~/path/to/vault`. Cairn copies the vault into
+`brain/obsidian/` and from then on keeps both sides in sync: edit a note in either app and the next sync
+copies it over. (If Cairn opened the vault itself, there is nothing to sync and the page says so.)
+
+* **Local app:** paste the vault path; it syncs every 20 s while Cairn is open. `cairn obsidian --watch 10`
+  keeps syncing with the app closed. `--folder .` mirrors the vault into `brain/` itself (`--folder ""` too,
+  except in PowerShell, which drops empty arguments); `--dry-run` shows what would be copied.
+* **Browser, Chrome/Edge:** pick the vault folder; two-way sync while the tab is open, nothing uploaded.
+* **Other browsers:** one-way import; import again to bring in changes.
+
+Nothing is ever lost: a note deleted in Cairn goes to the vault's `.trash/`, one deleted in Obsidian goes to
+`brain/.cairn/trash/`, and if both sides changed a note the newer wins and the other is kept as
+`Name (conflict 2026-11-06).md`. A vault that suddenly looks empty (unplugged drive) stops the sync instead
+of deleting anything. Only Markdown is synced; attachments and `.obsidian/` settings stay in the vault.
 
 Switch the Map between **2D and 3D** with the toggle in its corner (or press 2 / 3). The 3D map lays your
 notes out in space with perspective, depth and lit spheres; drag to turn it a full 360° any way, right-drag
@@ -179,6 +217,8 @@ cairn add "decision: use SQLite"         # → brain/decisions/0001-use-sqlite.m
 cairn list --type task --status doing
 cairn todos                              # TODO/FIXME/HACK comments in the code
 cairn context                            # write brain/CONTEXT.md
+cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ and sync both ways
+cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn serve --port 4777                  # the app (default command)
 ```
 
@@ -225,7 +265,7 @@ Read brain/CONTEXT.md before starting. Decisions in brain/decisions/ marked "acc
 | Tool | Great at | Missing for "a brain inside the project" |
 |---|---|---|
 | Notion | Databases, dashboards | Lives in its cloud: not diffable, not reviewable, invisible to tools that read the repo |
-| Obsidian | Linking local Markdown | Knows nothing about the repo: no code TODOs, no git, no project flow without plugin setup |
+| Obsidian | Linking local Markdown | Knows nothing about the repo: no code TODOs, no git, no project flow without plugin setup. Cairn syncs with your vault, so you can keep using both |
 | Foam (VS Code) | Wikilinks in the editor | Editor-locked; no board or brainstorm flow |
 | GitHub Issues/Projects | Tracking work | Heavy for half-formed ideas; needs network; not a thinking tool |
 
@@ -243,7 +283,7 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 ## Development
 
 ```bash
-python -m unittest discover -s tests          # 56 tests: core, API, CLI, parity, e2e, sign-in, Worker
+python -m unittest discover -s tests          # core, API, CLI, parity, e2e, Obsidian sync, map, sign-in, Worker
 pip install playwright && playwright install chromium   # for the parity and e2e tests
 python scripts/make_media.py                  # regenerate the banner and screenshot
 python scripts/live_github_check.py           # sign-in + edits against the real GitHub API on a throwaway repo

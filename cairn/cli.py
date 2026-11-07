@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+import time
 
 from . import __version__, core
 from .brain import Brain
@@ -72,6 +73,94 @@ def cmd_context(brain: Brain, args) -> int:
     return 0
 
 
+def _print_report(report: dict) -> None:
+    labels = [
+        ("pulled", "from Obsidian"),
+        ("pushed", "to Obsidian"),
+        ("deletedInBrain", "moved to brain/.cairn/trash (deleted in Obsidian)"),
+        ("deletedInVault", "moved to the vault's .trash (deleted in Cairn)"),
+    ]
+    for key, label in labels:
+        for path in report.get(key, []):
+            print(f"  {label}: {path}")
+    for conflict in report.get("conflicts", []):
+        print(f"  conflict: {conflict['path']} (kept the {conflict['kept']} version; other one in {conflict['copy']})")
+
+
+def cmd_obsidian(brain: Brain, args) -> int:
+    from .obsidian import ObsidianSync, SyncError
+
+    sync = ObsidianSync(brain)
+    try:
+        if args.unlink:
+            sync.unlink()
+            print("Unlinked. Notes already synced stay where they are.")
+            return 0
+        if args.vault:
+            brain.init()
+            status = sync.link(args.vault, args.folder)
+            print(f"Linked {status['vault']} <-> {brain.dir / status['folder']}")
+        status = sync.status()
+        if not status["linked"]:
+            print("No vault linked. Example: cairn obsidian ~/Documents/MyVault", file=sys.stderr)
+            return 2
+        while True:
+            report = sync.sync(_today(), dry_run=args.dry_run)
+            if args.dry_run:
+                for step in report["plan"]:
+                    print(f"  would {step['op']}: {step['path']}")
+                print(f"{len(report['plan'])} change(s) planned, nothing written")
+                return 0
+            if report["changes"] or not args.watch:
+                stamp = dt.datetime.now().strftime("%H:%M:%S")
+                print(f"[{stamp}] synced: {report['changes']} change(s)")
+                _print_report(report)
+            if not args.watch:
+                return 0
+            time.sleep(max(args.watch, 2))
+    except SyncError as error:
+        print(f"Sync stopped: {error}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        return 0
+
+
+def cmd_publish(brain: Brain, args) -> int:
+    from pathlib import Path
+
+    from . import publish
+
+    source = Path(args.source).expanduser() if args.source else brain.dir
+    if not source.is_dir():
+        print(f"No folder at {source}", file=sys.stderr)
+        return 2
+    try:
+        if args.folder:
+            report = publish.publish_to_folder(source, Path(args.folder).expanduser())
+        else:
+            if not args.to:
+                print("Where to? Example: cairn publish --to YOUR-NAME/brain", file=sys.stderr)
+                return 2
+            http = publish.make_http(publish.find_token())
+            report = publish.publish_to_github(source, args.to, http, _today(), dry_run=args.dry_run)
+    except publish.PublishError as error:
+        print(f"Publish stopped: {error}", file=sys.stderr)
+        return 1
+    verb = "would" if args.dry_run else "did"
+    for path in report["write"]:
+        print(f"  {verb} write: {path}")
+    for path in report["delete"]:
+        print(f"  {verb} remove: {path}")
+    if report.get("created"):
+        print(f"  {verb} create the public repo {report['repo']}")
+    if not report["write"] and not report["delete"]:
+        print("Nothing to publish: the public brain is up to date.")
+    elif report.get("commit"):
+        print(f"Published to https://github.com/{report['repo']} ({report['commit'][:7]})")
+    return 0
+
+
 def cmd_serve(brain: Brain, args) -> int:
     from .server import serve
 
@@ -111,6 +200,27 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("todos", help="list TODO/FIXME comments in the code")
     context_parser = sub.add_parser("context", help="write brain/CONTEXT.md for teammates and AI assistants")
     context_parser.add_argument("--stdout", action="store_true", help="print instead of writing the file")
+    obsidian_parser = sub.add_parser(
+        "obsidian",
+        help="import an Obsidian vault and keep it in sync both ways",
+        description="Mirror an Obsidian vault into brain/<folder>/ and keep both in sync. The first run imports "
+        "everything; later runs copy whatever changed on either side. Deletes go to a trash folder, never away.",
+    )
+    obsidian_parser.add_argument("vault", nargs="?", help="vault folder (only needed the first time)")
+    obsidian_parser.add_argument("--folder", default="obsidian", help="folder inside the brain (default: obsidian; '' = whole brain)")
+    obsidian_parser.add_argument("--watch", type=float, default=0, metavar="SECONDS", help="keep syncing every N seconds")
+    obsidian_parser.add_argument("--dry-run", action="store_true", help="show what would change")
+    obsidian_parser.add_argument("--unlink", action="store_true", help="stop syncing (keeps the notes)")
+    publish_parser = sub.add_parser(
+        "publish",
+        help="copy notes marked publish: true to your public brain repo",
+        description="Copy every note whose frontmatter says publish: true to brain/ in a public GitHub repo, in one "
+        "commit, and tag it cairn-brain. Nothing else leaves your brain. Links to private notes become plain text.",
+    )
+    publish_parser.add_argument("--to", metavar="OWNER/REPO", help="public repo (created if missing), e.g. you/brain")
+    publish_parser.add_argument("--source", help="folder to publish from (default: the brain; can be an Obsidian vault)")
+    publish_parser.add_argument("--folder", help="write into this local clone instead of using the GitHub API")
+    publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     return parser
 
 
@@ -126,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
         "list": cmd_list,
         "todos": cmd_todos,
         "context": cmd_context,
+        "obsidian": cmd_obsidian,
+        "publish": cmd_publish,
         "serve": cmd_serve,
         "desktop": cmd_desktop,
         None: cmd_serve,

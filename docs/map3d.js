@@ -242,6 +242,7 @@ export function createView3D(options) {
     const cy = height / 2;
     projected.clear();
     for (const b of list) {
+      if (session.future?.has(b.id)) continue;
       const px = b.x - t.x;
       const py = b.y - t.y;
       const pz = b.z - t.z;

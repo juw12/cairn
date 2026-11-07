@@ -110,6 +110,8 @@ class GitHubMock:
         self.push = push
         self.revoked = False
         self.requests: list[dict] = []
+        # Extra canned API answers by path, e.g. {"/repos/a/b/pulls/7": {...}} (pull requests, commits, releases).
+        self.extra: dict[str, dict] = {}
 
     # ---- helpers for tests
     def text(self, repo: str, path: str):
@@ -155,6 +157,8 @@ class GitHubMock:
         login, bad_token = self.who(request)
         if bad_token:
             return self.reply(route, {"message": "Bad credentials"}, 401)
+        if request.method == "GET" and path in self.extra:
+            return self.reply(route, self.extra[path])
 
         if path == "/user":
             if not login:

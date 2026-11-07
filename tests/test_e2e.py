@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
         raise
     sync_playwright = None
 
-VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "code", "context", "people"]
+VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "code", "context", "people", "proof"]
 
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
@@ -32,9 +32,11 @@ class EndToEndTests(unittest.TestCase):
         cls.pw.stop()
         cls.server.shutdown()
 
-    def open(self, query="?demo=1", viewport=(1440, 900), theme="light", wait="#nav button"):
+    def open(self, query="?demo=1", viewport=(1440, 900), theme="light", wait="#nav button", setup=None):
         context = self.browser.new_context(viewport={"width": viewport[0], "height": viewport[1]})
         self.github_log = install_github_mock(context)
+        if setup:
+            setup(self.github_log)
         page = context.new_page()
         self.errors = []
         page.on("console", lambda m: self.errors.append(m.text) if m.type == "error" else None)
@@ -199,6 +201,160 @@ class EndToEndTests(unittest.TestCase):
 
     # ------------------------------------------------------------ map: Obsidian-plus features
 
+    FAKE_VAULT = """
+    (() => {
+      class FileHandle {
+        constructor(dir, name) { this.kind = 'file'; this.dir = dir; this.name = name; }
+        async getFile() {
+          const entry = this.dir.files.get(this.name);
+          return { lastModified: entry.mtime, size: entry.text.length, text: async () => entry.text };
+        }
+        async createWritable() {
+          const dir = this.dir; const name = this.name; let buffer = '';
+          return { write: async (t) => { buffer += t; }, close: async () => { dir.files.set(name, { text: buffer, mtime: Date.now() }); } };
+        }
+      }
+      class DirHandle {
+        constructor(name) { this.kind = 'directory'; this.name = name; this.files = new Map(); this.dirs = new Map(); }
+        async *entries() {
+          for (const [n, d] of this.dirs) yield [n, d];
+          for (const n of this.files.keys()) yield [n, new FileHandle(this, n)];
+        }
+        async getDirectoryHandle(name, opts = {}) {
+          if (!this.dirs.has(name)) { if (!opts.create) throw new DOMException('missing', 'NotFoundError'); this.dirs.set(name, new DirHandle(name)); }
+          return this.dirs.get(name);
+        }
+        async getFileHandle(name, opts = {}) {
+          if (!this.files.has(name)) { if (!opts.create) throw new DOMException('missing', 'NotFoundError'); this.files.set(name, { text: '', mtime: Date.now() }); }
+          return new FileHandle(this, name);
+        }
+        async removeEntry(name) { this.files.delete(name); }
+        async queryPermission() { return 'granted'; }
+        async requestPermission() { return 'granted'; }
+        async isSameEntry(other) { return other === this; }
+      }
+      const vault = new DirHandle('My Vault');
+      const put = async (path, text) => {
+        const parts = path.split('/'); const name = parts.pop(); let dir = vault;
+        for (const p of parts) dir = await dir.getDirectoryHandle(p, { create: true });
+        dir.files.set(name, { text, mtime: Date.now() - 60000 });
+      };
+      window.__vault = { root: vault, put, read: async (path) => {
+        const parts = path.split('/'); const name = parts.pop(); let dir = vault;
+        for (const p of parts) { dir = dir.dirs.get(p); if (!dir) return null; }
+        return dir.files.get(name)?.text ?? null;
+      } };
+      window.showDirectoryPicker = async () => vault;
+    })()
+    """
+
+    def test_obsidian_vault_imports_and_syncs_both_ways(self):
+        page = self.open(query="?demo=1#/obsidian", wait="#obsidian-form")
+        page.evaluate(self.FAKE_VAULT)
+        page.evaluate(r"""async () => {
+            await window.__vault.put('.obsidian/app.md', 'settings, never synced');
+            await window.__vault.put('Projects/Trail Plan.md', '---\ntags: [hiking]\n---\nSee [[Gear List|gear]] and [[Competitor scan]].\n');
+            await window.__vault.put('Gear List.md', 'Tent, stove.\n');
+            await window.__vault.put('Daily/2026-11-05.md', '- packed\n');
+        }""")
+        page.click('#obsidian-form button[type="submit"]')
+        page.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'obsidian/Projects/Trail Plan.md')")
+        paths = page.evaluate("window.cairn.state.files.map((f) => f.path).filter((p) => p.startsWith('obsidian/'))")
+        self.assertEqual(sorted(paths), ["obsidian/Daily/2026-11-05.md", "obsidian/Gear List.md", "obsidian/Projects/Trail Plan.md"])
+        types = page.evaluate("Object.fromEntries(window.cairn.state.notes.filter((n) => n.path.startsWith('obsidian/')).map((n) => [n.path, n.type]))")
+        self.assertEqual(types["obsidian/Daily/2026-11-05.md"], "journal")
+        page.wait_for_selector(".sync-card.linked")
+        self.assertIn("3 notes in sync", page.inner_text(".sync-card.linked"))
+        # Obsidian links resolve on the map, including links into the existing Cairn notes.
+        edges = page.evaluate(r"""async () => {
+            const core = window.cairn.core;
+            return core.buildGraph(window.cairn.state.notes).edges.filter((e) => e.source.startsWith('obsidian/')).map((e) => e.target).sort();
+        }""")
+        self.assertEqual(edges, ["notes/competitor-scan.md", "obsidian/Gear List.md"])
+        # Edit in Cairn -> lands in the vault; edit in the vault -> lands in Cairn.
+        page.evaluate(r"""async () => {
+            const state = window.cairn.state;
+            const f = state.files.find((x) => x.path === 'obsidian/Gear List.md');
+            const { mtime } = await state.store.write(f.path, 'Tent, stove, map.\n', f.mtime);
+            f.text = 'Tent, stove, map.\n'; f.mtime = mtime;
+            await window.__vault.put('Daily/2026-11-05.md', '- packed\n- left at dawn\n');
+            const dir = window.__vault.root.dirs.get('Daily'); dir.files.get('2026-11-05.md').mtime = Date.now();
+        }""")
+        page.click('[data-action="obsidian-sync"]')
+        page.wait_for_function("() => window.cairn.state.files.find((f) => f.path === 'obsidian/Daily/2026-11-05.md').text.includes('left at dawn')")
+        self.assertEqual(page.evaluate("window.__vault.read('Gear List.md')"), "Tent, stove, map.\n")
+        self.assertIsNone(page.evaluate("window.cairn.state.files.find((f) => f.path.includes('.obsidian')) || null"))
+        self.assertIn("from Obsidian", page.inner_text(".sync-report"))
+        self.assertEqual(self.errors, [])
+
+    def test_map_alt_drag_links_missing_notes_and_growth(self):
+        page = self.open(query="?demo=1#/map", wait="#map-svg text")
+        # Two notes with no link between them, both on screen.
+        pair = page.evaluate(r"""() => {
+            const { state, core } = window.cairn;
+            const g = core.buildGraph(state.notes);
+            const linked = new Set(g.edges.flatMap((e) => [e.source + '|' + e.target, e.target + '|' + e.source]));
+            const ids = g.nodes.map((n) => n.id).filter((id) => document.querySelector(`#map-svg .map-node[data-node="${id}"]`));
+            for (const a of ids) for (const b of ids) if (a !== b && !linked.has(a + '|' + b)) return [a, b];
+            return null;
+        }""")
+        self.assertIsNotNone(pair)
+        source, target = pair
+
+        def centre(node_id):
+            box = page.locator(f'#map-svg .map-node[data-node="{node_id}"] circle').bounding_box()
+            return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+        (ax, ay), (bx, by) = centre(source), centre(target)
+        page.keyboard.down("Alt")
+        page.mouse.move(ax, ay)
+        page.mouse.down()
+        page.mouse.move((ax + bx) / 2, (ay + by) / 2, steps=6)
+        page.mouse.move(bx, by, steps=6)
+        page.mouse.up()
+        page.keyboard.up("Alt")
+        page.wait_for_function(
+            r"""([a, b]) => {
+                const { state, core } = window.cairn;
+                return core.buildGraph(state.notes).edges.some((e) => (e.source === a && e.target === b) || (e.source === b && e.target === a));
+            }""",
+            arg=[source, target],
+        )
+        self.assertIn("Linked", page.inner_text(".toast"))
+
+        # Missing notes: link to a note that doesn't exist, show missing notes, double-click to create it.
+        page.evaluate(r"""async () => {
+            const { state, core } = window.cairn;
+            const f = state.files.find((x) => x.path === 'notes/architecture.md');
+            const text = f.text.replace(/\s*$/, '') + '\n\nSee [[trail-snacks]].\n';
+            const { mtime } = await state.store.write(f.path, text, f.mtime);
+            f.text = text;
+            f.mtime = mtime;
+            const i = state.notes.findIndex((n) => n.path === f.path);
+            state.notes[i] = core.noteFromFile(f.path, text, mtime);
+            window.cairn.rerender();
+        }""")
+        page.wait_for_selector('[data-map="show-missing"]')
+        page.click('[data-map="show-missing"]')
+        page.wait_for_selector("#map-svg .map-ghost")
+        ghost = page.evaluate("document.querySelector('#map-svg .map-ghost').dataset.node")
+        page.locator(f'#map-svg .map-ghost[data-node="{ghost}"]').dispatch_event("dblclick")
+        page.wait_for_function(
+            "(id) => !document.querySelector(`#map-svg .map-ghost[data-node=\"${id}\"]`)",
+            arg=ghost,
+        )
+        unresolved = page.evaluate("window.cairn.core.buildGraph(window.cairn.state.notes).unresolved.map((u) => '?' + u.target.toLowerCase())")
+        self.assertNotIn(ghost, unresolved)
+        self.assertEqual(ghost, "?trail-snacks")
+        created = page.evaluate("window.cairn.state.notes.find((n) => n.path === 'notes/trail-snacks.md')?.title")
+        self.assertEqual(created, "Trail snacks")
+
+        # Growth time-lapse: everything starts hidden, then the whole map is back.
+        page.click('[data-map="grow"]')
+        page.wait_for_selector("#map-growth:not([hidden])")
+        page.wait_for_function("() => !document.querySelector('#map-svg .future')", timeout=15000)
+        self.assertEqual(self.errors, [])
+
     def test_map_3d_mode_turns_selects_and_remembers(self):
         page = self.open(query="?demo=1#/map", wait="#map-svg text")
         page.evaluate("localStorage.removeItem('cairn.map')")
@@ -237,6 +393,10 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector("#map-card:not([hidden])")
         title = page.evaluate("(p) => window.cairn.state.notes.find((n) => n.path === p).title", hub)
         self.assertEqual(page.inner_text("#map-card strong"), title)
+        # "Watch it grow" replays the brain in 3D too, then everything is back.
+        page.click('[data-map="grow"]')
+        page.wait_for_selector("#map-growth:not([hidden])")
+        page.wait_for_selector("#map-growth", state="hidden", timeout=15000)
         # The choice is remembered; "2" goes back to the flat map.
         page.reload()
         page.wait_for_selector("#map-canvas")
@@ -418,6 +578,136 @@ class EndToEndTests(unittest.TestCase):
         self.assertGreaterEqual(page.locator(".repo-row").count(), 1)
         self.assertEqual(self.errors, [])
 
+    # ------------------------------------------------------------ proof of work: claims, levels, vouches
+
+    def test_proof_rules(self):
+        page = self.open()
+        result = page.evaluate("""async () => {
+            const P = await import('./proof.js');
+            const core = window.cairn.core;
+            const ev = (u) => P.parseEvidence(u);
+            const claim = { slug: 'built-x', title: 'Built X' };
+            const vouch = (meta) => '---\\n' + Object.entries(meta).map(([k, v]) => k + ': ' + v).join('\\n') + '\\n---\\nSaw it ship.\\n';
+            const fileLink = ev('https://github.com/alice/brain/blob/main/vouches/bob/built-x.md');
+            return {
+                kinds: ['https://github.com/a/b', 'https://github.com/a/b/pull/3', 'https://github.com/a/b/commit/abc1234',
+                        'https://github.com/a/b/releases/tag/v1.0', 'https://github.com/a/b/tree/main/src', 'https://example.com/x',
+                        'https://github.com/a/b/issues/2'].map((u) => ev(u).kind),
+                ownRepo: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { owner: 'bob', stars: 0, forks: 0 }).level,
+                starred: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { owner: 'Bob', stars: 3, forks: 0 }).level,
+                forked: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { owner: 'bob', stars: 0, forks: 1 }).level,
+                notMine: P.judgeEvidence('bob', ev('https://github.com/eve/x'), { owner: 'eve', stars: 99, forks: 9 }).ok,
+                fork: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { owner: 'bob', fork: true }).ok,
+                prOther: P.judgeEvidence('bob', ev('https://github.com/eve/x/pull/1'), { owner: 'eve', author: 'bob', merged: true }).level,
+                prOwn: P.judgeEvidence('bob', ev('https://github.com/bob/x/pull/1'), { owner: 'bob', author: 'bob', merged: true }).level,
+                prOpen: P.judgeEvidence('bob', ev('https://github.com/eve/x/pull/1'), { owner: 'eve', author: 'bob', merged: false }).ok,
+                prStolen: P.judgeEvidence('bob', ev('https://github.com/eve/x/pull/1'), { owner: 'eve', author: 'eve', merged: true }).ok,
+                commit: P.judgeEvidence('bob', ev('https://github.com/eve/x/commit/abcdef1'), { owner: 'eve', author: 'bob' }).level,
+                missing: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { error: 'Not found on GitHub.' }).note,
+                vouchOk: P.judgeVouch('bob', claim, fileLink, vouch({ vouch_for: 'bob', claim: 'built-x', relation: 'client' })).level,
+                vouchSelf: P.judgeVouch('alice', claim, fileLink, vouch({ vouch_for: 'alice', claim: 'built-x' })).ok,
+                vouchWrongClaim: P.judgeVouch('bob', claim, fileLink, vouch({ vouch_for: 'bob', claim: 'other' })).ok,
+                vouchWrongPerson: P.judgeVouch('bob', claim, fileLink, vouch({ vouch_for: 'carol', claim: 'built-x' })).ok,
+                vouchMissing: P.judgeVouch('bob', claim, fileLink, null).ok,
+                levelNone: P.claimLevel([]),
+                levelBest: P.claimLevel([{ ok: true, level: 2 }, { ok: false, level: 4 }, { ok: true, level: 3 }]),
+                isPublic: [{ publish: 'true' }, { publish: true }, { publish: 'yes' }, { publish: 'true', private: 'true' }, {}].map(P.isPublic),
+                claims: P.claimsFromNotes([
+                    core.noteFromFile('n/a.md', '---\\nclaim: Did A\\nevidence: [https://github.com/a/b]\\ncreated: 2026-01-01\\n---\\n'),
+                    core.noteFromFile('n/b.md', '---\\ntitle: no claim\\n---\\n'),
+                    core.noteFromFile('n/c.md', '---\\nclaim: Did C\\nevidence:\\n  - https://github.com/a/c/pull/1\\npublish: true\\ncreated: 2026-02-01\\n---\\n'),
+                ]).map((c) => [c.slug, c.evidence.map((e) => e.kind).join(','), c.isPublic]),
+                url: P.vouchUrl({ subject: 'Bob', claim, voucher: 'alice', repo: 'brain', today: '2026-11-07' }),
+                link: P.vouchLink({ subject: 'Bob', claim, voucher: 'alice', repo: 'brain' }),
+            };
+        }""")
+        self.assertEqual(result["kinds"], ["repo", "pr", "commit", "release", "repo", "link", "link"])
+        self.assertEqual((result["ownRepo"], result["starred"], result["forked"]), (2, 3, 3))
+        self.assertFalse(result["notMine"])
+        self.assertFalse(result["fork"])
+        self.assertEqual((result["prOther"], result["prOwn"]), (3, 2))
+        self.assertFalse(result["prOpen"])
+        self.assertFalse(result["prStolen"])
+        self.assertEqual(result["commit"], 2)
+        self.assertEqual(result["missing"], "Not found on GitHub.")
+        self.assertEqual(result["vouchOk"], 4)
+        self.assertFalse(result["vouchSelf"])
+        self.assertFalse(result["vouchWrongClaim"])
+        self.assertFalse(result["vouchWrongPerson"])
+        self.assertFalse(result["vouchMissing"])
+        self.assertEqual((result["levelNone"], result["levelBest"]), (1, 3))
+        self.assertEqual(result["isPublic"], [True, True, False, False, False])
+        self.assertEqual(result["claims"], [["c", "pr", True], ["a", "repo", False]])
+        self.assertTrue(result["url"].startswith("https://github.com/alice/brain/new/main?filename=vouches%2Fbob%2Fbuilt-x.md&value="))
+        self.assertIn("vouch_for%3A%20Bob", result["url"])
+        self.assertEqual(result["link"], "https://github.com/alice/brain/blob/main/vouches/bob/built-x.md")
+        # The publish rule is the same in Python (cairn publish) and JS (the app's Public/Private pill).
+        from cairn.publish import is_public
+        cases = [{"publish": "true"}, {"publish": True}, {"publish": "yes"}, {"publish": "true", "private": "true"}, {}]
+        self.assertEqual([is_public(c) for c in cases], result["isPublic"])
+
+    def test_profile_claims_are_checked_on_github(self):
+        def setup(mock):
+            claims = {
+                "brain/notes/claim-pr.md": "---\nclaim: Fixed offline sync in someone/tool\nevidence: [https://github.com/someone/tool/pull/7]\ncreated: 2026-11-03\n---\n",
+                "brain/notes/claim-vouched.md": "---\nclaim: Ran the Trailmix beta\nevidence: [https://github.com/juw12/cairn/commit/abcdef1]\nattested_by: [https://github.com/alice/brain/blob/main/vouches/juw12/claim-vouched.md]\ncreated: 2026-11-02\n---\n",
+                "brain/notes/claim-stolen.md": "---\nclaim: Wrote the parser\nevidence: [https://github.com/someone/tool/pull/8]\ncreated: 2026-11-01\n---\n",
+                "brain/notes/claim-bare.md": "---\nclaim: Mentored three interns\ncreated: 2026-10-01\n---\n",
+            }
+            for path, text in claims.items():
+                mock.set_text("juw12/cairn", path, text)
+            mock.extra["/repos/someone/tool/pulls/7"] = {"user": {"login": "juw12"}, "merged_at": "2026-11-03T10:00:00Z"}
+            mock.extra["/repos/someone/tool/pulls/8"] = {"user": {"login": "someone"}, "merged_at": "2026-11-01T10:00:00Z"}
+            mock.extra["/repos/juw12/cairn/commits/abcdef1"] = {"author": {"login": "juw12"}, "commit": {"author": {"date": "2026-11-02T09:00:00Z"}}}
+            mock.repos["alice/brain"] = {
+                "meta": dict(mock.repos["juw12/cairn"]["meta"], name="brain", full_name="alice/brain", owner={"login": "alice"}),
+                "files": {"vouches/juw12/claim-vouched.md": "---\nvouch_for: juw12\nclaim: claim-vouched\nrelation: client\n---\nI ran the beta with Juwen.\n"},
+            }
+
+        page = self.open("?u=juw12", setup=setup)
+        page.wait_for_selector(".claims .lvl-summary", timeout=15000)
+        level = lambda slug: page.inner_text(f'.claim[data-claim="{slug}"] .lvl-badge')  # noqa: E731
+        self.assertIn("L3", level("claim-built-cairn"))  # own repo, 3 stars
+        self.assertIn("L3", level("claim-pr"))  # merged into someone else's repo
+        self.assertIn("L4", level("claim-vouched"))  # alice vouched in her own repo
+        self.assertIn("L1", level("claim-stolen"))  # PR opened by someone else
+        self.assertIn("L1", level("claim-bare"))  # no evidence at all
+        stolen = page.inner_text('.claim[data-claim="claim-stolen"]')
+        self.assertIn("Opened by @someone, not @juw12", stolen)
+        # Per level: L1 stolen + bare, L2 none, L3 repo + merged PR, L4 the vouched one.
+        self.assertEqual(page.locator(".claims .lvl-num").all_inner_texts(), ["2", "0", "2", "1"])
+        # Signed out, so anyone may vouch: the button opens GitHub's new-file page in the voucher's repo.
+        self.assertGreaterEqual(page.locator('.claim [data-action="vouch"]').count(), 5)
+        self.assertEqual(self.errors, [])
+
+    def test_proof_view_lists_claims_and_creates_one(self):
+        page = self.open()
+        self.go(page, "proof")
+        self.assertIn("No claims yet", page.inner_text("#view"))
+        page.click('[data-action="new-claim"]')
+        page.fill(".modal input", "Shipped offline maps")
+        page.click(".modal button[type=submit]")
+        page.wait_for_selector(".drawer")
+        text = page.evaluate("window.cairn.state.files.find((f) => f.text.includes('claim: Shipped offline maps'))?.text")
+        self.assertIsNotNone(text)
+        self.assertIn("evidence: []", text)
+        self.assertIn("publish: false", text)
+        page.keyboard.press("Escape")
+        self.go(page, "proof")
+        card = page.inner_text(".claim")
+        self.assertIn("Shipped offline maps", card)
+        self.assertIn("Private", card)
+        self.assertIn("Not checked", card)
+        self.assertEqual(self.errors, [])
+
+    def test_proof_view_of_someone_elses_brain_checks_itself(self):
+        page = self.open("?brain=juw12/cairn#/proof", wait=".claim")
+        page.wait_for_selector(".lvl-summary", timeout=15000)
+        self.assertIn("L3", page.inner_text('.claim[data-claim="claim-built-cairn"] .lvl-badge'))
+        self.assertEqual(page.inner_text('#nav [data-go="proof"] .count'), "1")
+        self.assertEqual(page.locator('[data-action="new-claim"]').count(), 0)  # read-only: no create button
+        self.assertEqual(self.errors, [])
+
     def test_unknown_user_and_bad_input(self):
         page = self.open()
         page.click('#nav [data-go="people"]')
@@ -441,7 +731,7 @@ class EndToEndTests(unittest.TestCase):
         page = self.open("?brain=juw12/cairn")
         page.wait_for_selector(".ro-banner")
         self.assertTrue(page.locator("#capture-form").is_hidden())
-        self.assertEqual(page.evaluate("window.cairn.state.notes.length"), 18)
+        self.assertEqual(page.evaluate("window.cairn.state.notes.length"), 19)
         join = page.get_attribute(".ro-banner a.btn.primary", "href")
         self.assertTrue(join.startswith("https://github.com/juw12/cairn/issues/new?title="), join)
         self.assertIn("Request%20to%20join", join)

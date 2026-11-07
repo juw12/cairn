@@ -9,7 +9,9 @@ import { $, LOGO, SPARKS, TYPE_META, ask, icon, plural, toast, today } from "./u
 import { GUIDE_KEY, LAST_BRAIN_KEY, REPO_URL, VIEWS, createNote, deleteNote, guide, loadAll, markGuide, noteByPath, readOnly, refreshGit, refreshTodos, state } from "./state.js";
 import { board, codeView, contextView, decisions, home, ideas, journal, moveNote, notesView, wireBoard } from "./views.js";
 import { mapView, resetMap, wireMap } from "./map.js";
+import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
+import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
 import { addSpark, closeDrawer, flushPending, openNote, promote, renderDrawer, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -34,7 +36,9 @@ function counts() {
     map: "",
     code: state.todos ? state.todos.length : "",
     context: "",
+    obsidian: "",
     people: "",
+    proof: state.notes.filter((n) => typeof n.meta?.claim === "string" && n.meta.claim.trim()).length || "",
   };
 }
 
@@ -108,7 +112,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView, people: peopleView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, code: codeView, context: contextView, obsidian: obsidianView, people: peopleView, proof: proofView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -180,7 +184,7 @@ function wireGlobal() {
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
-    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random"];
+    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim"];
     if (readOnly() && mutating.includes(action)) {
       toast("This brain is read-only. Ask to join to contribute.");
       return;
@@ -225,6 +229,8 @@ function wireGlobal() {
       sync: syncBrain,
       settings: openSettings,
       "switch-brain": switchBrain,
+      "obsidian-sync": () => syncObsidian(),
+      "obsidian-unlink": unlinkObsidian,
       "map-reset": () => resetMap(),
       "open-brain": () => openBrain(actionEl.dataset.repo),
       "sign-in": openSignIn,
@@ -234,6 +240,10 @@ function wireGlobal() {
         afterSignOut();
       },
       "create-brain": createMyBrain,
+      "proof-check": checkMyClaims,
+      "proof-forget": forgetProofLogin,
+      "new-claim": newClaim,
+      vouch: () => vouchFor(actionEl.dataset.subject, actionEl.dataset.claim),
       "held-use": useHeld,
       "held-copy": () => copyText(state.held?.text || "", "Your text was copied"),
       "held-discard": () => {
@@ -265,6 +275,7 @@ function wireGlobal() {
   document.addEventListener("change", (event) => {
     const move = event.target.closest("[data-move]");
     if (move) moveNote(move.dataset.move, move.value);
+    if (event.target.matches("[data-obsidian-auto]")) toggleAutoSync(event.target.checked);
   });
 
   document.addEventListener("input", (event) => {
@@ -282,6 +293,14 @@ function wireGlobal() {
     if (event.target.id === "people-form") {
       event.preventDefault();
       return lookupProfile(event.target.query.value);
+    }
+    if (event.target.id === "obsidian-form") {
+      event.preventDefault();
+      return linkObsidian(event.target);
+    }
+    if (event.target.id === "proof-login-form") {
+      event.preventDefault();
+      return setProofLogin(event.target);
     }
     if (event.target.id === "create-brain-form") {
       event.preventDefault();
@@ -401,6 +420,7 @@ export async function start(store) {
   setView(location.hash.replace("#/", "") || "home", { push: false });
   refreshTodos();
   refreshGit();
+  initObsidian();
 }
 
 async function boot() {

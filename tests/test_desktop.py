@@ -1,4 +1,4 @@
-"""One-click sync, the desktop app's API and its first-run choices. Uses only temp folders."""
+﻿"""One-click sync, the desktop app's API and its first-run choices. Uses only temp folders."""
 
 import http.client
 import json
@@ -267,6 +267,47 @@ class FirstRunTests(unittest.TestCase):
         self.assertTrue(command.endswith('Cairn.pyw" --hidden'))
         self.assertEqual(build_parser().parse_args(["desktop", "--hidden"]).hidden, True)
 
+
+
+class StartMenuShortcutTests(unittest.TestCase):
+    """The Start-menu shortcut must carry Cairn's AppUserModelID or a pinned taskbar icon goes blank."""
+
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+        self.config = desktop.Config(self.temp / "config.json")
+        self.link = self.temp / "Cairn.lnk"
+
+    def run_ensure(self):
+        with mock.patch.object(desktop.sys, "platform", "win32"), \
+             mock.patch.object(desktop, "start_menu_shortcut", return_value=self.link), \
+             mock.patch.object(desktop, "stamp_shortcut") as stamp:
+            stamp.side_effect = lambda link, *args, **kwargs: link.write_text("lnk")
+            desktop.ensure_start_menu_shortcut(self.config)
+        return stamp
+
+    def test_writes_shortcut_with_app_id_once(self):
+        stamp = self.run_ensure()
+        stamp.assert_called_once()
+        target, args, icon, workdir = stamp.call_args.args[1:5]
+        self.assertTrue(args.endswith('Cairn.pyw"'))
+        self.assertEqual(icon.name, "cairn.ico")
+        self.assertEqual(self.config.get("shortcutStamp"), f"{desktop.AUMID}|{desktop.APP_ROOT}")
+        self.assertFalse(self.run_ensure().called, "second start must not rewrite the shortcut")
+
+    def test_rewrites_shortcut_when_it_goes_missing(self):
+        self.run_ensure()
+        self.link.unlink()
+        self.assertTrue(self.run_ensure().called)
+
+    def test_failure_is_logged_not_raised(self):
+        with mock.patch.object(desktop.sys, "platform", "win32"), \
+             mock.patch.object(desktop, "start_menu_shortcut", return_value=self.link), \
+             mock.patch.object(desktop, "stamp_shortcut", side_effect=OSError("no powershell")), \
+             mock.patch.object(desktop, "log") as log:
+            desktop.ensure_start_menu_shortcut(self.config)
+        self.assertIsNone(self.config.get("shortcutStamp"))
+        self.assertIn("could not tag", log.call_args.args[0])
 
 if __name__ == "__main__":
     unittest.main()

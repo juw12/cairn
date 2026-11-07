@@ -31,6 +31,20 @@ NOTE_TEXTS = [
 ]
 TITLES = ["Café au lait: déjà vu!", "???", "  Ship   v1  ", "word " * 30, "a\u0903b", "中文 title", "Ünïcödé — dash"]
 CAPTURES = ["todo: ship v1 #release #Web", "idea", "Decision: use SQLite\nbecause offline", "log: fixed #bug-1", "http: not a prefix", "#only #tags", "note:   spaced   title  "]
+LINKS = "[[Folder/My Note.md#Goals|alias]] [[Offline Sync]] [[a\\|b]] [[  spaced  ]] [[Café/Déjà Vu]] [[x.MD]]"
+VAULT_NOTES = {
+    "Inbox/My Note.md": "# Heading differs\nlinks [[2026-11-05]] and [[Projects/Other Note]]",
+    "Daily/2026-11-05.md": "- walked",
+    "Projects/Other Note.md": "---\ntype: book\n---\nback to [[my note]]",
+}
+H = lambda h, m=0: {"hash": h, "mtime": m}  # noqa: E731
+SYNC_CASES = [
+    [{"a.md": H("1"), "s.md": H("s")}, {"b.md": H("2"), "s.md": H("s")}, {}],
+    [{"a.md": H("1x"), "b.md": H("2")}, {"a.md": H("1"), "b.md": H("2y")}, {"a.md": "1", "b.md": "2"}],
+    [{"gb.md": H("2"), "e.md": H("3n")}, {"gv.md": H("1")}, {"gv.md": "1", "gb.md": "2", "e.md": "3"}],
+    [{"c.md": H("v", 10), "d.md": H("v", 30)}, {"c.md": H("b", 20), "d.md": H("b", 20)}, {"c.md": "o"}],
+    [{"n.md": H("v")}, {"n.md": H("b")}, {}],
+]
 EDITS = [
     [{}, None],
     [{"status": "done"}, None],
@@ -63,6 +77,13 @@ def python_results(demo_files, vault_files):
         "graph": core.build_graph(notes),
         "backlinks": core.backlinks(notes, "notes/user-interviews.md"),
         "context": core.context_pack(notes, "trailmix", "2026-11-05"),
+        "links": core.extract_links(LINKS),
+        "vault": (lambda vn: {
+            "types": [n["type"] for n in vn],
+            "graph": core.build_graph(vn),
+            "backlinks": core.backlinks(vn, "Inbox/My Note.md"),
+        })([core.note_from_file(p, t, 0) for p, t in VAULT_NOTES.items()]),
+        "sync": [core.plan_sync(*case) for case in SYNC_CASES],
     }
 
 
@@ -94,6 +115,13 @@ async ([inputs, demoFiles, vaultFiles]) => {
     graph: core.buildGraph(notes),
     backlinks: core.backlinks(notes, 'notes/user-interviews.md'),
     context: core.contextPack(notes, 'trailmix', '2026-11-05'),
+    links: core.extractLinks(inputs.links),
+    vault: ((vn) => ({
+      types: vn.map((n) => n.type),
+      graph: core.buildGraph(vn),
+      backlinks: core.backlinks(vn, 'Inbox/My Note.md'),
+    }))(Object.entries(inputs.vault).map(([p, t]) => core.noteFromFile(p, t, 0))),
+    sync: inputs.sync.map((c) => core.planSync(...c)),
   };
 }
 """
@@ -111,7 +139,16 @@ class ParityTests(unittest.TestCase):
                 browser = launch_browser(p)
                 page = browser.new_page()
                 page.goto(url + "core.js")  # any same-origin page can import the module
-                inputs = {"notes": NOTE_TEXTS, "titles": TITLES, "captures": CAPTURES, "code": CODE, "edits": EDITS}
+                inputs = {
+                    "notes": NOTE_TEXTS,
+                    "titles": TITLES,
+                    "captures": CAPTURES,
+                    "code": CODE,
+                    "edits": EDITS,
+                    "links": LINKS,
+                    "vault": VAULT_NOTES,
+                    "sync": SYNC_CASES,
+                }
                 actual = page.evaluate(JS_HARNESS, [inputs, demo, vault])
                 browser.close()
         finally:
