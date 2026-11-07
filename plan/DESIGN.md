@@ -18,6 +18,31 @@ and why, so later changes can be checked against it.
 
 Fonts are bundled in `docs/fonts/` (SIL OFL), so there is no call to a font CDN.
 
+## Palette and banned defaults
+
+Note-type colours are muted inks on paper, each AA (4.5:1 or better) on `#f4f1ea` and on the
+dark surface. Light / dark values live in `docs/styles.css`.
+
+| Token | Light | Dark | Used for |
+|---|---|---|---|
+| `--accent` | `#d9481f` | `#f0764d` | The one signal colour: active page, primary action, live state |
+| `--idea` | `#b07415` | `#e2a94d` | Ideas, rating stars |
+| `--task` | `#2f5b8c` | `#86aee0` | Tasks |
+| `--decision` | `#56631c` | `#bcc777` | Decisions (olive) |
+| `--journal` | `#2e7566` | `#6fc2ad` | Journal, passing checks |
+| `--session` | `#24748a` | `#6cc4d8` | Vibe sessions |
+| `--feedback` | `#465769` | `#a3b6ca` | Feedback, skill runs (slate) |
+| `--danger` | `#b3261e` | `#f2867d` | Errors and failing checks only |
+
+Banned, checked with `slop_check` and by hand before a UI change ships:
+
+- No purple, violet or magenta anywhere (tokens, graph palette, canvas presets, gradients).
+- No emoji or text pictographs as icons. Stars, checks and crosses come from the SVG icon set in
+  `docs/ui.js`, so they share stroke weight and colour with every other icon.
+- No lightning, rocket or sparkle icons for ordinary actions; sessions use `activity`, starting
+  one uses `play`, prompts use `shuffle`.
+- No gradient text, glow blobs, glass panels, cards inside cards or hype copy.
+
 ## Psychology we use (and the line we don't cross)
 
 1. **Calm technology.** No red badges, unread counts or streaks that punish a

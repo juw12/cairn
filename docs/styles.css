@@ -27,8 +27,8 @@
   --idea-soft: #f4e8cf;
   --task: #2f5b8c;
   --task-soft: #dfe7f1;
-  --decision: #6a4c9c;
-  --decision-soft: #e9e2f3;
+  --decision: #56631c;
+  --decision-soft: #e8ead6;
   --note: #6b6a63;
   --note-soft: #e9e6de;
   --journal: #2e7566;
@@ -38,8 +38,8 @@
   --journal-ink: #276357;
   --session: #24748a;
   --session-soft: #dcebef;
-  --feedback: #9a4373;
-  --feedback-soft: #f3e2eb;
+  --feedback: #465769;
+  --feedback-soft: #e0e6ec;
   --shadow-sm: 0 1px 0 rgba(27, 26, 23, 0.04);
   --shadow: 0 1px 2px rgba(27, 26, 23, 0.06), 0 8px 24px -12px rgba(27, 26, 23, 0.16);
   --shadow-lg: 0 30px 70px -20px rgba(27, 26, 23, 0.35);
@@ -71,8 +71,8 @@
   --idea-soft: #33281a;
   --task: #86aee0;
   --task-soft: #1d2836;
-  --decision: #b59ae6;
-  --decision-soft: #2a2238;
+  --decision: #bcc777;
+  --decision-soft: #262a17;
   --note: #b0aca2;
   --note-soft: #282723;
   --journal: #6fc2ad;
@@ -82,8 +82,8 @@
   --journal-ink: var(--journal);
   --session: #6cc4d8;
   --session-soft: #16292e;
-  --feedback: #e08bbd;
-  --feedback-soft: #33202b;
+  --feedback: #a3b6ca;
+  --feedback-soft: #1d252e;
   --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.3);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 26px -12px rgba(0, 0, 0, 0.6);
   --shadow-lg: 0 30px 70px -20px rgba(0, 0, 0, 0.8);
@@ -473,8 +473,8 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .path-form { display: grid; gap: 8px; }
 .path-actions { display: flex; gap: 8px; }
 .path-steps { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; font-size: 13px; }
-:root { --g0: #d9481f; --g1: #2f5b8c; --g2: #2e7566; --g3: #b07415; --g4: #6a4c9c; --g5: #b8406e; --g6: #4f7a28; --g7: #2a8199; --g-other: #a9a294; }
-:root[data-theme="dark"] { --g0: #f0764d; --g1: #7aa7dc; --g2: #5fbfa8; --g3: #e2a94d; --g4: #b393e6; --g5: #ec7fa9; --g6: #9ccc65; --g7: #5cc4dc; --g-other: #6b665d; }
+:root { --g0: #d9481f; --g1: #2f5b8c; --g2: #2e7566; --g3: #b07415; --g4: #465769; --g5: #8a5a2b; --g6: #4f7a28; --g7: #2a8199; --g-other: #a9a294; }
+:root[data-theme="dark"] { --g0: #f0764d; --g1: #7aa7dc; --g2: #5fbfa8; --g3: #e2a94d; --g4: #a3b6ca; --g5: #d6a06a; --g6: #9ccc65; --g7: #5cc4dc; --g-other: #6b665d; }
 
 /* obsidian sync */
 .sync-card { padding: 22px 24px; }
@@ -1205,10 +1205,12 @@ pre.math { white-space: pre-wrap; }
 .rating-summary .big { font-family: var(--display); font-size: 46px; line-height: 1; }
 .rating-summary .big span { font-size: 18px; color: var(--muted); }
 .dist { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.dist-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) 22px; gap: 8px; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.dist-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 22px; gap: 8px; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .dist-row i { display: block; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--feedback) var(--w), var(--line) var(--w)); }
-.stars { color: var(--idea-ink); letter-spacing: 1px; }
-.stars span { color: var(--muted); }
+.stars { display: inline-flex; gap: 1px; vertical-align: -2px; color: var(--idea-ink); }
+.stars .icon { width: 13px; height: 13px; }
+.stars .on .icon { fill: currentColor; }
+.stars .off { color: var(--muted); }
 .fb-form { display: flex; flex-direction: column; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .fb-form textarea { resize: vertical; min-height: 56px; font: inherit; }
 .fb-form-row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -1248,6 +1250,10 @@ pre.math { white-space: pre-wrap; }
 .skill-chip code { background: none; padding: 0; color: var(--feedback); }
 .skill-chip b { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--feedback-soft); color: var(--feedback); font-size: 12px; line-height: 18px; text-align: center; }
 .session-row .meta .icon { vertical-align: -2px; }
+/* vibe: rating and check marks drawn with the app icon set, not text symbols */
+.dist-row .star-label { display: inline-flex; align-items: center; gap: 2px; }
+.dist-row .star-label .icon { width: 11px; height: 11px; fill: currentColor; }
+.session-row .meta .check-pass .icon, .session-row .meta .check-fail .icon { width: 12px; height: 12px; stroke-width: 2.2; vertical-align: -1px; }
 /* vibe: secondary text one step louder than the app-wide --muted, still quieter than --ink-2 */
 .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook { --muted: #59544b; }
 :root[data-theme="dark"] :is(.vibe-live, .vibe-figures, .vibe-cols, .vibe-hook) { --muted: #a9a296; }

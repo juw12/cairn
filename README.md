@@ -235,7 +235,7 @@ The editor speaks Obsidian-flavoured Markdown, so a vault reads the same in both
   into links in one click. Hover any link for a preview of the note.
 - **Properties:** edit, add or remove any front-matter key, not just the built-in ones.
 - **Rename** a note and every link to it is rewritten. Links to missing notes are shown dimmed; click one to create it.
-- **Find things:** Notes has a list or a folder tree, a ★ Bookmarks filter, and search operators: `tag:release`,
+- **Find things:** Notes has a list or a folder tree, a Bookmarks filter, and search operators: `tag:release`,
   `path:ideas/`, `file:`, `type:`, `status:`, `line:`, `"exact phrase"` and `-exclude`.
 - **Templates:** notes in `Templates/` (or `_templates/`) appear in the command palette (Ctrl+K), as a new note or
   inserted into the open one; `{{title}}`, `{{date:YYYY-MM-DD}}` and `{{time}}` are filled in. The palette also

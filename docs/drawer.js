@@ -466,7 +466,7 @@ export function renderDrawer() {
       </div>
       <div class="drawer-body">
         ${heldBanner(note)}
-        ${state.spark && isIdea ? `<div class="spark-card">${icon("zap")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Added to the note below. Answer it in a line or two.</span></div></div>` : ""}
+        ${state.spark && isIdea ? `<div class="spark-card">${icon("idea")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Added to the note below. Answer it in a line or two.</span></div></div>` : ""}
         <input class="title-input" id="ed-title" value="${esc(note.title)}" aria-label="Title" placeholder="Untitled" ${lockedAttr}>
         <div class="props">
           ${statuses.length ? `<label for="ed-status">Status</label><div><select id="ed-status" class="select" ${lockedAttr}>${statuses.map((s) => `<option value="${s}" ${s === note.status ? "selected" : ""}>${STATUS_LABEL[s]}</option>`).join("")}</select></div>` : ""}
@@ -484,7 +484,7 @@ export function renderDrawer() {
           </div>`}
           <span class="word-count" id="word-count">${plural(words, "word")}</span>
           <span class="grow"></span>
-          ${isIdea ? `<button class="btn sm" data-action="spark">${icon("zap", "sm")} Spark</button><button class="btn sm primary" data-action="promote">${icon("arrow", "sm")} Promote to task</button>` : ""}
+          ${isIdea ? `<button class="btn sm" data-action="spark">${icon("shuffle", "sm")} Spark</button><button class="btn sm primary" data-action="promote">${icon("arrow", "sm")} Promote to task</button>` : ""}
           ${readOnly() ? "" : `<button class="btn sm ghost danger icon-only" data-action="delete" aria-label="Delete note">${icon("trash", "sm")}</button>`}
         </div>
         ${mode === "write" ? textarea : mode === "split" ? `<div class="split-editor">${textarea}${preview}</div>` : preview}

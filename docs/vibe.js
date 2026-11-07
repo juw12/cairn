@@ -60,7 +60,7 @@ function duration(minutes) {
 
 function stars(rating) {
   if (!rating) return "";
-  return `<span class="stars" aria-label="${rating} out of 5">${"★".repeat(rating)}<span>${"☆".repeat(5 - rating)}</span></span>`;
+  return `<span class="stars" role="img" aria-label="${rating} out of 5">${[1, 2, 3, 4, 5].map((n) => `<span class="${n <= rating ? "on" : "off"}">${icon("star", "sm")}</span>`).join("")}</span>`;
 }
 
 function linkTarget(value) {
@@ -283,7 +283,7 @@ export function wireVibe() {
 // ============================================================ view
 
 function logRow(entry) {
-  const mark = entry.kind === "pass" ? icon("check", "sm") : entry.kind === "fail" ? icon("x", "sm") : entry.kind === "skill" ? icon("sparkle", "sm") : "";
+  const mark = entry.kind === "pass" ? icon("check", "sm") : entry.kind === "fail" ? icon("x", "sm") : entry.kind === "skill" ? icon("terminal", "sm") : "";
   return `<li class="log-row k-${entry.kind}"><span class="t">${esc(entry.time)}</span><span class="kind">${mark}${entry.kind}</span><span class="txt">${esc(entry.text)}</span></li>`;
 }
 
@@ -320,7 +320,7 @@ function liveCards() {
       ? ` <button class="btn sm" data-action="vibe-sample">${icon("play", "sm")} Load a sample week</button>`
       : "";
     return `<section class="vibe-live idle">
-      <p>${icon("zap")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here, or from your terminal: <code>cairn vibe start "add dark mode"</code>.`}${sample}</p>
+      <p>${icon("activity")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here, or from your terminal: <code>cairn vibe start "add dark mode"</code>.`}${sample}</p>
     </section>`;
   }
   return live.map((session, index) => liveCard(session, index === 0, live.length)).join("");
@@ -430,8 +430,8 @@ function sessionRow(note) {
   const skillRuns = log.filter((e) => e.kind === "skill").length;
   const bits = [
     duration(minutes),
-    skillRuns ? `${icon("sparkle", "sm")}${skillRuns}` : "",
-    passed || failed ? `<span class="check-pass">✓${passed}</span> <span class="check-fail">✗${failed}</span>` : "",
+    skillRuns ? `<span title="${skillRuns} skill runs">${icon("terminal", "sm")}${skillRuns}</span>` : "",
+    passed || failed ? `<span class="check-pass" title="${passed} checks passed">${icon("check", "sm")}${passed}</span> <span class="check-fail" title="${failed} checks failed">${icon("x", "sm")}${failed}</span>` : "",
     added || removed ? `<b class="plus">+${added}</b> <b class="minus">−${removed}</b>` : "",
   ].filter(Boolean);
   return `<button class="row-item session-row" data-open="${esc(note.path)}">
@@ -464,7 +464,7 @@ function ratingSummary(stats) {
   if (stats.rating === null) return "";
   const most = Math.max(1, ...stats.ratings);
   const rows = [5, 4, 3, 2, 1]
-    .map((n) => `<div class="dist-row"><span>${n}★</span><i style="--w:${Math.round((stats.ratings[n - 1] / most) * 100)}%"></i><span>${stats.ratings[n - 1]}</span></div>`)
+    .map((n) => `<div class="dist-row"><span class="star-label" aria-label="${n} stars">${n}${icon("star", "sm")}</span><i style="--w:${Math.round((stats.ratings[n - 1] / most) * 100)}%"></i><span>${stats.ratings[n - 1]}</span></div>`)
     .join("");
   return `<div class="rating-summary"><div class="big">${stats.rating.toFixed(1)}<span>/5</span></div><div class="dist">${rows}</div></div>`;
 }
@@ -485,7 +485,7 @@ function feedbackForm(sessions) {
     <div class="fb-form-row">
       <select class="select sm" name="rating" aria-label="Rating">
         <option value="">No rating</option>
-        ${[5, 4, 3, 2, 1].map((n) => `<option value="${n}" ${String(n) === String(draft.rating) ? "selected" : ""}>${"★".repeat(n)} ${n}</option>`).join("")}
+        ${[5, 4, 3, 2, 1].map((n) => `<option value="${n}" ${String(n) === String(draft.rating) ? "selected" : ""}>${n} out of 5</option>`).join("")}
       </select>
       <input class="input sm" name="from" placeholder="From (e.g. @alice)" value="${esc(draft.from || "")}">
       <select class="select sm" name="about" aria-label="About which session">
@@ -507,7 +507,7 @@ export function vibeView() {
   const head = pageHead(
     "Vibe",
     "Live progress of your AI coding sessions, what came out of them, and what people said about it. Every session and every piece of feedback is a Markdown file in <code>brain/</code>.",
-    `<button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("zap")} ${liveSession() ? "Start another" : "Start session"}</button>`,
+    `<button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("play")} ${liveSession() ? "Start another" : "Start session"}</button>`,
   );
   return `${head}
     ${liveCards()}

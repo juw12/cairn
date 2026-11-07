@@ -19,8 +19,8 @@ const MIN_W = 80;
 const MIN_H = 40;
 const SIDES = ["top", "right", "bottom", "left"];
 const NORMAL = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
-// JSON Canvas preset colours 1-6 (red, orange, yellow, green, cyan, purple), as Obsidian shows them.
-export const PRESET_COLORS = { 1: "#e5484d", 2: "#e9973f", 3: "#d6b82d", 4: "#3fae5f", 5: "#3aaeb6", 6: "#9a6bff" };
+// JSON Canvas preset colours 1-6. Files keep the spec numbers; Cairn draws preset 6 (purple in Obsidian) as slate.
+export const PRESET_COLORS = { 1: "#e5484d", 2: "#e9973f", 3: "#d6b82d", 4: "#3fae5f", 5: "#3aaeb6", 6: "#6b7f95" };
 
 // ============================================================ the file format
 
