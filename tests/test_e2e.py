@@ -362,9 +362,11 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector("#map-canvas")
         self.assertEqual(page.locator("#map-svg").count(), 0)
         page.wait_for_function("() => window.cairn.map3d && window.cairn.map3d.settled", timeout=15000)
-        # Every note has a place in space, and the layout really uses depth.
+        # Every note has a place in space (canvases too), and the layout really uses depth.
         bodies = page.evaluate("window.cairn.map3d.bodies()")
-        self.assertEqual(len(bodies), 18)
+        canvases = [b for b in bodies if str(b["id"]).startswith("canvas:")]
+        self.assertEqual(len(bodies) - len(canvases), 18)
+        self.assertEqual(len(canvases), 1, "the demo canvas is on the map")
         zs = [b["z"] for b in bodies]
         self.assertGreater(max(zs) - min(zs), 40, "the 3D layout should not be flat")
         # Dragging turns the map (a trackball: any direction, no limit).
