@@ -20,6 +20,7 @@ import { maybeStartTour, startTour } from "./tour.js";
 import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
+import { autopilotView, wireAutopilot } from "./autopilot.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
 
 // ============================================================ shell rendering
@@ -44,6 +45,7 @@ function counts() {
     obsidian: "",
     canvas: canvasCount() || "",
     plugins: "",
+    autopilot: "",
     people: "",
     proof: state.notes.filter((n) => typeof n.meta?.claim === "string" && n.meta.claim.trim()).length || "",
   };
@@ -128,7 +130,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, autopilot: autopilotView, people: peopleView, proof: proofView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -162,6 +164,7 @@ function afterRender() {
   if (state.view === "map") wireMap();
   if (state.view === "canvas") wireCanvas();
   if (state.view === "plugins") wirePlugins();
+  if (state.view === "autopilot") wireAutopilot();
   const pluginView = $("[data-plugin-view]");
   if (pluginView) renderPluginView(state.view, pluginView);
 }

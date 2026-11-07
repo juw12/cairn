@@ -80,7 +80,24 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
 | **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
 | **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture. |
+| **Autopilot** (Pro) | Type a goal once. A coding agent on your computer (OpenCode) reads the brain for precedents (CONTEXT.md, decisions, similar notes, your `brain/autopilot.md` defaults), then works round after round on its own, without you typing *go* or *continue*, until the goal is done and checked. Every goal is a task on the Board with the agent's progress logged in it. Comments are optional steering; it stops only for hard stops (paying, sending to people, final submit, deleting your data, passwords). |
 | **People** | Look up anyone on GitHub and see their proof of work, read from their brain's files: working on, shipped, decisions, open to collaborate. Open their brain read-only and **Ask to join** (opens a prefilled GitHub issue). |
+
+## Cairn Pro: Autopilot
+
+Everything above is free and stays free. **Autopilot** is the one paid feature, and it is how you support Cairn.
+
+- **Try it free:** every computer gets one trial goal.
+- **Get Pro:** buy a key at [juw12.gumroad.com/l/cairn-pro](https://juw12.gumroad.com/l/cairn-pro), paste it in
+  *Autopilot -> Activate*. The key is checked with Gumroad's public license API and stored in `~/.cairn/license.json`
+  (never in your brain or repo). Offline? A verified key keeps working for 30 days.
+- **What runs where:** Autopilot drives [OpenCode](https://opencode.ai) on your own machine with whatever model you
+  configured there. Cairn sends nothing anywhere except the license check to Gumroad.
+- **Make it yours:** add `brain/autopilot.md` with your standing defaults ("big files go to E:", "always add tests",
+  "publish to GitHub when done") and Autopilot follows them on every goal.
+
+Cairn is MIT-licensed, so you can read exactly what Autopilot does (`cairn/autopilot.py`). Pro buys you the convenience,
+updates and the knowledge that the project keeps going.
 
 ## Use it
 

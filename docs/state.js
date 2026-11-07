@@ -20,6 +20,7 @@ export const VIEWS = [
   { id: "context", label: "Context pack", icon: "sparkle", group: "Project" },
   { id: "obsidian", label: "Obsidian sync", icon: "vault", group: "Project" },
   { id: "plugins", label: "Plugins", icon: "puzzle", group: "Project" },
+  { id: "autopilot", label: "Autopilot", icon: "zap", group: "Project" },
   { id: "people", label: "People", icon: "users", group: "Network" },
   { id: "proof", label: "Proof", icon: "check", group: "Network" },
 ];
