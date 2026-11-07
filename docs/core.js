@@ -515,6 +515,9 @@ function formatProperty(key, value, styleLines, eol) {
 // Apply property changes and/or a new body to a note's original text, touching nothing else:
 // unchanged properties keep their exact bytes, a changed one keeps its list style, the body keeps its
 // line endings when it is not edited, and an edited body is written with the file's own line ending.
+// Pass REMOVE as a property's value to delete that property (JS only; the editor's Properties panel).
+export const REMOVE = Symbol("remove");
+
 export function updateNoteText(original, changes = {}, body = undefined) {
   const lines = splitLines(original);
   const eol = original.includes("\r\n") ? "\r\n" : "\n";
@@ -529,7 +532,8 @@ export function updateNoteText(original, changes = {}, body = undefined) {
     }
   }
   const current = parseNote(original).meta;
-  const wanted = Object.entries(changes).filter(([key, value]) => value !== undefined && JSON.stringify(current[key] ?? null) !== JSON.stringify(value));
+  const wanted = Object.entries(changes).filter(([key, value]) =>
+    value === REMOVE ? key in current : value !== undefined && JSON.stringify(current[key] ?? null) !== JSON.stringify(value));
   let rawBody = closing === -1 ? original : lines.slice(closing + 1).join("");
   if (body !== undefined && body !== parseNote(original).body) {
     rawBody = eol === "\r\n" ? body.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n") : body.replaceAll("\r\n", "\n");
@@ -538,7 +542,8 @@ export function updateNoteText(original, changes = {}, body = undefined) {
 
   if (closing === -1) {
     if (!wanted.length) return rawBody;
-    const header = wanted.flatMap(([key, value]) => formatProperty(key, value, [], eol));
+    const header = wanted.filter(([, value]) => value !== REMOVE).flatMap(([key, value]) => formatProperty(key, value, [], eol));
+    if (!header.length) return rawBody;
     return `---${eol}${header.join("")}---${eol}${rawBody}`;
   }
 
@@ -560,6 +565,10 @@ export function updateNoteText(original, changes = {}, body = undefined) {
   }
   for (const [key, value] of wanted) {
     const segment = segments.find((s) => s.key === key);
+    if (value === REMOVE) {
+      if (segment) segments.splice(segments.indexOf(segment), 1);
+      continue;
+    }
     if (segment) {
       const trailingBlank = [];
       while (segment.lines.length > 1 && stripEol(segment.lines[segment.lines.length - 1]) === "") trailingBlank.unshift(segment.lines.pop());
