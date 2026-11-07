@@ -74,7 +74,9 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | **Decisions** | Lightweight decision records (context, options, decision, consequences), numbered and reviewed in PRs like code. |
 | **Notes, Journal** | Markdown editor with preview, `[[wikilinks]]`, backlinks, tags and a page per day. |
 | **Map** | A live graph of every note: drag notes (they stay pinned), zoom, pinch, hover to light up neighbours with direction arrows, click for an inspector with summary and links in/out. **Shift-click** two notes for the path between them, **Alt-drag** one onto another to write a `[[link]]`, double-click a hollow "unwritten" link to create that note. Local graph (1-3 hops), search, colour by type / folder / cluster / status, tag hubs, orphan filter, a time-lapse of how the brain grew. Canvas-rendered, smooth with thousands of notes, and every note stays reachable by keyboard. |
-| **Obsidian sync** | Import an Obsidian vault and keep it in sync both ways. Files are mirrored as they are; nothing is converted. |
+| **Canvas** | Infinite boards of notes, cards, links and groups joined by arrows, saved as Obsidian-compatible `.canvas` files. |
+| **Obsidian sync** | Import an Obsidian vault and keep it in sync both ways (notes and canvases). Files are mirrored as they are; nothing is converted. |
+| **Plugins** | Community plugins: install from the list, a GitHub repo or a link. Write your own in one file ([PLUGINS.md](PLUGINS.md)). |
 | **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
 | **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
 | **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture. |
@@ -217,7 +219,17 @@ The editor speaks Obsidian-flavoured Markdown, so a vault reads the same in both
   diagrams. Both libraries load only when a note uses them (pinned versions, integrity-checked); offline, the note
   shows the source instead.
 
-Not there (on purpose, for now): community plugins, Canvas and tabs.
+- **Canvas:** an infinite board for laying out notes, cards, links and groups and drawing arrows between them.
+  Double-click to add a card, drag a dot on a card's edge to connect, colour, undo, zoom and pan with mouse, keys
+  or touch. Saved as `.canvas` files in the open JSON Canvas format, so boards open in Obsidian and sync with your
+  vault both ways; fields Cairn doesn't know are kept.
+- **Tabs:** keep several notes open. Ctrl/⌘+click or middle-click any note to open it in a new tab; drag tabs to
+  reorder, Ctrl+Alt+←/→ to switch, Ctrl+Alt+W to close, Ctrl+Alt+T to reopen. Tabs are remembered per brain.
+- **Community plugins:** turn them on under **Plugins**, then install from the built-in list (Note queries,
+  Calendar, Writing stats, Recent files), from any GitHub repo (`owner/repo`) or from a link. A plugin is one
+  JavaScript file that can add commands, sidebar pages, ```` ```lang ```` block renderers and event hooks; see
+  [PLUGINS.md](PLUGINS.md). Plugins live on your device, never in a shared brain. Obsidian's own plugins don't run
+  here (they need Obsidian's API), but Cairn's API mirrors theirs, so porting is usually quick.
 
 ### Keep a separate brain in sync with a vault
 

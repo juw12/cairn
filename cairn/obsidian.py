@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 
 from . import core
-from .brain import SKIP_DIRS, Brain, is_vault
+from .brain import SKIP_DIRS, TEXT_SUFFIXES, Brain, is_vault
 
 STATE_DIR = ".cairn"
 STATE_FILE = "obsidian.json"
@@ -47,14 +47,14 @@ def clean_folder(folder: str | None) -> str:
 
 
 def scan(root: Path) -> dict[str, dict]:
-    """Every Markdown file under root as {relative path: {"hash", "mtime", "text"}}, skipping dot folders."""
+    """Every note and canvas under root as {relative path: {"hash", "mtime", "text"}}, skipping dot folders."""
     files: dict[str, dict] = {}
     if not root.is_dir():
         return files
     for current, dirs, names in os.walk(root):
         dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
         for name in sorted(names):
-            if not name.lower().endswith(".md") or name.endswith(".cairn-tmp"):
+            if not name.lower().endswith(TEXT_SUFFIXES) or name.endswith(".cairn-tmp"):
                 continue
             path = Path(current) / name
             try:
@@ -77,7 +77,7 @@ def _inside(child: Path, parent: Path) -> bool:
 
 def _write(root: Path, relative: str, text: str) -> None:
     target = (root / relative).resolve()
-    if not _inside(target, root.resolve()) or not target.name.lower().endswith(".md"):
+    if not _inside(target, root.resolve()) or not target.name.lower().endswith(TEXT_SUFFIXES):
         raise SyncError(f"Refusing to write outside the synced folder: {relative}")
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(target.name + ".cairn-tmp")
@@ -98,11 +98,13 @@ def _move_to_trash(root: Path, relative: str, trash: Path) -> None:
 
 
 def conflict_name(relative: str, taken: set[str], today: str) -> str:
-    stem = relative[:-3]
-    candidate = f"{stem} (conflict {today}).md"
+    stem, dot, suffix = relative.rpartition(".")
+    suffix = f".{suffix}" if dot else ""
+    stem = stem if dot else relative
+    candidate = f"{stem} (conflict {today}){suffix}"
     number = 2
     while candidate in taken:
-        candidate = f"{stem} (conflict {today} {number}).md"
+        candidate = f"{stem} (conflict {today} {number}){suffix}"
         number += 1
     return candidate
 

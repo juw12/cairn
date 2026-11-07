@@ -7,7 +7,7 @@
 //   gitStatus() / gitCommit(msg) / gitSync() -> server only
 //   desktop() / desktopAction(action, payload) -> the desktop app only (info.desktop)
 
-import { scanTodos } from "./core.js";
+import { isBrainFile, scanTodos } from "./core.js";
 import { DEMO_FILES, DEMO_TODOS } from "./demo.js";
 import * as gh from "./github.js";
 
@@ -205,7 +205,7 @@ export class FolderStore {
       for await (const [name, handle] of dir.entries()) {
         if (handle.kind === "directory") {
           if (!name.startsWith(".") && !SKIP_DIRS.has(name)) await walk(handle, `${prefix}${name}/`);
-        } else if (name.endsWith(".md")) {
+        } else if (isBrainFile(name)) {
           const file = await handle.getFile();
           out.push({ path: prefix + name, text: await file.text(), mtime: file.lastModified });
         }

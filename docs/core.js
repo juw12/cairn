@@ -39,6 +39,10 @@ const CAPTURE_PREFIXES = {
 };
 
 export const SPECIAL_FILES = ["CONTEXT.md", "README.md"];
+// Files a brain holds: Markdown notes and Obsidian canvases (JSON Canvas, jsoncanvas.org).
+export const isNotePath = (path) => /\.md$/i.test(path);
+export const isCanvasPath = (path) => /\.canvas$/i.test(path);
+export const isBrainFile = (path) => isNotePath(path) || isCanvasPath(path);
 
 const KEY_RE = /^([A-Za-z0-9_-]+):(.*)$/;
 const TAG_RE = /(^|\s)#([A-Za-z0-9][A-Za-z0-9_/-]*)/g;

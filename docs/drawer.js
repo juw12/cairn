@@ -8,6 +8,8 @@ import { $, SPARKS, STATUS_LABEL, TYPE_META, ask, icon, plural, rowItem, toast, 
 import { createNote, fileByPath, markGuide, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { hydrateAssets, isBookmarked, normalizeNotePath, renameNote, renderNote, resolveFrom, toggleBookmark } from "./vault.js";
 import { moveNote } from "./views.js";
+import { emit as emitPluginEvent } from "./plugins.js";
+import { pick } from "./palette.js";
 import { render, renderView, setView } from "./app.js";
 
 // ============================================================ editor drawer
@@ -22,12 +24,14 @@ let lastCaret = null;
 const PANELS = { outline: true, links: false, mentions: false };
 const BUILT_IN = new Set(["title", "type", "status", "tags", "created", "source"]);
 
-export function openNote(path, { heading = null } = {}) {
+export function openNote(path, { heading = null, newTab = false } = {}) {
   if (!noteByPath(path)) return;
   flushPending();
+  placeTab(path, newTab);
   state.open = path;
   state.scrollHeading = heading;
   renderDrawer();
+  emitPluginEvent("note-open", { path });
 }
 
 export function closeDrawer() {
@@ -36,6 +40,213 @@ export function closeDrawer() {
   state.spark = null;
   closeSuggest();
   $("#drawer-layer")?.remove();
+}
+
+// ------------------------------------------------------------ tabs
+// Several notes stay open as tabs above the editor, like Obsidian: a plain click opens a note in
+// the current tab, Ctrl/Cmd+click or a middle click opens it in a new one. Tabs are remembered per
+// brain on this device, and closing the drawer keeps them for next time.
+
+const MAX_TABS = 12;
+const tabsKey = () => `cairn.tabs:${state.info?.mode || ""}:${state.info?.project || ""}`;
+
+function ensureTabs() {
+  if (Array.isArray(state.tabs)) return;
+  state.tabs = [];
+  state.lastTab = null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(tabsKey()) || "null");
+    if (saved && Array.isArray(saved.tabs)) {
+      state.tabs = saved.tabs.filter((p) => typeof p === "string" && noteByPath(p)).slice(0, MAX_TABS);
+      state.lastTab = state.tabs.includes(saved.active) ? saved.active : state.tabs[0] || null;
+    }
+  } catch {
+    /* start with no tabs */
+  }
+}
+
+function saveTabs() {
+  try {
+    localStorage.setItem(tabsKey(), JSON.stringify({ tabs: state.tabs, active: state.open || state.lastTab }));
+  } catch {
+    /* storage full or blocked: tabs just aren't remembered */
+  }
+}
+
+// Put `path` in the tab list: already open -> just switch; new tab -> next to the current one;
+// otherwise it replaces the current tab.
+function placeTab(path, newTab = false) {
+  ensureTabs();
+  state.tabs = state.tabs.filter((p) => noteByPath(p) || p === state.lastTab);
+  if (!state.tabs.includes(path)) {
+    const current = state.tabs.includes(state.open) ? state.open : state.lastTab;
+    const at = state.tabs.indexOf(current);
+    if (newTab || at === -1) state.tabs.splice(at === -1 ? state.tabs.length : at + 1, 0, path);
+    else state.tabs[at] = path;
+    while (state.tabs.length > MAX_TABS) state.tabs.splice(state.tabs.findIndex((p) => p !== path), 1);
+  }
+  state.tabs = state.tabs.filter((p) => p === path || noteByPath(p));
+  state.lastTab = path;
+  saveTabs();
+}
+
+export function openTabs() {
+  ensureTabs();
+  return [...state.tabs];
+}
+
+export function closeTab(path = state.open || state.lastTab) {
+  ensureTabs();
+  const at = state.tabs.indexOf(path);
+  if (at === -1) return;
+  flushPending();
+  state.tabs.splice(at, 1);
+  state.closedTabs = [path, ...(state.closedTabs || []).filter((p) => p !== path)].slice(0, 20);
+  if (path === state.open) {
+    const next = state.tabs[at] || state.tabs[at - 1];
+    if (next) {
+      state.open = next;
+      state.lastTab = next;
+      saveTabs();
+      renderDrawer();
+      emitPluginEvent("note-open", { path: next });
+      return;
+    }
+    state.lastTab = null;
+    saveTabs();
+    closeDrawer();
+    return;
+  }
+  if (state.lastTab === path) state.lastTab = state.open;
+  saveTabs();
+  if (state.open) renderDrawer();
+}
+
+export function closeOtherTabs() {
+  ensureTabs();
+  const keep = state.open || state.lastTab;
+  if (!keep) return;
+  state.closedTabs = [...state.tabs.filter((p) => p !== keep), ...(state.closedTabs || [])].slice(0, 20);
+  state.tabs = [keep];
+  saveTabs();
+  if (state.open) renderDrawer();
+}
+
+export function cycleTab(step) {
+  ensureTabs();
+  if (state.tabs.length < 2) return;
+  const at = state.tabs.indexOf(state.open || state.lastTab);
+  openNote(state.tabs[(at + step + state.tabs.length) % state.tabs.length]);
+}
+
+export function reopenClosedTab() {
+  const path = (state.closedTabs || []).find((p) => noteByPath(p));
+  if (!path) return toast("No closed tab to reopen.");
+  state.closedTabs = state.closedTabs.filter((p) => p !== path);
+  openNote(path, { newTab: true });
+}
+
+export async function openInNewTab() {
+  const notes = [...state.notes].sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+  const chosen = await pick(notes.map((n) => ({ label: n.title, kind: n.path, icon: TYPE_META[n.type].icon, value: n.path })), "Open a note in a new tab…");
+  if (chosen) openNote(chosen, { newTab: true });
+}
+
+// A note was deleted: drop its tab without offering to reopen it.
+export function forgetTab(path) {
+  ensureTabs();
+  state.tabs = state.tabs.filter((p) => p !== path);
+  if (state.lastTab === path) state.lastTab = state.tabs[0] || null;
+  saveTabs();
+}
+
+export function resetTabs() {
+  state.tabs = null;
+  state.lastTab = null;
+  state.closedTabs = [];
+}
+
+function tabStrip(note) {
+  ensureTabs();
+  const tabs = state.tabs.filter((p) => noteByPath(p));
+  if (tabs.length < 2) return "";
+  return `<div class="tab-strip" role="tablist" aria-label="Open notes">${tabs
+    .map((path) => {
+      const tab = noteByPath(path);
+      const on = path === note.path;
+      return `<div class="note-tab${on ? " on" : ""}" role="tab" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-tab="${esc(path)}" draggable="true" title="brain/${esc(path)} · middle-click to close">
+        <span class="dot t-${tab.type}"></span><span class="note-tab-title">${esc(tab.title)}</span>
+        <button class="note-tab-close" data-tab-close="${esc(path)}" tabindex="-1" aria-label="Close ${esc(tab.title)}">${icon("x", "sm")}</button>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+function wireTabs(layer) {
+  const strip = $(".tab-strip", layer);
+  $("[data-tab-new]", layer)?.addEventListener("click", openInNewTab);
+  if (!strip) return;
+  strip.addEventListener("click", (event) => {
+    const close = event.target.closest("[data-tab-close]");
+    if (close) {
+      event.stopPropagation();
+      return closeTab(close.dataset.tabClose);
+    }
+    const tab = event.target.closest("[data-tab]");
+    if (tab && tab.dataset.tab !== state.open) openNote(tab.dataset.tab);
+  });
+  strip.addEventListener("auxclick", (event) => {
+    const tab = event.target.closest("[data-tab]");
+    if (event.button === 1 && tab) {
+      event.preventDefault();
+      closeTab(tab.dataset.tab);
+    }
+  });
+  strip.addEventListener("mousedown", (event) => {
+    if (event.button === 1) event.preventDefault(); // no autoscroll cursor on middle-click
+  });
+  strip.addEventListener("keydown", (event) => {
+    const tabs = [...strip.querySelectorAll("[data-tab]")];
+    const at = tabs.indexOf(event.target.closest("[data-tab]"));
+    if (at === -1) return;
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      const next = tabs[(at + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+      next.focus();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openNote(tabs[at].dataset.tab);
+      setTimeout(() => $(`.note-tab.on`)?.focus(), 0);
+    } else if (event.key === "Delete") {
+      event.preventDefault();
+      closeTab(tabs[at].dataset.tab);
+    }
+  });
+  let dragged = null;
+  strip.addEventListener("dragstart", (event) => {
+    const tab = event.target.closest("[data-tab]");
+    if (!tab) return;
+    dragged = tab.dataset.tab;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", dragged);
+  });
+  strip.addEventListener("dragover", (event) => {
+    if (dragged) event.preventDefault();
+  });
+  strip.addEventListener("drop", (event) => {
+    const target = event.target.closest("[data-tab]");
+    if (!dragged || !target || target.dataset.tab === dragged) return;
+    event.preventDefault();
+    const tabs = state.tabs.filter((p) => p !== dragged);
+    const at = tabs.indexOf(target.dataset.tab);
+    const rect = target.getBoundingClientRect();
+    tabs.splice(event.clientX > rect.left + rect.width / 2 ? at + 1 : at, 0, dragged);
+    state.tabs = tabs;
+    dragged = null;
+    saveTabs();
+    renderDrawer();
+  });
+  strip.querySelector(".note-tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 function queueChange(changes) {
@@ -223,6 +434,8 @@ export function renderDrawer() {
   closeSuggest();
   const note = noteByPath(state.open);
   if (!note) return;
+  ensureTabs();
+  if (!state.tabs.includes(note.path)) placeTab(note.path);
   const statuses = core.STATUSES[note.type];
   const backs = core.backlinks(state.notes, note.path).map(noteByPath).filter(Boolean);
   const created = typeof note.meta.created === "string" ? note.meta.created : "";
@@ -241,12 +454,14 @@ export function renderDrawer() {
   layer.innerHTML = `
     <div class="scrim" data-action="close-drawer"></div>
     <aside class="drawer${mode === "split" ? " wide" : ""}" role="dialog" aria-modal="true" aria-label="Edit ${esc(note.title)}">
+      ${tabStrip(note)}
       <div class="drawer-head">
         ${typePill(note.type)}
         <span class="path" title="brain/${esc(note.path)}">brain/${esc(note.path)}</span>
         <span class="save-state${state.held?.path === note.path ? " unsaved" : ""}" id="save-state">${readOnly() ? "Read-only" : state.held?.path === note.path ? "Not saved" : "Saved"}</span>
         <button class="btn ghost sm icon-only bookmark${starred ? " on" : ""}" data-action="bookmark" aria-pressed="${starred}" aria-label="${starred ? "Remove bookmark" : "Bookmark this note"}" title="${starred ? "Bookmarked" : "Bookmark"}">${icon("star")}</button>
         ${readOnly() ? "" : `<button class="btn ghost sm icon-only" data-action="rename" aria-label="Rename or move" title="Rename or move (links are updated)">${icon("pencil")}</button>`}
+        <button class="btn ghost sm icon-only" data-tab-new aria-label="Open another note in a new tab" title="Open another note in a new tab (or Ctrl+click any note)">${icon("tabs")}</button>
         <button class="btn ghost sm icon-only" data-action="close-drawer" aria-label="Close">${icon("x")}</button>
       </div>
       <div class="drawer-body">
@@ -284,6 +499,7 @@ export function renderDrawer() {
     </aside>`;
   $("#layer").appendChild(layer);
   wireDrawer(layer, note);
+  wireTabs(layer);
 }
 
 function wireDrawer(layer, note) {

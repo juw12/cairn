@@ -3,7 +3,8 @@
 import * as core from "./core.js";
 import { ConflictError } from "./store.js";
 import { $, toast, today } from "./ui.js";
-import { closeDrawer, renderDrawer } from "./drawer.js";
+import { closeDrawer, forgetTab, renderDrawer } from "./drawer.js";
+import { notesChanged } from "./plugins.js";
 import { render, renderNav, renderSidebarFoot, renderView } from "./app.js";
 
 export const VIEWS = [
@@ -14,9 +15,11 @@ export const VIEWS = [
   { id: "notes", label: "Notes", icon: "note", group: "Remember" },
   { id: "journal", label: "Journal", icon: "journal", group: "Remember" },
   { id: "map", label: "Map", icon: "map", group: "Remember" },
+  { id: "canvas", label: "Canvas", icon: "canvas", group: "Remember" },
   { id: "code", label: "Code inbox", icon: "code", group: "Project" },
   { id: "context", label: "Context pack", icon: "sparkle", group: "Project" },
   { id: "obsidian", label: "Obsidian sync", icon: "vault", group: "Project" },
+  { id: "plugins", label: "Plugins", icon: "puzzle", group: "Project" },
   { id: "people", label: "People", icon: "users", group: "Network" },
   { id: "proof", label: "Proof", icon: "check", group: "Network" },
 ];
@@ -47,6 +50,10 @@ export const state = {
   discover: null,
   obsidian: null,
   proofCheck: null,
+  canvas: null,
+  tabs: null,
+  lastTab: null,
+  closedTabs: [],
 };
 
 export const readOnly = () => Boolean(state.info?.readOnly);
@@ -55,8 +62,9 @@ export const readOnly = () => Boolean(state.info?.readOnly);
 
 function rebuildNotes() {
   state.notes = state.files
-    .filter((f) => !core.SPECIAL_FILES.includes(f.path))
+    .filter((f) => core.isNotePath(f.path) && !core.SPECIAL_FILES.includes(f.path))
     .map((f) => core.noteFromFile(f.path, f.text, f.mtime));
+  notesChanged();
 }
 
 export async function loadAll() {
@@ -155,6 +163,7 @@ export async function deleteNote(path) {
   }
   upsertFile(path, null);
   scheduleGitRefresh();
+  forgetTab(path);
   closeDrawer();
   render();
   toast(`Deleted brain/${path}`, {
