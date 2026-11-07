@@ -780,7 +780,7 @@ def context_pack(notes: list[dict], project: str, today: str) -> str:
 
 # A session log line: `- 14:02 pass: pytest (12s)`. Anything else in the body is free text.
 LOG_KINDS = ("start", "note", "prompt", "pass", "fail", "commit", "skill", "end")
-_LOG_LINE_RE = re.compile(r"^\s*[-*]\s+(\d{1,2}:\d{2})\s+([a-z]+):\s*(.*)$")
+_VIBE_LOG_LINE_RE = re.compile(r"^\s*[-*]\s+(\d{1,2}:\d{2})\s+([a-z]+):\s*(.*)$")
 _STAMP_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})")
 FINISHED = ("shipped", "partial", "dropped")
 
@@ -789,7 +789,7 @@ def session_log(body: str) -> list[dict]:
     """The timestamped steps of a session, in the order they were written."""
     entries = []
     for line in body.replace("\r\n", "\n").split("\n"):
-        match = _LOG_LINE_RE.match(line)
+        match = _VIBE_LOG_LINE_RE.match(line)
         if match and match.group(2) in LOG_KINDS:
             entries.append({"time": match.group(1).zfill(5), "kind": match.group(2), "text": match.group(3).strip()})
     return entries
