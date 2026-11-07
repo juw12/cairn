@@ -15,6 +15,7 @@ export const SHORTCUTS = [
       ["Mod+K", "Command palette: every action and note"],
       ["/", "Search notes"],
       ["C", "Jump to quick capture"],
+      ["L", "Log your day by voice or typing"],
       ["?", "This sheet"],
       ["Esc", "Close the note, dialog or menu"],
     ],
@@ -35,6 +36,14 @@ export const SHORTCUTS = [
       ["Mod+Alt+\\", "Open or close a note beside this one"],
       ["Alt+click", "Open a link or tab in the side pane"],
       ["Drag a tab", "Drop it on the right half to split"],
+    ],
+  },
+  {
+    title: "Voice log",
+    rows: [
+      ["L", "Open the log (or tap the mic button)"],
+      ["Enter", "Save what you typed"],
+      ["Esc", "Close the log"],
     ],
   },
   {

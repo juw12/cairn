@@ -126,8 +126,8 @@ export function relativeTime(ms) {
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-export function plural(count, word) {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
+export function plural(count, word, many = `${word}s`) {
+  return `${count} ${count === 1 ? word : many}`;
 }
 
 // ============================================================ shared pieces

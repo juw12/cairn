@@ -69,9 +69,11 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | Screen | What it does |
 |---|---|
 | **Quick capture** | One bar on every screen. `todo: ship v1 #release`, `decision: use SQLite`, `log: fixed the bug` or just text (an idea). It shows where the note will go before you press Enter. |
+| **Voice log** | One mic button in the middle of every screen (or <kbd>L</kbd>). Talk and it writes a timestamped line into today's `journal/YYYY-MM-DD.md`; say *todo …*, *idea …*, *decision …* or *mood good* and it creates the linked note or mood too. *Undo*, *read today*, *stop*. Works in the browser's own speech engine, no API key; typing works everywhere else. [More below](#keep-a-daily-log-by-voice). |
 | **Ideas wall** | Raw → Exploring → Ready → Parked. Drag ideas right as they firm up. **Spark** drops a thinking prompt into an idea; **Promote to task** creates a linked task. |
 | **Board** | To do → Doing → Done with drag and drop, checklists and progress bars. |
 | **Decisions** | Lightweight decision records (context, options, decision, consequences), numbered and reviewed in PRs like code. |
+| **Journal & memories** | Streaks, an 18-week heatmap, a mood chart, look-backs (yesterday, a week, a month and a year ago), what was on your mind, search across every day and a one-click **weekly review** saved as `journal/YYYY-Www.md`. |
 | **Notes, Journal** | Markdown editor with preview, `[[wikilinks]]`, backlinks, tags and a page per day. Open notes as **tabs**, and put a second note **beside** the first (columns button, <kbd>Alt</kbd>+click a link or tab, or drag a tab to the right): both stay editable, links in the side note open there, and the layout is remembered. |
 | **Map** | A live graph of every note: drag notes (they stay pinned), zoom, pinch, hover to light up neighbours with direction arrows, click for an inspector with summary and links in/out. **Shift-click** two notes for the path between them, **Alt-drag** one onto another to write a `[[link]]`, double-click a hollow "unwritten" link to create that note. Local graph (1-3 hops), search, colour by type / folder / cluster / status, tag hubs, orphan filter, a time-lapse of how the brain grew. Canvas-rendered, smooth with thousands of notes, and every note stays reachable by keyboard. |
 | **Canvas** | Infinite boards of notes, cards, links and groups joined by arrows, saved as Obsidian-compatible `.canvas` files. <kbd>Shift</kbd>-drag to box-select, <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> / <kbd>D</kbd> to copy, paste and duplicate (pasting a link, a `[[note]]` or text makes the right card), drag notes in from the **Notes** panel. A note shows the canvases it sits on, and the Map draws each canvas as a square joined to its notes. |
@@ -99,7 +101,7 @@ Press <kbd>?</kbd> anywhere in the app (or pick **Keyboard shortcuts** in the pa
 
 | Where | Keys |
 |---|---|
-| Everywhere | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> palette · <kbd>/</kbd> search · <kbd>C</kbd> capture · <kbd>?</kbd> shortcuts · <kbd>Esc</kbd> close |
+| Everywhere | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> palette · <kbd>/</kbd> search · <kbd>C</kbd> capture · <kbd>L</kbd> voice log · <kbd>?</kbd> shortcuts · <kbd>Esc</kbd> close |
 | Tabs | <kbd>Ctrl</kbd>+click a link opens a tab · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> switch · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> close · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> reopen |
 | Split view | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>&#92;</kbd> open/close · <kbd>Alt</kbd>+click a link or tab · drag a tab to the right half |
 | Writing | <kbd>Ctrl</kbd>+<kbd>B</kbd>/<kbd>I</kbd> bold/italic · <kbd>[[</kbd> link a note · <kbd>Enter</kbd> continues a list |
@@ -145,6 +147,32 @@ It opens `http://127.0.0.1:4777` with code scanning and one-click **Commit brain
 (File System Access API). Nothing is uploaded.
 
 **3. Demo.** [Try the sample project](https://juw12.github.io/cairn/?demo=1) (an offline hiking app). It's saved only in your browser.
+
+### Keep a daily log by voice
+
+Press the round **Log** button at the bottom of any screen, or <kbd>L</kbd>. The microphone starts (you can turn that off), you talk, and every sentence lands in today's page as a plain Markdown bullet:
+
+```markdown
+## Log
+
+- 08:12 Walked to work, sorted the GPX bug on the train #beta
+- 09:40 Task: [[book-the-train-to-lyon|Book the train to Lyon]]
+- 18:05 Mood: 🙂 good (4/5)
+```
+
+| Say | What happens |
+|---|---|
+| anything | a timestamped line in today's log |
+| *todo …*, *remind me to …* | a task on the board, linked from the log |
+| *idea …*, *decision …*, *note …* | that note, linked from the log |
+| *mood good*, *I feel tired* | a mood line (1-5) for the mood chart |
+| *undo*, *scratch that* | removes the last line (and the note it made) |
+| *read today*, *what did I do yesterday* | reads it back aloud |
+| *open today*, *weekly review*, *stop* | opens the page, writes the review, stops listening |
+
+"Hey Cairn" in front is fine and ignored. **Keep listening** logs line after line hands-free; **Review before saving** puts what you said in the box first. Speech recognition is the browser's own (Chrome, Edge, Safari); in browsers without it the mic is greyed out and the box works the same with typed prefixes (`todo:`, `idea:`, `mood:`). Nothing is sent anywhere by Cairn, and read-only brains never show the button.
+
+**Journal** turns the pages into memory: your streak, a heatmap of the last 18 weeks, a mood chart, what you wrote yesterday, a week, a month and a year ago, the tags and notes that were on your mind, days that share links with today, and search across every entry. **Weekly review** collects the week's entries, moods, finished tasks and new notes into `journal/2026-W45.md`, a normal note that shows up on the Map and in backlinks.
 
 ### Share your brain and explore others
 

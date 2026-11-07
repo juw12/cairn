@@ -7,7 +7,7 @@ import * as gh from "./github.js";
 import * as auth from "./auth.js";
 import { $, LOGO, SPARKS, TYPE_META, ask, icon, plural, toast, today } from "./ui.js";
 import { GUIDE_KEY, LAST_BRAIN_KEY, REPO_URL, VIEWS, createNote, deleteNote, guide, loadAll, markGuide, noteByPath, readOnly, refreshGit, refreshTodos, state } from "./state.js";
-import { board, codeView, contextView, decisions, home, ideas, journal, moveNote, notesView, wireBoard } from "./views.js";
+import { board, codeView, contextView, decisions, home, ideas, moveNote, notesView, wireBoard } from "./views.js";
 import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
@@ -16,6 +16,7 @@ import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createM
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { showShortcuts } from "./shortcuts.js";
+import { initVoiceLog, journalView, openLogSheet, syncLogFab, wireJournal } from "./voicelog.js";
 import { showWelcome } from "./welcome.js";
 import { maybeStartTour, startTour } from "./tour.js";
 import { initHoverPreview } from "./hover.js";
@@ -129,7 +130,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -163,6 +164,8 @@ function afterRender() {
   if (state.view === "map") wireMap();
   if (state.view === "canvas") wireCanvas();
   if (state.view === "plugins") wirePlugins();
+  if (state.view === "journal") wireJournal();
+  syncLogFab();
   const pluginView = $("[data-plugin-view]");
   if (pluginView) renderPluginView(state.view, pluginView);
 }
@@ -462,6 +465,10 @@ function wireGlobal() {
     } else if (event.key === "?") {
       event.preventDefault();
       showShortcuts();
+    } else if ((event.key === "l" || event.key === "L") && !event.defaultPrevented) {
+      // On the Map, L with a note selected means "local map" (handled there first).
+      event.preventDefault();
+      openLogSheet();
     } else if (event.key === "c") {
       event.preventDefault();
       captureInput.focus();
@@ -508,6 +515,8 @@ export function applyInfo() {
   document.title = state.info.owner ? `${state.info.owner}/${state.info.project} · Cairn` : `${state.info.project} · Cairn`;
   document.body.classList.toggle("readonly", readOnly());
   $("#capture-form").hidden = readOnly() || state.info.mode === "visitor";
+  initVoiceLog();
+  syncLogFab();
   renderSidebarFoot();
 }
 

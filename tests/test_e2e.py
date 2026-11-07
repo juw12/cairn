@@ -18,6 +18,10 @@ except ImportError:  # pragma: no cover
 VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "context", "plugins", "people", "proof"]
 
 
+# The demo brain has 26 notes: the original 18 plus 8 dated journal pages (docs/store.js DEMO_DAYS).
+DEMO_NOTES = 26
+
+
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
 class EndToEndTests(unittest.TestCase):
     @classmethod
@@ -60,7 +64,7 @@ class EndToEndTests(unittest.TestCase):
             self.go(page, view)
             self.assertTrue(page.inner_text("#view").strip(), view)
             if view == "map":
-                self.assertEqual(page.locator(".map-node").count(), 18)
+                self.assertEqual(page.locator(".map-node").count(), DEMO_NOTES)
         self.assertEqual(self.errors, [])
 
     def test_capture_routes_to_task_with_tags(self):
@@ -365,7 +369,7 @@ class EndToEndTests(unittest.TestCase):
         # Every note has a place in space (canvases too), and the layout really uses depth.
         bodies = page.evaluate("window.cairn.map3d.bodies()")
         canvases = [b for b in bodies if str(b["id"]).startswith("canvas:")]
-        self.assertEqual(len(bodies) - len(canvases), 18)
+        self.assertEqual(len(bodies) - len(canvases), DEMO_NOTES)
         self.assertEqual(len(canvases), 1, "the demo canvas is on the map")
         zs = [b["z"] for b in bodies]
         self.assertGreater(max(zs) - min(zs), 40, "the 3D layout should not be flat")
@@ -405,7 +409,7 @@ class EndToEndTests(unittest.TestCase):
         page.locator("#map-canvas").focus()
         page.keyboard.press("2")
         page.wait_for_selector("#map-svg text")
-        self.assertEqual(page.locator(".map-node").count(), 18)
+        self.assertEqual(page.locator(".map-node").count(), DEMO_NOTES)
         self.assertEqual(self.errors, [])
 
     def test_map_select_keyboard_local_and_path(self):
@@ -432,11 +436,12 @@ class EndToEndTests(unittest.TestCase):
         # L opens the local map of the selected note; Escape goes back to the whole map.
         page.keyboard.press("l")
         page.wait_for_selector(".map-chip.local")
-        self.assertLess(page.locator(".map-node").count(), 18)
+        self.assertEqual(page.locator(".log-sheet").count(), 0, "L on the Map is the local map, not the voice log")
+        self.assertLess(page.locator(".map-node").count(), DEMO_NOTES)
         page.locator("#map-svg .map-dot.selected").focus()
         page.keyboard.press("Escape")
         page.wait_for_function("() => !document.querySelector('.map-chip.local')")
-        self.assertEqual(page.locator(".map-node").count(), 18)
+        self.assertEqual(page.locator(".map-node").count(), DEMO_NOTES)
         # Path between two notes on the same island.
         ends = page.evaluate("""async () => {
             const G = await import('./graph.js');
@@ -470,14 +475,14 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector("#map-svg text")
         self.assertEqual(page.locator(".map-node").count(), tasks)
         page.click('[data-map="clear-filters"]')
-        page.wait_for_function("() => document.querySelectorAll('.map-node').length === 18")
+        page.wait_for_function("() => document.querySelectorAll('.map-node').length === %d" % DEMO_NOTES)
         orphans = page.evaluate("""() => {
             const g = window.cairn.core.buildGraph(window.cairn.state.notes);
             const linked = new Set(g.edges.flatMap((e) => [e.source, e.target]));
             return g.nodes.filter((n) => !linked.has(n.id)).length;
         }""")
         page.uncheck('[data-map-setting="orphans"]')
-        page.wait_for_function("(n) => document.querySelectorAll('.map-node').length === n", arg=18 - orphans)
+        page.wait_for_function("(n) => document.querySelectorAll('.map-node').length === n", arg=DEMO_NOTES - orphans)
         page.check('[data-map-setting="orphans"]')
         page.uncheck('[data-map-setting="arrows"]')
         self.assertEqual(self.errors, [])

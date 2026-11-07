@@ -1272,6 +1272,7 @@ function wirePanel(wrap) {
       else return;
       event.stopPropagation();
     } else if (key.toLowerCase() === "l" && session.selected) {
+      event.preventDefault();
       mapActions.local();
     } else if (key.toLowerCase() === "f") {
       mapActions.fit();

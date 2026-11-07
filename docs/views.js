@@ -6,6 +6,7 @@ import { $, $$, STATUS_HINT, STATUS_LABEL, TYPE_META, byRecent, checklist, empty
 import { fileByPath, guide, markGuide, noteByPath, readOnly, saveNote, state } from "./state.js";
 import { bookmarks, countNotes, folderTree, searchNotes } from "./vault.js";
 import { render } from "./app.js";
+import { homeLogStrip } from "./voicelog.js";
 
 // ============================================================ views
 
@@ -78,6 +79,7 @@ export function home() {
       ${figure("decisions", proposed.length, "open decisions")}
       ${figure("code", todoCount, "code TODOs")}
     </div>
+    ${homeLogStrip()}
     <div class="columns-3">
       ${column("Doing now", "board", "Board", doing.map((n) => rowItem(n, checklistMeta(n))), "Nothing in progress. Drag a task to Doing.")}
       ${column("Fresh ideas", "ideas", "Ideas", fresh.map((n) => rowItem(n, relativeTime(n.mtime))), "No raw ideas. Capture one above.")}
