@@ -5,6 +5,9 @@ Everything happens inside Cairn; there is no storefront website.
 - Buying: the Autopilot screen shows the plans and PayPal's embedded checkout (card or PayPal
   balance, inside the Cairn window). When the payment completes the app stores a receipt and Pro
   is active at once.
+- Keys for every purchase: right after a payment the app asks the Cairn Pro license server
+  (``worker/pro``, a Cloudflare Worker) for a signed key. The server looks the order up at PayPal
+  and signs it; it stores nothing, so the same order number and e-mail restore Pro on any computer.
 - Pro keys: a key is a small signed note, ``CAIRN1.<payload>.<signature>``. The app checks the
   signature offline against ``SELLER_PUBLIC_KEY`` (RSA-2048, PKCS#1 v1.5, SHA-256), so a key works
   with no network and cannot be forged without the seller's private key. Keys move Pro to a new
@@ -25,6 +28,9 @@ import os
 import re
 import secrets
 import threading
+import time
+import urllib.error
+import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -48,6 +54,10 @@ SELLER_PUBLIC_KEY = {
 # PayPal REST app client id (public, made once in PayPal's developer dashboard). Empty = the
 # in-app checkout stays hidden and only Pro keys work.
 PAYPAL_CLIENT_ID = os.environ.get("CAIRN_PRO_PAYPAL_CLIENT", "")
+
+# The license server that turns a PayPal order into a key (worker/pro). Empty = no restore.
+LICENSE_SERVER = os.environ.get("CAIRN_PRO_SERVER", "https://cairn-pro.juwenmondial.workers.dev")
+CLAIM_RETRY_SECONDS = 3600
 
 SHA256_PREFIX = bytes.fromhex("3031300d060960864801650304020105000420")
 
@@ -196,6 +206,56 @@ def issue_key(email: str, plan_id: str, private: dict, days: int | None = None, 
     return sign_key(payload, private)
 
 
+# ------------------------------------------------------------------ license server
+
+def claim_key(order_id: str, email: str, server: str | None = None, timeout: float = 12) -> dict:
+    """Ask the license server for the key of a PayPal order: {"key", "plan", "expires"}.
+
+    ValueError = the server said no (wrong e-mail, unknown order). ConnectionError = try later.
+    """
+    server = (LICENSE_SERVER if server is None else server).rstrip("/")
+    if not server:
+        raise ConnectionError("This copy of Cairn has no license server set.")
+    body = json.dumps({"orderId": order_id, "email": email}).encode("utf-8")
+    failure = ConnectionError("Could not reach the Cairn Pro license server. Check the internet connection and try again.")
+    # The system proxy first, then direct: some offices need the proxy, some proxies block workers.dev.
+    for opener in (urllib.request.build_opener(), urllib.request.build_opener(urllib.request.ProxyHandler({}))):
+        # A fresh request each time: a proxy handler rewrites the request it is given.
+        request = urllib.request.Request(
+            server + "/claim",
+            data=body,
+            headers={"Content-Type": "application/json", "User-Agent": "cairn-pro"},
+            method="POST",
+        )
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            if not str(data.get("key", "")).startswith(KEY_PREFIX + "."):
+                raise ConnectionError("The license server sent an unexpected answer.")
+            return data
+        except urllib.error.HTTPError as error:
+            try:
+                message = str(json.loads(error.read().decode("utf-8")).get("error", ""))
+            except (ValueError, OSError, AttributeError):
+                message = ""
+            if not message:
+                # Not our server talking (a proxy or captive portal page): try the next way out.
+                failure = ConnectionError(f"Could not reach the Cairn Pro license server (answer {error.code}).")
+                continue
+            if error.code in (400, 402, 403, 404):
+                raise ValueError(message) from None
+            failure = ConnectionError(message)
+            if error.code == 503:
+                break
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+    raise failure
+
+
+def _rank(expires: str) -> date:
+    return date.fromisoformat(expires) if expires else date.max
+
+
 # ------------------------------------------------------------------ this machine's plan
 
 ORDER_ID = re.compile(r"^[A-Z0-9-]{8,40}$")
@@ -205,12 +265,16 @@ class License:
     """Cairn Pro on this computer, kept in ~/.cairn/license.json (never inside a brain or repo)."""
 
     def __init__(self, home: Path | None = None, public_key: dict | None = None, paypal_client_id: str | None = None,
-                 today=date.today):
+                 today=date.today, server: str | None = None):
         self.home = home or config_dir()
         self.public_key = public_key or SELLER_PUBLIC_KEY
         self.paypal_client_id = PAYPAL_CLIENT_ID if paypal_client_id is None else paypal_client_id
         self.today = today
+        # Keys from the real server only verify against the real public key, so a custom key pair
+        # (tests, a fork) gets no server unless one is passed in.
+        self.server = (LICENSE_SERVER if public_key is None else "") if server is None else server
         self.lock = threading.Lock()
+        self.claim_thread: threading.Thread | None = None
 
     @property
     def path(self) -> Path:
@@ -234,30 +298,38 @@ class License:
     # ---------------------------------------------------------- entitlement
 
     def _entitlement(self) -> tuple[dict | None, str]:
-        """(active plan or None, reason it is not active)."""
+        """(active plan or None, reason it is not active). A key and a receipt can both exist
+        (a purchase gets its key from the server); the one that lasts longer wins."""
         record = _load(self.path, {})
         today = self.today()
+        candidates, reasons = [], []
         if record.get("key"):
             try:
                 payload = verify_key(record["key"], self.public_key, today)
+                candidates.append({"source": "key", "email": payload.get("email", ""), "plan": payload.get("plan", ""),
+                                   "expires": payload.get("expires", ""), "order": record.get("order", "")})
             except ValueError as error:
-                return None, str(error)
-            return {"source": "key", "email": payload.get("email", ""), "plan": payload.get("plan", ""),
-                    "expires": payload.get("expires", "")}, ""
+                reasons.append(str(error))
         receipt = record.get("receipt")
         if receipt:
             expires = receipt.get("expires", "")
             if expires and date.fromisoformat(expires) < today:
-                return None, f"Your {plan_name(receipt.get('plan'))} pass ended on {expires}."
-            return {"source": "purchase", "email": receipt.get("email", ""), "plan": receipt.get("plan", ""),
-                    "expires": expires, "order": receipt.get("order", "")}, ""
-        return None, ""
+                reasons.append(f"Your {plan_name(receipt.get('plan'))} pass ended on {expires}.")
+            else:
+                candidates.append({"source": "purchase", "email": receipt.get("email", ""), "plan": receipt.get("plan", ""),
+                                   "expires": expires, "order": receipt.get("order", "")})
+        if candidates:
+            return max(candidates, key=lambda item: _rank(item["expires"])), ""
+        return None, (reasons[0] if reasons else "")
 
     def is_pro(self) -> bool:
         return self._entitlement()[0] is not None
 
     def status(self) -> dict:
         active, reason = self._entitlement()
+        record = _load(self.path, {})
+        self._claim_later(record)
+        claim = record.get("claim") or {}
         return {
             "plan": "pro" if active else ("trial" if self.trial_left() else "free"),
             "pro": bool(active),
@@ -272,6 +344,10 @@ class License:
             "currency": CURRENCY,
             "checkout": {"provider": "paypal", "clientId": self.paypal_client_id, "ready": bool(self.paypal_client_id)},
             "keysReady": bool(self.public_key.get("n")),
+            "key": record.get("key", "") if active else "",
+            "restoreReady": bool(self.server),
+            "keyPending": bool(active and record.get("receipt") and not record.get("key") and self.server),
+            "keyError": claim.get("error", ""),
         }
 
     def activate(self, key: str) -> dict:
@@ -280,7 +356,74 @@ class License:
             raise ValueError("Paste your Cairn Pro key (it starts with CAIRN1).")
         verify_key(key, self.public_key, self.today())
         with self.lock:
-            _save(self.path, {"key": key})
+            record = _load(self.path, {})
+            record["key"] = key
+            record.pop("order", None)
+            _save(self.path, record)
+        return self.status()
+
+    def _store_claimed(self, result: dict, order_id: str) -> None:
+        """Keep a key from the server unless the key already here lasts longer."""
+        payload = verify_key(result["key"], self.public_key, self.today())
+        with self.lock:
+            record = _load(self.path, {})
+            current = ""
+            if record.get("key"):
+                try:
+                    current = verify_key(record["key"], self.public_key, self.today()).get("expires", "") or "max"
+                except ValueError:
+                    current = ""
+            new_rank = _rank(payload.get("expires", ""))
+            if not current or new_rank >= (date.max if current == "max" else date.fromisoformat(current)):
+                record["key"] = result["key"]
+                record["order"] = order_id
+            record.pop("claim", None)
+            _save(self.path, record)
+
+    def claim(self) -> bool:
+        """Fetch the key for the stored receipt from the license server. True when stored."""
+        record = _load(self.path, {})
+        receipt = record.get("receipt") or {}
+        if not receipt or not self.server or not receipt.get("email"):
+            return False
+        try:
+            result = claim_key(receipt["order"], receipt["email"], self.server)
+            self._store_claimed(result, receipt["order"])
+            return True
+        except (ValueError, ConnectionError) as error:
+            with self.lock:
+                record = _load(self.path, {})
+                record["claim"] = {"tried": time.time(), "error": str(error)}
+                _save(self.path, record)
+            return False
+
+    def _claim_later(self, record: dict) -> None:
+        """A purchase without its key yet: try in the background, at most once an hour."""
+        if not self.server or record.get("key") or not (record.get("receipt") or {}).get("email"):
+            return
+        if self.claim_thread and self.claim_thread.is_alive():
+            return
+        if time.time() - float((record.get("claim") or {}).get("tried", 0)) < CLAIM_RETRY_SECONDS:
+            return
+        with self.lock:
+            record = _load(self.path, {})
+            record["claim"] = {"tried": time.time(), "error": (record.get("claim") or {}).get("error", "")}
+            _save(self.path, record)
+        self.claim_thread = threading.Thread(target=self.claim, name="cairn-pro-claim", daemon=True)
+        self.claim_thread.start()
+
+    def restore(self, order_id: str, email: str) -> dict:
+        """Turn Pro on from a past purchase: the PayPal order number and the e-mail that paid."""
+        order_id = "".join(str(order_id).split()).upper()
+        email = str(email).strip()
+        if not ORDER_ID.match(order_id):
+            raise ValueError("Enter the PayPal order number (Transaction ID) from your receipt.")
+        if "@" not in email:
+            raise ValueError("Enter the e-mail of the PayPal account that paid.")
+        if not self.server:
+            raise ValueError("Restore needs the Cairn Pro license server, which this copy of Cairn does not have. Paste a Pro key instead.")
+        result = claim_key(order_id, email, self.server)
+        self._store_claimed(result, order_id)
         return self.status()
 
     def record_purchase(self, order: dict) -> dict:
@@ -308,15 +451,21 @@ class License:
                 "date": self.today().isoformat(),
                 "expires": (start + timedelta(days=plan["days"])).isoformat() if plan["days"] else "",
             }
-            record = {"receipt": receipt, "history": (record.get("history") or []) + [receipt]}
+            history = (record.get("history") or []) + [receipt]
+            record.pop("claim", None)
+            record.update({"receipt": receipt, "history": history})
             _save(self.path, record)
+        # Get the portable key in the background; status() shows it when it arrives.
+        if self.server and receipt["email"]:
+            self.claim_thread = threading.Thread(target=self.claim, name="cairn-pro-claim", daemon=True)
+            self.claim_thread.start()
         return self.status()
 
     def deactivate(self) -> dict:
         with self.lock:
             record = _load(self.path, {})
-            record.pop("key", None)
-            record.pop("receipt", None)
+            for field in ("key", "receipt", "order", "claim"):
+                record.pop(field, None)
             if record:
                 _save(self.path, record)
             elif self.path.exists():

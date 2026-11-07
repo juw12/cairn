@@ -49,8 +49,12 @@ function planPanel(license) {
     const who = license.email ? ` · ${esc(license.email)}` : "";
     const order = license.order ? ` · order ${esc(license.order)}` : "";
     return `<div class="callout pilot-pro">${icon("star")}<div style="flex:1"><strong>Cairn Pro</strong> · ${esc(license.planName || "active")}${until}${who}${order}
-      <div class="muted" style="margin-top:4px">Thank you for supporting Cairn. Autopilot has no goal limit on this computer.</div></div>
-      <button class="btn ghost" data-pilot="unlicense">Remove from this computer</button></div>`;
+      <div class="muted" style="margin-top:4px">Thank you for supporting Cairn. Autopilot has no goal limit on this computer.</div>
+      ${moveNote(license)}</div>
+      <div class="pilot-pro-actions">
+        ${license.key ? `<button class="btn" data-pilot="copykey">${icon("copy")} Copy your Pro key</button>` : ""}
+        <button class="btn ghost" data-pilot="unlicense">Remove from this computer</button>
+      </div></div>`;
   }
   const lead = license.trialLeft
     ? `You have <strong>${license.trialLeft} free goal</strong> to try Autopilot. After that it is part of Cairn Pro.`
@@ -78,14 +82,42 @@ function planPanel(license) {
     </ul>
     ${checkout}
     <details class="pilot-keybox"${license.checkout.ready ? "" : " open"}>
-      <summary>Have a Pro key, or moving to a new computer?</summary>
+      <summary>Already bought Pro, or moving to a new computer?</summary>
+      ${license.restoreReady ? `<form class="pilot-restore" id="pilot-restore-form" autocomplete="off">
+        <div class="pilot-fine-head">Restore a purchase</div>
+        <div class="pilot-row">
+          <input class="input" id="pilot-order" placeholder="PayPal order number" spellcheck="false" aria-label="PayPal order number" style="flex:1;min-width:160px">
+          <input class="input" id="pilot-email" type="email" placeholder="E-mail that paid" aria-label="E-mail of the PayPal account that paid" style="flex:1;min-width:160px">
+          <button class="btn">Restore</button>
+        </div>
+        <p class="pilot-fine">The order number is the Transaction ID on your PayPal receipt e-mail. Works on any computer, any time.</p>
+      </form>` : ""}
+      <div class="pilot-fine-head">Or paste a Pro key</div>
       <div class="pilot-row">
         <input class="input" id="pilot-key" placeholder="CAIRN1…" autocomplete="off" spellcheck="false" aria-label="Pro key" style="flex:1;min-width:200px">
         <button class="btn" data-pilot="license">Activate</button>
       </div>
-      <p class="pilot-fine">Paste your key and Pro is on, even offline. Bought inside Cairn? Reply to your PayPal receipt with the order number and you get a key for your other computers.</p>
+      <p class="pilot-fine">A key turns Pro on even offline. Copy it from Cairn on a computer that already has Pro.</p>
     </details>
   </section>`;
+}
+
+function moveNote(license) {
+  if (license.key) return `<div class="pilot-fine">Moving to another computer? Copy your Pro key and paste it there, or restore with your PayPal order number.</div>`;
+  if (license.keyPending) {
+    const why = license.keyError ? ` (${esc(license.keyError)})` : "";
+    return `<div class="pilot-fine">Getting your portable Pro key from the license server${why}. Pro already works here; your PayPal order number also restores it anywhere.</div>`;
+  }
+  return "";
+}
+
+async function copyKey(key) {
+  try {
+    await navigator.clipboard.writeText(key);
+    toast("Pro key copied. Paste it in Cairn on your other computer.");
+  } catch {
+    window.prompt("Copy your Pro key:", key);
+  }
 }
 
 function engineNote(engine) {
@@ -321,6 +353,15 @@ export function wireAutopilot() {
   if (pilot.wired) return;
   pilot.wired = true;
   view.addEventListener("submit", async (event) => {
+    if (event.target.id === "pilot-restore-form") {
+      event.preventDefault();
+      const orderId = document.getElementById("pilot-order").value.trim();
+      const email = document.getElementById("pilot-email").value.trim();
+      if (!orderId || !email) return toast("Enter the PayPal order number and the e-mail that paid.", { error: true });
+      document.activeElement?.blur();
+      if (await act("restore", { orderId, email })) toast("Cairn Pro is back on. Welcome back!");
+      return;
+    }
     if (event.target.id !== "pilot-comment-form") return;
     event.preventDefault();
     const input = document.getElementById("pilot-comment");
@@ -353,6 +394,8 @@ export function wireAutopilot() {
       if (!key) return toast("Paste your Cairn Pro key (it starts with CAIRN1).", { error: true });
       document.getElementById("pilot-key").blur();
       if (await act("license", { key })) toast("Cairn Pro is on. Thank you!");
+    } else if (action === "copykey") {
+      if (pilot.data?.license?.key) await copyKey(pilot.data.license.key);
     } else if (action === "unlicense") {
       await act("unlicense");
     } else if (action === "remove") {

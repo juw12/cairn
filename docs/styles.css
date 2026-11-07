@@ -1176,3 +1176,7 @@ pre.math { white-space: pre-wrap; }
 .pilot-keybox summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 .pilot-keybox[open] summary { margin-bottom: 8px; }
 .pilot-pro { align-items: center; }
+.pilot-pro-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.pilot-fine-head { font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; }
+.pilot-restore { margin: 0; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+@media (max-width: 640px) { .pilot-pro { flex-wrap: wrap; } .pilot-pro-actions { width: 100%; } }

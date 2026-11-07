@@ -246,6 +246,22 @@ def cmd_pro(brain: Brain, args) -> int:
         key = pro.issue_key(args.email, args.plan, private, days=args.days)
         print(key)
         return 0
+    if action == "restore":
+        try:
+            status = pro.License().restore(args.order, args.email)
+        except (ValueError, ConnectionError) as error:
+            print(f"Could not restore: {error}")
+            return 1
+        until = f" until {status['expires']}" if status["expires"] else ""
+        print(f"Cairn Pro is on: {status['planName']}{until}.")
+        return 0
+    if action == "key":
+        status = pro.License().status()
+        if not status["key"]:
+            print("No Pro key on this computer yet." + (" It is on its way from the license server." if status["keyPending"] else ""))
+            return 1
+        print(status["key"])
+        return 0
     if action == "verify":
         try:
             payload = pro.verify_key(args.key)
@@ -322,6 +338,10 @@ def build_parser() -> argparse.ArgumentParser:
     sell_parser.add_argument("--paypal-client-id", required=True, help="public client id of your PayPal REST app")
     sell_parser.add_argument("--install", action="store_true", help=argparse.SUPPRESS)
     sell_parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
+    restore_parser = pro_sub.add_parser("restore", help="turn Pro on from a past purchase (new computer)")
+    restore_parser.add_argument("order", help="PayPal order number / Transaction ID from the receipt")
+    restore_parser.add_argument("email", help="e-mail of the PayPal account that paid")
+    pro_sub.add_parser("key", help="print this computer's Pro key (to move Pro to another computer)")
     verify_parser = pro_sub.add_parser("verify", help="check a Pro key")
     verify_parser.add_argument("key")
     return parser

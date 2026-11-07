@@ -264,6 +264,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = pilot.license.deactivate()
             elif action == "purchase":
                 result = pilot.license.record_purchase(body)
+            elif action == "restore":
+                result = pilot.license.restore(str(body.get("orderId", "")), str(body.get("email", "")))
             else:
                 return self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
             self._send_json(result)
