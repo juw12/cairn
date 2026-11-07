@@ -6,6 +6,7 @@
 //   todos()                      -> [{ path, line, tag, text }]
 //   gitStatus() / gitCommit(msg) / gitSync() -> server only
 //   desktop() / desktopAction(action, payload) -> the desktop app only (info.desktop)
+//   vibe(since, base)            -> server only: session/feedback files + live git activity
 
 import { isBrainFile, scanTodos } from "./core.js";
 import { DEMO_FILES, DEMO_TODOS } from "./demo.js";
@@ -98,6 +99,11 @@ export class ServerStore {
 
   async desktop() {
     return this.request("GET", "api/desktop");
+  }
+
+  // Session and feedback files plus live git activity since `since`, polled by the Vibe view.
+  async vibe(since = "", base = "") {
+    return this.request("GET", `api/vibe?since=${encodeURIComponent(since)}&base=${encodeURIComponent(base)}`);
   }
 
   // Images and other attachments are served by the local server, which finds them the way

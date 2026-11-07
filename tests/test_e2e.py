@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
         raise
     sync_playwright = None
 
-VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "context", "plugins", "people", "proof"]
+VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "context", "plugins", "people", "proof"]
 
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
@@ -61,6 +61,65 @@ class EndToEndTests(unittest.TestCase):
             self.assertTrue(page.inner_text("#view").strip(), view)
             if view == "map":
                 self.assertEqual(page.locator(".map-node").count(), 18)
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_session_feedback_and_stats(self):
+        page = self.open()
+        self.go(page, "vibe")
+        self.assertIn("Nothing live", page.inner_text(".vibe-live"))
+        page.click('[data-action="vibe-start"]')
+        page.fill(".modal input", "Add dark mode")
+        page.click('.modal button[type="submit"]')
+        page.wait_for_selector(".vibe-live h2")
+        self.assertEqual(page.inner_text('#nav [data-go="vibe"] .count'), "live")
+        path = page.evaluate("window.cairn.state.notes.find((n) => n.type === 'session').path")
+        self.assertRegex(path, r"^sessions/\d{4}-\d{2}-\d{2}-add-dark-mode\.md$")
+
+        page.select_option("#vibe-log-form select", "pass")
+        page.fill("#vibe-log-text", "pytest: 12 passed")
+        page.press("#vibe-log-text", "Enter")
+        page.wait_for_function("(p) => window.cairn.state.files.find((f) => f.path === p).text.includes('pass: pytest: 12 passed')", arg=path)
+        self.assertIn("pytest: 12 passed", page.inner_text(".vibe-log"))
+
+        page.fill("#fb-text", "The toggle is hard to find")
+        page.select_option("#fb-form select[name=rating]", "3")
+        page.fill("#fb-form input[name=from]", "@alice")
+        page.click('#fb-form button[type="submit"]')
+        page.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'feedback/the-toggle-is-hard-to-find.md')")
+        feedback = self.note_text(page, "feedback/the-toggle-is-hard-to-find.md")
+        self.assertIn("rating: 3", feedback)
+        self.assertIn('from: "@alice"', feedback)
+        self.assertIn("about: \"[[", feedback)
+
+        page.click('[data-action="vibe-end"][data-result="shipped"]')
+        page.wait_for_function("(p) => window.cairn.state.files.find((f) => f.path === p).text.includes('status: shipped')", arg=path)
+        text = self.note_text(page, path)
+        self.assertIn("ended: ", text)
+        self.assertIn("end: shipped", text)
+        figures = page.inner_text(".vibe-figures")
+        self.assertIn("100%", figures)  # ship rate and checks green
+        self.assertIn("3.0", figures)  # average rating
+        self.assertEqual(page.locator('#nav [data-go="vibe"] .count').count(), 0)
+
+        page.select_option('[data-fb-status="feedback/the-toggle-is-hard-to-find.md"]', "addressed")
+        page.wait_for_function("() => window.cairn.state.files.find((f) => f.path === 'feedback/the-toggle-is-hard-to-find.md').text.includes('status: addressed')")
+        self.assertEqual(self.errors, [])
+
+    def test_feedback_capture_prefix(self):
+        page = self.open()
+        page.fill("#capture-input", "fb: offline maps saved my hike #maps")
+        self.assertEqual(page.inner_text("#capture-type"), "Feedback")
+        page.press("#capture-input", "Enter")
+        page.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'feedback/offline-maps-saved-my-hike.md')")
+        self.assertIn("status: new", self.note_text(page, "feedback/offline-maps-saved-my-hike.md"))
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_view_on_a_phone_in_dark_mode(self):
+        page = self.open(viewport=(390, 844), theme="dark")
+        page.evaluate("location.hash = '#/vibe'")
+        page.wait_for_selector(".vibe-figures")
+        overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        self.assertLessEqual(overflow, 0)
         self.assertEqual(self.errors, [])
 
     def test_capture_routes_to_task_with_tags(self):

@@ -56,6 +56,7 @@ const ICONS = {
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
   shuffle: '<path d="M4 7h3.5c4.5 0 4.5 10 9 10H20M4 17h3.5c1.6 0 2.6-1.2 3.4-2.8M14.8 9.6C15.6 8 16.4 7 18 7h2"/><path d="m17.5 4.5 2.5 2.5-2.5 2.5M17.5 14.5l2.5 2.5-2.5 2.5"/>',
+  chat: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5z"/><path d="M8 9h8M8 12h5"/>',
   template: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/>',
 };
 
@@ -69,12 +70,16 @@ export const TYPE_META = {
   decision: { label: "Decision", icon: "decision" },
   note: { label: "Note", icon: "note" },
   journal: { label: "Journal", icon: "journal" },
+  session: { label: "Session", icon: "zap" },
+  feedback: { label: "Feedback", icon: "chat" },
 };
 
 export const STATUS_LABEL = {
   raw: "Raw", exploring: "Exploring", ready: "Ready", parked: "Parked",
   todo: "To do", doing: "Doing", done: "Done",
   proposed: "Proposed", accepted: "Accepted", superseded: "Superseded",
+  live: "Live", shipped: "Shipped", partial: "Partial", dropped: "Dropped",
+  new: "New", planned: "Planned", addressed: "Addressed", wontfix: "Won't fix",
 };
 
 export const STATUS_HINT = {

@@ -6,12 +6,13 @@ the CLI and the browser-only app.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 from urllib.parse import unquote
 import unicodedata
 
-TYPES = ("idea", "task", "decision", "note", "journal")
+TYPES = ("idea", "task", "decision", "note", "journal", "session", "feedback")
 
 FOLDERS = {
     "idea": "ideas",
@@ -19,6 +20,8 @@ FOLDERS = {
     "decision": "decisions",
     "note": "notes",
     "journal": "journal",
+    "session": "sessions",
+    "feedback": "feedback",
 }
 
 STATUSES = {
@@ -27,6 +30,8 @@ STATUSES = {
     "decision": ["proposed", "accepted", "superseded"],
     "note": [],
     "journal": [],
+    "session": ["live", "shipped", "partial", "dropped"],
+    "feedback": ["new", "planned", "addressed", "wontfix"],
 }
 
 TEMPLATES = {
@@ -35,6 +40,8 @@ TEMPLATES = {
     "decision": "## Context\n\n\n## Options\n\n\n## Decision\n\n\n## Consequences\n\n",
     "note": "",
     "journal": "## Log\n\n- \n",
+    "session": "## Goal\n\n\n## Log\n\n",
+    "feedback": "",
 }
 
 CAPTURE_PREFIXES = {
@@ -46,6 +53,8 @@ CAPTURE_PREFIXES = {
     "note": "note",
     "journal": "journal",
     "log": "journal",
+    "feedback": "feedback",
+    "fb": "feedback",
 }
 
 SPECIAL_FILES = ("CONTEXT.md", "README.md")
@@ -215,6 +224,8 @@ def note_path(note_type: str, title: str, existing_paths: list[str], today: str)
     if note_type == "decision":
         numbers = [int(m.group(1)) for name in taken if (m := re.match(r"^(\d{4})-", name))]
         slug = f"{(max(numbers) + 1 if numbers else 1):04d}-{slug}"
+    elif note_type == "session":
+        slug = f"{today}-{slug}"
     return f"{folder}/{unique_slug(slug, taken)}.md"
 
 
@@ -684,3 +695,108 @@ def context_pack(notes: list[dict], project: str, today: str) -> str:
     out.append("Read this before working on the project. Details live in the linked files; "
                "decisions in force are binding unless a newer decision supersedes them.")
     return "\n".join(out) + "\n"
+
+
+# ---------------------------------------------------------------- vibe sessions and feedback
+
+# A session log line: `- 14:02 pass: pytest (12s)`. Anything else in the body is free text.
+LOG_KINDS = ("start", "note", "prompt", "pass", "fail", "commit", "end")
+_LOG_LINE_RE = re.compile(r"^\s*[-*]\s+(\d{1,2}:\d{2})\s+([a-z]+):\s*(.*)$")
+_STAMP_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})")
+FINISHED = ("shipped", "partial", "dropped")
+
+
+def session_log(body: str) -> list[dict]:
+    """The timestamped steps of a session, in the order they were written."""
+    entries = []
+    for line in body.replace("\r\n", "\n").split("\n"):
+        match = _LOG_LINE_RE.match(line)
+        if match and match.group(2) in LOG_KINDS:
+            entries.append({"time": match.group(1).zfill(5), "kind": match.group(2), "text": match.group(3).strip()})
+    return entries
+
+
+def stamp_minutes(stamp) -> int | None:
+    """`2026-11-07T14:02` -> minutes on a common clock (only differences are meaningful)."""
+    match = _STAMP_RE.match(stamp) if isinstance(stamp, str) else None
+    if not match:
+        return None
+    year, month, day, hour, minute = (int(g) for g in match.groups())
+    try:
+        days = dt.date(year, month, day).toordinal() - dt.date(1970, 1, 1).toordinal()
+    except ValueError:
+        return None
+    return days * 1440 + hour * 60 + minute
+
+
+def session_minutes(note: dict) -> int:
+    start = stamp_minutes(note["meta"].get("started"))
+    end = stamp_minutes(note["meta"].get("ended"))
+    if start is None or end is None or end < start:
+        return 0
+    return end - start
+
+
+def _count(value) -> int:
+    return int(value) if isinstance(value, str) and re.fullmatch(r"[0-9]+", value.strip()) else 0
+
+
+def feedback_rating(note: dict) -> int | None:
+    rating = _count(note["meta"].get("rating"))
+    return rating if 1 <= rating <= 5 else None
+
+
+def _session_day(note: dict) -> str:
+    for key in ("started", "created"):
+        value = note["meta"].get(key)
+        if isinstance(value, str) and _DAY_RE.match(value[:10]):
+            return value[:10]
+    return ""
+
+
+def _percent(part: int, whole: int) -> int | None:
+    return int(100 * part / whole + 0.5) if whole else None
+
+
+def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
+    """Totals for the Vibe view: sessions, results, checks, code churn and feedback."""
+    sessions = [n for n in notes if n["type"] == "session"]
+    feedback = [n for n in notes if n["type"] == "feedback"]
+    finished = [s for s in sessions if s["status"] in FINISHED]
+    logs = [entry for s in sessions for entry in session_log(s["body"])]
+    passed = sum(1 for e in logs if e["kind"] == "pass")
+    failed = sum(1 for e in logs if e["kind"] == "fail")
+    ratings = [r for r in (feedback_rating(f) for f in feedback) if r is not None]
+    end = dt.date.fromisoformat(today)
+    daily = []
+    for offset in range(days - 1, -1, -1):
+        day = (end - dt.timedelta(days=offset)).isoformat()
+        on_day = [s for s in sessions if _session_day(s) == day]
+        daily.append({
+            "day": day,
+            "sessions": len(on_day),
+            "minutes": sum(session_minutes(s) for s in on_day),
+            "shipped": sum(1 for s in on_day if s["status"] == "shipped"),
+        })
+    return {
+        "sessions": len(sessions),
+        "live": sum(1 for s in sessions if s["status"] == "live"),
+        "shipped": sum(1 for s in sessions if s["status"] == "shipped"),
+        "partial": sum(1 for s in sessions if s["status"] == "partial"),
+        "dropped": sum(1 for s in sessions if s["status"] == "dropped"),
+        "ship_rate": _percent(sum(1 for s in finished if s["status"] == "shipped"), len(finished)),
+        "minutes": sum(session_minutes(s) for s in finished),
+        "prompts": sum(1 for e in logs if e["kind"] == "prompt"),
+        "passed": passed,
+        "failed": failed,
+        "pass_rate": _percent(passed, passed + failed),
+        "commits": sum(_count(s["meta"].get("commits")) for s in sessions),
+        "added": sum(_count(s["meta"].get("added")) for s in sessions),
+        "removed": sum(_count(s["meta"].get("removed")) for s in sessions),
+        "feedback": len(feedback),
+        "feedback_open": sum(1 for f in feedback if f["status"] in ("new", "planned")),
+        "feedback_addressed": sum(1 for f in feedback if f["status"] == "addressed"),
+        "rating": int(10 * sum(ratings) / len(ratings) + 0.5) / 10 if ratings else None,
+        "ratings": [ratings.count(stars) for stars in range(1, 6)],
+        "daily": daily,
+    }

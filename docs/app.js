@@ -12,6 +12,7 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
+import { copyAgentHook, endSession, liveSession, startSession, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -40,6 +41,7 @@ function counts() {
     journal: by("journal"),
     map: "",
     code: state.todos ? state.todos.length : "",
+    vibe: liveSession() ? "live" : "",
     context: "",
     obsidian: "",
     canvas: canvasCount() || "",
@@ -128,7 +130,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -164,6 +166,7 @@ function afterRender() {
   if (state.view === "plugins") wirePlugins();
   const pluginView = $("[data-plugin-view]");
   if (pluginView) renderPluginView(state.view, pluginView);
+  if (state.view === "vibe") wireVibe();
 }
 
 // ============================================================ global events
@@ -227,7 +230,7 @@ function wireGlobal() {
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
-    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add"];
+    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add", "vibe-start", "vibe-end"];
     if (readOnly() && mutating.includes(action)) {
       toast("This brain is read-only. Ask to join to contribute.");
       return;
@@ -270,6 +273,9 @@ function wireGlobal() {
         refreshTodos();
       },
       "todo-task": () => todoToTask(actionEl.dataset.source),
+      "vibe-start": startSession,
+      "vibe-end": () => endSession(actionEl.dataset.result),
+      "vibe-copy-hook": copyAgentHook,
       "copy-context": () => copyText(core.contextPack(state.notes, state.info.project, today()), "Context pack copied"),
       "save-context": saveContext,
       commit: commitBrain,

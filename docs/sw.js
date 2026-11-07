@@ -15,6 +15,7 @@ const SHELL = [
   "people.js",
   "proof.js",
   "proofview.js",
+  "vibe.js",
   "drawer.js",
   "vault.js",
   "hover.js",

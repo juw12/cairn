@@ -123,6 +123,26 @@ It opens `http://127.0.0.1:4777` with code scanning and one-click **Commit brain
 
 **3. Demo.** [Try the sample project](https://juw12.github.io/cairn/?demo=1) (an offline hiking app). It's saved only in your browser.
 
+### Watch your vibe coding live
+
+**Vibe** (sidebar → Project) shows what your AI assistant is doing right now, what came out of it, and what people
+thought. A session is a plain file in `brain/sessions/` with `status: live` while you work and a log of timestamped
+steps; feedback lives in `brain/feedback/` with an optional 1-5 rating.
+
+```sh
+cairn vibe start "add dark mode" --agent claude   # opens a live session
+cairn vibe log "asked for a theme toggle" --kind prompt
+cairn vibe check -- python -m pytest               # runs your tests, logs pass/fail with the summary line
+cairn vibe end --result shipped "toggle works"     # records commits and +/- lines since the start
+cairn feedback "toggle is hard to find on mobile" --rating 3 --from @alice
+cairn vibe status                                  # the same stats in the terminal
+```
+
+Paste the instructions from the Vibe page into `AGENTS.md` or `CLAUDE.md` and your assistant reports its own
+progress. With the local app the page updates within seconds: new steps, commits and changed files appear as they
+happen. Stats: sessions, time, ship rate, checks passing, a 14-day activity chart, open feedback and the average
+rating. No streaks, no leaderboards: everything is evidence you can open as a file.
+
 ### Share your brain and explore others
 
 Cairn uses GitHub as the network, so there is nothing new to sign up for.
