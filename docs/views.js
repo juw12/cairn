@@ -138,8 +138,8 @@ export function ideas() {
   return `${pageHead("Ideas", readOnly()
     ? "What this brain is thinking about, from raw to ready. Open one to read it in full."
     : "Brainstorm here. Capture without judging, then drag ideas right as they firm up. Open one to spark it with a prompt or promote it to a task.",
-    `<button class="btn" data-action="spark-random">${icon("zap")} Spark a prompt</button><button class="btn primary" data-action="new" data-type="idea">${icon("plus")} New idea</button>`)}
-    ${state.spark && !state.open ? `<div class="spark-card">${icon("zap")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Pick an idea and answer this in it, or capture what it makes you think of.</span></div></div>` : ""}
+    `<button class="btn" data-action="spark-random">${icon("shuffle")} Spark a prompt</button><button class="btn primary" data-action="new" data-type="idea">${icon("plus")} New idea</button>`)}
+    ${state.spark && !state.open ? `<div class="spark-card">${icon("idea")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Pick an idea and answer this in it, or capture what it makes you think of.</span></div></div>` : ""}
     ${boardColumns("idea")}`;
 }
 
@@ -280,7 +280,7 @@ export function contextView() {
     : `<pre class="pre-box">${esc(pack)}</pre>`;
   return `${pageHead("Context pack", "A one-page brief of where the project stands, for teammates and AI assistants (Copilot, Claude, Cursor, ChatGPT…). No API keys: it’s just a file your tools can read.",
     `<button class="btn" data-action="copy-context">${icon("copy")} Copy</button><button class="btn primary" data-action="save-context">${icon("save")} Save to brain/CONTEXT.md</button>`)}
-    <div class="callout" style="margin-bottom:16px">${icon("sparkle")}<div>Tell your assistant: <strong>“Read brain/CONTEXT.md before you start.”</strong> Or add that line to <code>AGENTS.md</code>, <code>CLAUDE.md</code> or <code>.github/copilot-instructions.md</code> so it happens every time. Regenerate after big changes; <code>cairn context</code> does the same from the terminal.</div></div>
+    <div class="callout" style="margin-bottom:16px">${icon("terminal")}<div>Tell your assistant: <strong>“Read brain/CONTEXT.md before you start.”</strong> Or add that line to <code>AGENTS.md</code>, <code>CLAUDE.md</code> or <code>.github/copilot-instructions.md</code> so it happens every time. Regenerate after big changes; <code>cairn context</code> does the same from the terminal.</div></div>
     <div class="toolbar"><div class="segmented" role="tablist" aria-label="View"><button class="${state.contextMode === "preview" ? "on" : ""}" data-context-mode="preview">Preview</button><button class="${state.contextMode === "raw" ? "on" : ""}" data-context-mode="raw">Markdown</button></div><span class="muted" style="margin-left:auto;font-size:12.5px">${saved} · ${pack.split("\n").length} lines</span></div>
     <section class="card">${body}</section>`;
 }

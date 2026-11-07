@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__
+from . import __version__, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -148,6 +148,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"items": brain.scan_code()})
             elif route == "/api/git":
                 self._send_json(brain.git_status())
+            elif route == "/api/vibe":
+                query = parse_qs(urlparse(self.path).query)
+                since = query.get("since", [""])[0]
+                base = query.get("base", [""])[0]
+                self._send_json({"files": vibe.vibe_files(brain), "git": vibe.git_activity(brain, since, base)})
             elif route == "/api/obsidian":
                 self._send_json(self.obsidian.status())
             elif route == "/api/desktop" and self.desktop is not None:

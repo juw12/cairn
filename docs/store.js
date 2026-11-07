@@ -6,11 +6,13 @@
 //   todos()                      -> [{ path, line, tag, text }]
 //   gitStatus() / gitCommit(msg) / gitSync() -> server only
 //   desktop() / desktopAction(action, payload) -> the desktop app only (info.desktop)
+//   vibe(since, base)            -> server only: session/feedback files + live git activity
 
 import { addDays, addMonths, dayOf } from "./daylog.js";
 import { isBrainFile, scanTodos } from "./core.js";
 import { DEMO_FILES, DEMO_TODOS } from "./demo.js";
 import * as gh from "./github.js";
+import * as auth from "./auth.js";
 
 export class ConflictError extends Error {
   constructor(text, mtime) {
@@ -99,6 +101,11 @@ export class ServerStore {
 
   async desktop() {
     return this.request("GET", "api/desktop");
+  }
+
+  // Session and feedback files plus live git activity since `since`, polled by the Vibe view.
+  async vibe(since = "", base = "") {
+    return this.request("GET", `api/vibe?since=${encodeURIComponent(since)}&base=${encodeURIComponent(base)}`);
   }
 
   // Images and other attachments are served by the local server, which finds them the way
@@ -216,6 +223,27 @@ export class FolderStore {
     return out.sort((a, b) => (a.path < b.path ? -1 : 1));
   }
 
+  // Session and feedback files, re-read every few seconds by the Vibe view. Enumerating two small folders is
+  // the fallback Chrome recommends when a FileSystemObserver isn't available. No git from a browser.
+  async vibe() {
+    const files = [];
+    const brain = await this.brainDir();
+    for (const folder of ["sessions", "feedback"]) {
+      let dir;
+      try {
+        dir = await brain.getDirectoryHandle(folder);
+      } catch {
+        continue;
+      }
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind !== "file" || !name.endsWith(".md")) continue;
+        const file = await handle.getFile();
+        files.push({ path: `${folder}/${name}`, text: await file.text(), mtime: file.lastModified });
+      }
+    }
+    return { files, git: { available: false, browser: true } };
+  }
+
   async write(path, text, mtime) {
     let existing = null;
     try {
@@ -301,15 +329,15 @@ const DEMO_KEY = "cairn.demo.v1";
 // Recent journal days for the demo, dated relative to today so the streak, heatmap, mood chart and
 // look-backs (a week / month / year ago) have something to show. Plain "## Log" pages like any other.
 const DEMO_DAYS = [
-  [-1, ["09:12 Standup: GPX import is the last beta blocker #beta", "13:40 Paired with @sam on the segment bug, found the timezone issue", "Mood: 🙂 good (4/5)", "18:05 Task: [[gpx-import|GPX import]] is close, tests pass locally"]],
-  [-2, ["10:02 Five beta hikers confirmed for the weekend test, thanks @ana #beta", "15:30 Weather overlay looks great on the elevation profile", "Mood: 😄 great (5/5)"]],
-  [-3, ["08:50 Read the interview notes again, offline is the #1 ask #research", "16:20 Decided to keep the map corridor at 2 km", "Mood: 😐 okay (3/5)"]],
-  [-5, ["11:15 Tile sizes are fine: 40 km route is 26 MB #maps", "Mood: 🙂 good (4/5)"]],
-  [-7, ["09:30 Kicked off the beta plan with @sam and @ana #beta", "14:00 Idea: share a live trip link with family", "Mood: 🙂 good (4/5)"]],
-  [-10, ["17:45 Long day, the PMTiles build kept failing #maps", "Mood: 🙁 low (2/5)"]],
-  [-14, ["10:10 First hike test on the Ridge trail, map held up offline", "Mood: 😄 great (5/5)"]],
-  ["month", ["12:00 Wrote the first [[user-interviews]] summary #research", "Mood: 🙂 good (4/5)"]],
-  ["year", ["19:30 Sketched the first idea for an offline hiking app", "Mood: 😄 great (5/5)"]],
+  [-1, ["09:12 Standup: GPX import is the last beta blocker #beta", "13:40 Paired with @sam on the segment bug, found the timezone issue", "Mood: good (4/5)", "18:05 Task: [[gpx-import|GPX import]] is close, tests pass locally"]],
+  [-2, ["10:02 Five beta hikers confirmed for the weekend test, thanks @ana #beta", "15:30 Weather overlay looks great on the elevation profile", "Mood: great (5/5)"]],
+  [-3, ["08:50 Read the interview notes again, offline is the #1 ask #research", "16:20 Decided to keep the map corridor at 2 km", "Mood: okay (3/5)"]],
+  [-5, ["11:15 Tile sizes are fine: 40 km route is 26 MB #maps", "Mood: good (4/5)"]],
+  [-7, ["09:30 Kicked off the beta plan with @sam and @ana #beta", "14:00 Idea: share a live trip link with family", "Mood: good (4/5)"]],
+  [-10, ["17:45 Long day, the PMTiles build kept failing #maps", "Mood: low (2/5)"]],
+  [-14, ["10:10 First hike test on the Ridge trail, map held up offline", "Mood: great (5/5)"]],
+  ["month", ["12:00 Wrote the first [[user-interviews]] summary #research", "Mood: good (4/5)"]],
+  ["year", ["19:30 Sketched the first idea for an offline hiking app", "Mood: great (5/5)"]],
 ];
 
 function demoJournalDays() {
@@ -433,6 +461,38 @@ export class GitHubStore {
 
   async list() {
     return this.files.map(({ path, text, mtime }) => ({ path, text, mtime }));
+  }
+
+  // Signed in, the Vibe view polls the brain folder with a conditional request (304s cost nothing against the
+  // rate limit). Only when the sha of sessions/ or feedback/ changes are they listed, and only files whose
+  // sha changed are fetched, the way git itself compares trees. Signed out there's no live polling.
+  get vibePollMs() {
+    return 20000;
+  }
+
+  async vibe() {
+    if (!auth.session()) return { files: [], git: { available: false, github: true, signedOut: true } };
+    this.folderShas ||= new Map();
+    const files = [];
+    const top = await gh.listFolderIfChanged(this.repo, this.root.replace(/\/$/, ""), this.rootEtag || "");
+    if (!top) return { files, git: { available: false, github: true } };
+    this.rootEtag = top.etag;
+    for (const folder of ["sessions", "feedback"]) {
+      const dir = top.items.find((item) => item.type === "dir" && item.name === folder);
+      if (!dir || this.folderShas.get(folder) === dir.sha) continue;
+      const listing = await gh.listFolderIfChanged(this.repo, dir.path);
+      if (!listing) continue;
+      this.folderShas.set(folder, dir.sha);
+      for (const item of listing.items.filter((entry) => entry.type === "file" && entry.name.endsWith(".md"))) {
+        const path = item.path.slice(this.root.length);
+        if (this.shas.get(path) === item.sha) continue;
+        const latest = await gh.readFile(this.repo, item.path);
+        if (!latest) continue;
+        this.shas.set(path, latest.sha);
+        files.push({ path, text: latest.text, mtime: Date.now() });
+      }
+    }
+    return { files, git: { available: false, github: true } };
   }
 
   // Public repos serve files from raw.githubusercontent.com; private ones need a token, so those

@@ -134,7 +134,7 @@ class VoiceLogTests(unittest.TestCase):
         self.assertEqual(result["stop"], "stop")
         self.assertEqual((result["read"]["kind"], result["read"]["day"]), ("read", -1))
         self.assertEqual(result["plain"]["kind"], "log")
-        self.assertEqual(result["moodLine"], "Mood: 🙂 good (4/5)")
+        self.assertEqual(result["moodLine"], "Mood: good (4/5)")
         self.assertEqual((result["streak"]["current"], result["streak"]["longest"], result["streak"]["loggedToday"]), (1, 2, True))
         # Not logged yet today: yesterday's run still counts until a whole day is missed.
         self.assertEqual((result["streakYesterday"]["current"], result["streakYesterday"]["loggedToday"]), (2, False))
@@ -206,8 +206,8 @@ class VoiceLogTests(unittest.TestCase):
             arg=f"journal/{self.today}.md",
         )
         text = self.journal_text(page)
-        self.assertIn("Mood: 🙂 good (4/5)", text)
-        self.assertIn("Mood: 😄 great (5/5)", text)
+        self.assertIn("Mood: good (4/5)", text)
+        self.assertIn("Mood: great (5/5)", text)
         self.assertEqual(self.errors, [])
 
     def test_stop_command_ends_listening(self):

@@ -281,7 +281,7 @@ function drawSheet() {
     <p class="log-feedback" id="log-feedback" role="status" aria-live="polite"></p>
     <div class="log-row">
       <div class="mood-chips" role="group" aria-label="How do you feel?">
-        ${dl.MOODS.map((m) => `<button type="button" class="mood-chip" data-mood="${m.score}" title="${m.label}" aria-label="Mood: ${m.label}">${m.emoji}</button>`).join("")}
+        ${dl.MOODS.map((m) => `<button type="button" class="mood-chip" data-mood="${m.score}" title="${m.label}" aria-label="Mood: ${m.label}, ${m.score} out of 5">${m.label}</button>`).join("")}
       </div>
       <div class="log-prompt">
         <button type="button" class="link-btn" data-log="use-prompt" title="Answer this">${esc(prompt)}</button>
@@ -329,7 +329,7 @@ function drawSheet() {
 }
 
 function entryRow(entry) {
-  const mood = entry.mood ? `<span class="entry-mood" title="${entry.mood.label}">${entry.mood.emoji}</span>` : "";
+  const mood = entry.mood ? `<span class="entry-mood" title="Mood ${entry.mood.score} out of 5">${entry.mood.label}</span>` : "";
   const body = entry.kind === "mood" ? `${esc(entry.mood ? `Feeling ${entry.mood.label}` : entry.text.replace(/^Mood:\s*/, ""))}` : inline(entry.text.replace(/^(Task|Idea|Decision|Note):\s*/, ""));
   return `<li class="log-entry kind-${entry.kind}" data-line="${entry.line}">
     <span class="entry-time">${esc(entry.time || "·")}</span>
@@ -358,7 +358,7 @@ async function onSheetClick(event) {
   if (mood) {
     const m = dl.MOODS[Number(mood.dataset.mood) - 1];
     await addLine(dl.moodLine(m));
-    feedback(`Mood saved: ${m.emoji} ${m.label}`);
+    feedback(`Mood saved: ${m.label}`);
     return;
   }
   const button = event.target.closest("[data-log]");
@@ -483,7 +483,7 @@ export async function handleUtterance(raw, { typed = false } = {}) {
     }
     case "mood":
       await addLine(dl.moodLine(intent.mood));
-      feedback(`Mood saved: ${intent.mood.emoji} ${intent.mood.label}`);
+      feedback(`Mood saved: ${intent.mood.label}`);
       break;
     default:
       await addLine(intent.text);
@@ -681,7 +681,7 @@ export function readAloud(offset = 0) {
   const when = offset === 0 ? "Today" : offset === -1 ? "Yesterday" : dl.prettyDay(day);
   const entries = info?.entries || [];
   const text = entries.length
-    ? `${when}, you logged ${plural(entries.length, "thing")}. ${entries.map((e) => `${e.time ? `At ${e.time}, ` : ""}${dl.plainText(e.text).replace(/^Mood:\s*\S+\s*/, "mood ")}.`).join(" ")}`
+    ? `${when}, you logged ${plural(entries.length, "thing")}. ${entries.map((e) => `${e.time ? `At ${e.time}, ` : ""}${dl.plainText(e.text).replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "mood ")}.`).join(" ")}`
     : `${when}, nothing is logged yet.`;
   feedback(text);
   if (!canSpeak()) return text;
@@ -726,7 +726,7 @@ export function journalView() {
   const pages = state.notes.filter((n) => n.type === "journal").sort((a, b) => (a.slug < b.slug ? 1 : -1));
   const editable = canWrite();
   const actions = editable
-    ? `<button class="btn" data-jl="review">${icon("sparkle")} Weekly review</button><button class="btn" data-action="journal-today">${icon("journal")} Today's page</button><button class="btn primary" data-jl="log">${MIC} Log now</button>`
+    ? `<button class="btn" data-jl="review">${icon("list")} Weekly review</button><button class="btn" data-action="journal-today">${icon("journal")} Today's page</button><button class="btn primary" data-jl="log">${MIC} Log now</button>`
     : "";
   const recent = [...all.keys()].sort().reverse().filter((d) => all.get(d).entries.length).slice(0, 5);
   const todayInfo = all.get(now);
@@ -738,7 +738,7 @@ export function journalView() {
       <div class="stat-card"><span class="stat-num">${streak.longest}</span><span class="stat-label">longest streak</span></div>
       <div class="stat-card"><span class="stat-num">${[...all.values()].filter((i) => i.entries.length).length}</span><span class="stat-label">days logged · ${plural(totalEntries, "entry", "entries")}</span></div>
       <div class="stat-card"><span class="stat-num">${weekEntries}</span><span class="stat-label">entries this week</span></div>
-      <div class="stat-card"><span class="stat-num">${avg === null ? "–" : `${dl.MOODS[Math.round(avg) - 1].emoji} ${avg.toFixed(1)}`}</span><span class="stat-label">mood, last ${range} days</span></div>
+      <div class="stat-card"><span class="stat-num">${avg === null ? "–" : `${avg.toFixed(1)}<small>/5</small>`}</span><span class="stat-label">mood, last ${range} days</span></div>
     </section>
     <div class="memory-grid">
       <section class="card memory-card heat-card">
@@ -792,11 +792,11 @@ function moodChart(series) {
   const yOf = (score) => 70 - (score - 1) * 15;
   const points = series.map((p, i) => ({ x: left + i * step, y: p.score === null ? null : yOf(p.score), p }));
   const known = points.filter((pt) => pt.y !== null);
-  if (!known.length) return `<p class="muted mood-empty">No moods yet. Tap a face in the log, or say “mood good”.</p>`;
+  if (!known.length) return `<p class="muted mood-empty">No moods yet. Pick a mood in the log, or say “mood good”.</p>`;
   const path = known.map((pt, i) => `${i ? "L" : "M"}${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(" ");
   const area = `${path} L${known[known.length - 1].x.toFixed(1)} 70 L${known[0].x.toFixed(1)} 70 Z`;
   const rows = [1, 3, 5].map((score) => `<line x1="${left}" x2="${width}" y1="${yOf(score)}" y2="${yOf(score)}" class="grid"/>
-    <text x="2" y="${yOf(score) + 5}" class="face">${dl.MOODS[score - 1].emoji}</text>`).join("");
+    <text x="2" y="${yOf(score) + 3}" class="axis">${score}/5</text>`).join("");
   return `<svg class="mood-chart" viewBox="0 0 ${width} 92" role="img" aria-label="Mood over the last ${series.length} days, average ${(known.reduce((sum, pt) => sum + pt.p.score, 0) / known.length).toFixed(1)} out of 5">
     ${rows}
     <path d="${area}" class="area"/>
@@ -808,7 +808,7 @@ function moodChart(series) {
 }
 
 function lookBackItem(e) {
-  return `<li>${e.time ? `<span class="entry-time">${esc(e.time)}</span> ` : ""}${e.mood ? e.mood.emoji + " " : ""}${inline(e.text.replace(/^(Task|Idea|Decision|Note):\s*/, "$1: ").replace(/^Mood:\s*\S+\s*/, ""))}</li>`;
+  return `<li>${e.time ? `<span class="entry-time">${esc(e.time)}</span> ` : ""}${inline(e.text.replace(/^(Task|Idea|Decision|Note):\s*/, "$1: ").replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: "))}</li>`;
 }
 
 function lookBackRow({ label, day, info }) {
@@ -824,7 +824,7 @@ function lookBackRow({ label, day, info }) {
 function dayBlock(day, info) {
   return `<div class="day-block">
     <button class="day-title link-btn" data-jl-day="${day}">${esc(dl.prettyDay(day))}</button>
-    <ul class="day-entries">${info.entries.map((e) => `<li><span class="entry-time">${esc(e.time || "·")}</span><span>${e.mood ? e.mood.emoji + " " : ""}${inline(e.text.replace(/^Mood:\s*\S+\s*/, "Mood: "))}</span></li>`).join("")}</ul>
+    <ul class="day-entries">${info.entries.map((e) => `<li><span class="entry-time">${esc(e.time || "·")}</span><span>${inline(e.text.replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: "))}</span></li>`).join("")}</ul>
   </div>`;
 }
 
@@ -889,11 +889,11 @@ export function homeLogStrip() {
         <span class="muted">${plural(entries.length, "entry", "entries")}${streak.current ? ` · ${streak.current}-day streak` : ""}</span>
       </div>
       ${last.length
-        ? `<ul class="home-log-entries">${last.map((e) => `<li><span class="entry-time">${esc(e.time || "·")}</span><span>${e.mood ? e.mood.emoji + " " : ""}${inline(e.text.replace(/^Mood:\s*\S+\s*/, "Mood: "))}</span></li>`).join("")}</ul>`
+        ? `<ul class="home-log-entries">${last.map((e) => `<li><span class="entry-time">${esc(e.time || "·")}</span><span>${inline(e.text.replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: "))}</span></li>`).join("")}</ul>`
         : `<p class="muted">${canWrite() ? "Nothing yet. Say what you did, how you feel, or a todo; Cairn files it." : "Nothing logged today."}</p>`}
     </div>
     ${memory
-      ? `<button class="home-log-memory" data-jl-day="${memory.day}" type="button"><span class="eyebrow">${esc(memory.label)}</span><span>${inline(memory.info.entries[0].text.replace(/^Mood:\s*\S+\s*/, "Mood: "))}</span></button>`
+      ? `<button class="home-log-memory" data-jl-day="${memory.day}" type="button"><span class="eyebrow">${esc(memory.label)}</span><span>${inline(memory.info.entries[0].text.replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: "))}</span></button>`
       : ""}
     <div class="home-log-actions">
       ${canWrite() ? `<button class="btn primary" type="button" data-log-open>${MIC} Log by voice</button>` : ""}

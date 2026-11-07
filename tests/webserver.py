@@ -84,9 +84,9 @@ VALID_TOKEN = "ghp_" + "a" * 36
 OTHER_TOKEN = "ghp_" + "b" * 36  # a real user without push access to juw12/cairn
 CORS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, If-None-Match",
     "Access-Control-Allow-Methods": "GET, PUT, POST, DELETE, OPTIONS",
-    "Access-Control-Expose-Headers": "x-oauth-scopes, x-ratelimit-remaining",
+    "Access-Control-Expose-Headers": "x-oauth-scopes, x-ratelimit-remaining, ETag",
 }
 
 
@@ -110,6 +110,7 @@ class GitHubMock:
         self.push = push
         self.revoked = False
         self.requests: list[dict] = []
+        self.listings: list[dict] = []
         # Extra canned API answers by path, e.g. {"/repos/a/b/pulls/7": {...}} (pull requests, commits, releases).
         self.extra: dict[str, dict] = {}
 
@@ -216,7 +217,26 @@ class GitHubMock:
         current = files.get(file_path)
         if request.method == "GET":
             if current is None:
-                return self.reply(route, {"message": "Not Found"}, 404)
+                # A folder: list the files directly inside it, with an ETag so unchanged listings answer 304.
+                prefix = file_path.strip("/") + "/" if file_path.strip("/") else ""
+                entries, folders = [], {}
+                for p, t in sorted(files.items()):
+                    if not p.startswith(prefix):
+                        continue
+                    rest = p[len(prefix):]
+                    if "/" in rest:
+                        folders.setdefault(rest.split("/", 1)[0], []).append(p + git_sha(t))
+                    else:
+                        entries.append({"type": "file", "name": rest, "path": p, "sha": git_sha(t)})
+                for name, parts in sorted(folders.items()):
+                    entries.append({"type": "dir", "name": name, "path": prefix + name, "sha": git_sha("".join(parts))})
+                if not entries:
+                    return self.reply(route, {"message": "Not Found"}, 404)
+                etag = '"' + hashlib.sha1(json.dumps(entries).encode("utf-8")).hexdigest() + '"'
+                self.listings.append({"path": file_path, "conditional": bool(request.headers.get("if-none-match")), "etag": etag})
+                if request.headers.get("if-none-match") == etag:
+                    return route.fulfill(status=304, body="", headers={**CORS, "ETag": etag})
+                return self.reply(route, entries, headers={"ETag": etag})
             encoded = base64.b64encode(current.encode("utf-8")).decode("ascii")
             return self.reply(route, {"content": encoded, "sha": git_sha(current), "path": file_path})
         if not login or not (login == "juw12" and self.push):

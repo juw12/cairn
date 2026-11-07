@@ -45,6 +45,7 @@ const ICONS = {
   terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>',
   play: '<path d="M7 5v14l11-7z"/>',
   zap: '<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>',
+  activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   save: '<path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M8 3v5h7M8 21v-7h8v7"/>',
   users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.2c2.6.2 4.5 2.6 4.5 5.8"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
@@ -56,6 +57,7 @@ const ICONS = {
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
   shuffle: '<path d="M4 7h3.5c4.5 0 4.5 10 9 10H20M4 17h3.5c1.6 0 2.6-1.2 3.4-2.8M14.8 9.6C15.6 8 16.4 7 18 7h2"/><path d="m17.5 4.5 2.5 2.5-2.5 2.5M17.5 14.5l2.5 2.5-2.5 2.5"/>',
+  chat: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5z"/><path d="M8 9h8M8 12h5"/>',
   template: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/>',
 };
 
@@ -69,12 +71,16 @@ export const TYPE_META = {
   decision: { label: "Decision", icon: "decision" },
   note: { label: "Note", icon: "note" },
   journal: { label: "Journal", icon: "journal" },
+  session: { label: "Session", icon: "activity" },
+  feedback: { label: "Feedback", icon: "chat" },
 };
 
 export const STATUS_LABEL = {
   raw: "Raw", exploring: "Exploring", ready: "Ready", parked: "Parked",
   todo: "To do", doing: "Doing", done: "Done",
   proposed: "Proposed", accepted: "Accepted", superseded: "Superseded",
+  live: "Live", shipped: "Shipped", partial: "Partial", dropped: "Dropped",
+  new: "New", planned: "Planned", addressed: "Addressed", wontfix: "Won't fix",
 };
 
 export const STATUS_HINT = {

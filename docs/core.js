@@ -1,7 +1,7 @@
 // Pure functions shared (and parity-tested) with cairn/core.py.
 // Nothing here touches storage or the DOM.
 
-export const TYPES = ["idea", "task", "decision", "note", "journal"];
+export const TYPES = ["idea", "task", "decision", "note", "journal", "session", "feedback"];
 
 export const FOLDERS = {
   idea: "ideas",
@@ -9,6 +9,8 @@ export const FOLDERS = {
   decision: "decisions",
   note: "notes",
   journal: "journal",
+  session: "sessions",
+  feedback: "feedback",
 };
 
 export const STATUSES = {
@@ -17,6 +19,8 @@ export const STATUSES = {
   decision: ["proposed", "accepted", "superseded"],
   note: [],
   journal: [],
+  session: ["live", "shipped", "partial", "dropped"],
+  feedback: ["new", "planned", "addressed", "wontfix"],
 };
 
 export const TEMPLATES = {
@@ -25,6 +29,8 @@ export const TEMPLATES = {
   decision: "## Context\n\n\n## Options\n\n\n## Decision\n\n\n## Consequences\n\n",
   note: "",
   journal: "## Log\n\n- \n",
+  session: "## Goal\n\n\n## Log\n\n",
+  feedback: "",
 };
 
 const CAPTURE_PREFIXES = {
@@ -36,6 +42,8 @@ const CAPTURE_PREFIXES = {
   note: "note",
   journal: "journal",
   log: "journal",
+  feedback: "feedback",
+  fb: "feedback",
 };
 
 export const SPECIAL_FILES = ["CONTEXT.md", "README.md"];
@@ -204,6 +212,8 @@ export function notePath(type, title, existingPaths, today) {
     const numbers = [...taken].map((name) => /^(\d{4})-/.exec(name)).filter(Boolean).map((m) => Number(m[1]));
     const next = numbers.length ? Math.max(...numbers) + 1 : 1;
     slug = `${String(next).padStart(4, "0")}-${slug}`;
+  } else if (type === "session") {
+    slug = `${today}-${slug}`;
   }
   return `${folder}/${uniqueSlug(slug, taken)}.md`;
 }
@@ -771,4 +781,127 @@ export function contextPack(notes, project, today) {
       "decisions in force are binding unless a newer decision supersedes them.",
   );
   return out.join("\n") + "\n";
+}
+
+// ------------------------------------------------------------ vibe sessions and feedback
+
+// A session log line: `- 14:02 pass: pytest (12s)`. Anything else in the body is free text.
+export const LOG_KINDS = ["start", "note", "prompt", "pass", "fail", "commit", "skill", "end"];
+const VIBE_LOG_LINE_RE = /^\s*[-*]\s+(\d{1,2}:\d{2})\s+([a-z]+):\s*(.*)$/;
+const STAMP_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/;
+export const FINISHED = ["shipped", "partial", "dropped"];
+
+export function sessionLog(body) {
+  const entries = [];
+  for (const line of body.replaceAll("\r\n", "\n").split("\n")) {
+    const match = VIBE_LOG_LINE_RE.exec(line);
+    if (match && LOG_KINDS.includes(match[2])) {
+      entries.push({ time: match[1].padStart(5, "0"), kind: match[2], text: match[3].trim() });
+    }
+  }
+  return entries;
+}
+
+const SKILL_RE = /^\/([A-Za-z0-9][A-Za-z0-9_-]*)/;
+
+// `/refine app cairn · 6.5 -> 8.7` -> `/refine` (slash commands like /refine, /council, /ambitious-founder).
+export function skillName(text) {
+  const match = SKILL_RE.exec(String(text).trim());
+  return match ? `/${match[1].toLowerCase()}` : "";
+}
+
+// A plain note that starts with a slash command is a skill run.
+export function logKind(text, kind = "note") {
+  return kind === "note" && skillName(text) ? "skill" : kind;
+}
+
+// `2026-11-07T14:02` -> minutes on a common clock (only differences are meaningful).
+export function stampMinutes(stamp) {
+  const match = typeof stamp === "string" ? STAMP_RE.exec(stamp) : null;
+  if (!match) return null;
+  const [year, month, day, hour, minute] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return Math.round(date.getTime() / 60000) + hour * 60 + minute;
+}
+
+export function sessionMinutes(note) {
+  const start = stampMinutes(note.meta.started);
+  const end = stampMinutes(note.meta.ended);
+  if (start === null || end === null || end < start) return 0;
+  return end - start;
+}
+
+function count(value) {
+  return typeof value === "string" && /^[0-9]+$/.test(value.trim()) ? Number(value.trim()) : 0;
+}
+
+export function feedbackRating(note) {
+  const rating = count(note.meta.rating);
+  return rating >= 1 && rating <= 5 ? rating : null;
+}
+
+function sessionDay(note) {
+  for (const key of ["started", "created"]) {
+    const value = note.meta[key];
+    if (typeof value === "string" && DAY_RE.test(value.slice(0, 10))) return value.slice(0, 10);
+  }
+  return "";
+}
+
+function percent(part, whole) {
+  return whole ? Math.floor((100 * part) / whole + 0.5) : null;
+}
+
+// Totals for the Vibe view: sessions, results, checks, code churn and feedback.
+export function vibeStats(notes, today, days = 14) {
+  const sessions = notes.filter((n) => n.type === "session");
+  const feedback = notes.filter((n) => n.type === "feedback");
+  const finished = sessions.filter((s) => FINISHED.includes(s.status));
+  const logs = sessions.flatMap((s) => sessionLog(s.body));
+  const passed = logs.filter((e) => e.kind === "pass").length;
+  const failed = logs.filter((e) => e.kind === "fail").length;
+  const ratings = feedback.map(feedbackRating).filter((r) => r !== null);
+  const sum = (list, fn) => list.reduce((total, item) => total + fn(item), 0);
+  const skills = {};
+  for (const entry of logs) {
+    const name = entry.kind === "skill" ? skillName(entry.text) : "";
+    if (name) skills[name] = (skills[name] || 0) + 1;
+  }
+  const [year, month, day] = today.split("-").map(Number);
+  const end = Date.UTC(year, month - 1, day);
+  const daily = [];
+  for (let offset = days - 1; offset >= 0; offset--) {
+    const date = new Date(end - offset * 86400000).toISOString().slice(0, 10);
+    const onDay = sessions.filter((s) => sessionDay(s) === date);
+    daily.push({
+      day: date,
+      sessions: onDay.length,
+      minutes: sum(onDay, sessionMinutes),
+      shipped: onDay.filter((s) => s.status === "shipped").length,
+    });
+  }
+  return {
+    sessions: sessions.length,
+    live: sessions.filter((s) => s.status === "live").length,
+    shipped: sessions.filter((s) => s.status === "shipped").length,
+    partial: sessions.filter((s) => s.status === "partial").length,
+    dropped: sessions.filter((s) => s.status === "dropped").length,
+    ship_rate: percent(finished.filter((s) => s.status === "shipped").length, finished.length),
+    minutes: sum(finished, sessionMinutes),
+    prompts: logs.filter((e) => e.kind === "prompt").length,
+    passed,
+    failed,
+    pass_rate: percent(passed, passed + failed),
+    commits: sum(sessions, (s) => count(s.meta.commits)),
+    added: sum(sessions, (s) => count(s.meta.added)),
+    removed: sum(sessions, (s) => count(s.meta.removed)),
+    feedback: feedback.length,
+    feedback_open: feedback.filter((f) => ["new", "planned"].includes(f.status)).length,
+    feedback_addressed: feedback.filter((f) => f.status === "addressed").length,
+    rating: ratings.length ? Math.floor((10 * ratings.reduce((a, b) => a + b, 0)) / ratings.length + 0.5) / 10 : null,
+    ratings: [1, 2, 3, 4, 5].map((stars) => ratings.filter((r) => r === stars).length),
+    skills,
+    daily,
+  };
 }

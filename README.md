@@ -148,6 +148,34 @@ It opens `http://127.0.0.1:4777` with code scanning and one-click **Commit brain
 
 **3. Demo.** [Try the sample project](https://juw12.github.io/cairn/?demo=1) (an offline hiking app). It's saved only in your browser.
 
+### Watch your vibe coding live
+
+**Vibe** (sidebar → Project) shows what your AI assistant is doing right now, what came out of it, and what people
+thought. A session is a plain file in `brain/sessions/` with `status: live` while you work and a log of timestamped
+steps; feedback lives in `brain/feedback/` with an optional 1-5 rating.
+
+```sh
+cairn vibe start "add dark mode" --agent claude   # opens a live session
+cairn vibe log "asked for a theme toggle" --kind prompt
+cairn vibe skill /refine "6.5 -> 8.7"              # skill runs: /refine, /council, /ambitious-founder, /precedent...
+cairn vibe check -- python -m pytest               # runs your tests, logs pass/fail with the summary line
+cairn vibe end --result shipped "toggle works"     # records commits and +/- lines since the start
+cairn feedback "toggle is hard to find on mobile" --rating 3 --from @alice
+cairn vibe status                                  # the same stats in the terminal
+```
+
+Paste the instructions from the Vibe page into `AGENTS.md` or `CLAUDE.md` and your assistant reports its own
+progress. Any logged step that starts with a slash command counts as a skill run, and the page tallies them.
+
+- **Parallel agents:** run several sessions at once (one per terminal or git worktree). `start` prints the
+  session's slug; set `CAIRN_SESSION` to it in that terminal (or pass `--session`) and every command goes there.
+- **Live everywhere:** the local app updates within seconds, with commits and changed files counted since the
+  session started (exactly, from the commit it began on). A folder opened in Chrome or Edge refreshes every few
+  seconds. A GitHub brain you're signed in to refreshes every 20 seconds with conditional requests, so unchanged
+  checks don't use up your rate limit.
+- **Demo:** *Load a sample week* on the Vibe page of the [demo](https://juw12.github.io/cairn/?demo=1). Stats: sessions, time, ship rate, checks passing, a 14-day activity chart, open feedback and the average
+rating. No streaks, no leaderboards: everything is evidence you can open as a file.
+
 ### Keep a daily log by voice
 
 Press the round **Log** button at the bottom of any screen, or <kbd>L</kbd>. The microphone starts (you can turn that off), you talk, and every sentence lands in today's page as a plain Markdown bullet:
@@ -157,7 +185,7 @@ Press the round **Log** button at the bottom of any screen, or <kbd>L</kbd>. The
 
 - 08:12 Walked to work, sorted the GPX bug on the train #beta
 - 09:40 Task: [[book-the-train-to-lyon|Book the train to Lyon]]
-- 18:05 Mood: 🙂 good (4/5)
+- 18:05 Mood: good (4/5)
 ```
 
 | Say | What happens |
@@ -260,7 +288,7 @@ The editor speaks Obsidian-flavoured Markdown, so a vault reads the same in both
   into links in one click. Hover any link for a preview of the note.
 - **Properties:** edit, add or remove any front-matter key, not just the built-in ones.
 - **Rename** a note and every link to it is rewritten. Links to missing notes are shown dimmed; click one to create it.
-- **Find things:** Notes has a list or a folder tree, a ★ Bookmarks filter, and search operators: `tag:release`,
+- **Find things:** Notes has a list or a folder tree, a Bookmarks filter, and search operators: `tag:release`,
   `path:ideas/`, `file:`, `type:`, `status:`, `line:`, `"exact phrase"` and `-exclude`.
 - **Templates:** notes in `Templates/` (or `_templates/`) appear in the command palette (Ctrl+K), as a new note or
   inserted into the open one; `{{title}}`, `{{date:YYYY-MM-DD}}` and `{{time}}` are filled in. The palette also

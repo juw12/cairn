@@ -9,11 +9,11 @@ const LINK_RE = /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g;
 const PERSON_RE = /(^|[\s(])@([A-Za-z][A-Za-z0-9_.-]*[A-Za-z0-9]|[A-Za-z])/g;
 
 export const MOODS = [
-  { score: 1, emoji: "\u{1F62B}", label: "awful", words: ["awful", "terrible", "horrible", "miserable", "exhausted"] },
-  { score: 2, emoji: "\u{1F641}", label: "low", words: ["low", "bad", "sad", "down", "tired", "stressed", "meh"] },
-  { score: 3, emoji: "\u{1F610}", label: "okay", words: ["okay", "ok", "alright", "fine", "so so", "so-so", "neutral"] },
-  { score: 4, emoji: "\u{1F642}", label: "good", words: ["good", "happy", "nice", "calm", "productive", "well"] },
-  { score: 5, emoji: "\u{1F604}", label: "great", words: ["great", "amazing", "awesome", "fantastic", "excellent", "wonderful", "excited"] },
+  { score: 1, label: "awful", words: ["awful", "terrible", "horrible", "miserable", "exhausted"] },
+  { score: 2, label: "low", words: ["low", "bad", "sad", "down", "tired", "stressed", "meh"] },
+  { score: 3, label: "okay", words: ["okay", "ok", "alright", "fine", "so so", "so-so", "neutral"] },
+  { score: 4, label: "good", words: ["good", "happy", "nice", "calm", "productive", "well"] },
+  { score: 5, label: "great", words: ["great", "amazing", "awesome", "fantastic", "excellent", "wonderful", "excited"] },
 ];
 
 export const PROMPTS = [
@@ -87,7 +87,7 @@ export function moodFromWords(text) {
 }
 
 export function moodLine(mood, note = "") {
-  return `Mood: ${mood.emoji} ${mood.label} (${mood.score}/5)${note ? ` ${note}` : ""}`;
+  return `Mood: ${mood.label} (${mood.score}/5)${note ? ` ${note}` : ""}`;
 }
 
 export function parseEntries(body) {
@@ -379,7 +379,7 @@ export function weeklyReview(days, notes, anyDayInWeek) {
   lines.push(`- Entries: ${entryCount}`);
   if (avg !== null) {
     const mood = MOODS[Math.round(avg) - 1];
-    lines.push(`- Average mood: ${mood.emoji} ${avg.toFixed(1)}/5`);
+    lines.push(`- Average mood: ${avg.toFixed(1)}/5 (${mood.label})`);
   }
   if (created.length) lines.push(`- Notes created: ${created.length}`);
   lines.push("");

@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
         raise
     sync_playwright = None
 
-VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "context", "plugins", "people", "proof"]
+VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "context", "plugins", "people", "proof"]
 
 
 # The demo brain has 26 notes: the original 18 plus 8 dated journal pages (docs/store.js DEMO_DAYS).
@@ -65,6 +65,107 @@ class EndToEndTests(unittest.TestCase):
             self.assertTrue(page.inner_text("#view").strip(), view)
             if view == "map":
                 self.assertEqual(page.locator(".map-node").count(), DEMO_NOTES)
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_session_feedback_and_stats(self):
+        page = self.open()
+        self.go(page, "vibe")
+        self.assertIn("Nothing live", page.inner_text(".vibe-live"))
+        page.click('[data-action="vibe-start"]')
+        page.fill(".modal input", "Add dark mode")
+        page.click('.modal button[type="submit"]')
+        page.wait_for_selector(".vibe-live h2")
+        self.assertEqual(page.inner_text('#nav [data-go="vibe"] .count'), "live")
+        path = page.evaluate("window.cairn.state.notes.find((n) => n.type === 'session').path")
+        self.assertRegex(path, r"^sessions/\d{4}-\d{2}-\d{2}-add-dark-mode\.md$")
+
+        page.select_option(".vibe-log-form select", "pass")
+        page.fill(".vibe-log-form input", "pytest: 12 passed")
+        page.press(".vibe-log-form input", "Enter")
+        page.wait_for_function("(p) => window.cairn.state.files.find((f) => f.path === p).text.includes('pass: pytest: 12 passed')", arg=path)
+        self.assertIn("pytest: 12 passed", page.inner_text(".vibe-log"))
+
+        page.fill("#fb-text", "The toggle is hard to find")
+        page.select_option("#fb-form select[name=rating]", "3")
+        page.fill("#fb-form input[name=from]", "@alice")
+        page.click('#fb-form button[type="submit"]')
+        page.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'feedback/the-toggle-is-hard-to-find.md')")
+        feedback = self.note_text(page, "feedback/the-toggle-is-hard-to-find.md")
+        self.assertIn("rating: 3", feedback)
+        self.assertIn('from: "@alice"', feedback)
+        self.assertIn("about: \"[[", feedback)
+
+        page.click('[data-action="vibe-end"][data-result="shipped"]')
+        page.wait_for_function("(p) => window.cairn.state.files.find((f) => f.path === p).text.includes('status: shipped')", arg=path)
+        text = self.note_text(page, path)
+        self.assertIn("ended: ", text)
+        self.assertIn("end: shipped", text)
+        figures = page.inner_text(".vibe-figures")
+        self.assertIn("100%", figures)  # ship rate and checks green
+        self.assertIn("3.0", figures)  # average rating
+        self.assertEqual(page.locator('#nav [data-go="vibe"] .count').count(), 0)
+
+        page.select_option('[data-fb-status="feedback/the-toggle-is-hard-to-find.md"]', "addressed")
+        page.wait_for_function("() => window.cairn.state.files.find((f) => f.path === 'feedback/the-toggle-is-hard-to-find.md').text.includes('status: addressed')")
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_skills_and_parallel_sessions(self):
+        page = self.open()
+        self.go(page, "vibe")
+        for title in ("Map tiles", "Share link"):
+            page.click('[data-action="vibe-start"]')
+            page.fill(".modal input", title)
+            page.click('.modal button[type="submit"]')
+            page.wait_for_function("(t) => window.cairn.state.notes.some((n) => n.type === 'session' && n.title === t)", arg=title)
+        page.wait_for_function("() => document.querySelectorAll('.vibe-live').length === 2")
+        self.assertEqual(page.inner_text('#nav [data-go="vibe"] .count'), "2 live")
+        self.assertIn("Share link", page.inner_text(".vibe-live >> nth=0"))  # newest first
+
+        # A note that starts with a slash command is logged as a skill run, on the session whose form was used.
+        older = page.evaluate("window.cairn.state.notes.find((n) => n.title === 'Map tiles').path")
+        form = f'.vibe-log-form[data-session="{older}"]'
+        page.fill(f"{form} input", "/refine app trailmix · 6.5 -> 8.7")
+        page.press(f"{form} input", "Enter")
+        page.wait_for_function("(p) => window.cairn.state.files.find((f) => f.path === p).text.includes('skill: /refine app trailmix')", arg=older)
+        page.fill(f"{form} input", "/council tooltips")
+        page.press(f"{form} input", "Enter")
+        page.wait_for_selector(".skill-chip")
+        chips = page.inner_text(".vibe-skills")
+        self.assertIn("/refine", chips)
+        self.assertIn("/council", chips)
+
+        page.click(f'[data-action="vibe-end"][data-result="partial"][data-path="{older}"]')
+        page.wait_for_function("(p) => window.cairn.state.files.find((f) => f.path === p).text.includes('status: partial')", arg=older)
+        self.assertEqual(page.inner_text('#nav [data-go="vibe"] .count'), "live")
+        self.assertEqual(page.locator(".vibe-live").count(), 1)
+        self.assertEqual(self.errors, [])
+
+    def test_demo_can_load_a_sample_week(self):
+        page = self.open()
+        self.go(page, "vibe")
+        page.click('[data-action="vibe-sample"]')
+        page.wait_for_function("() => window.cairn.state.notes.filter((n) => n.type === 'session').length === 4")
+        self.assertEqual(page.evaluate("window.cairn.state.notes.filter((n) => n.type === 'feedback').length"), 3)
+        self.assertIn("4", page.inner_text(".vibe-figures"))
+        self.assertEqual(page.locator(".skill-chip").count(), 4)
+        self.assertEqual(page.locator('[data-action="vibe-sample"]').count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_feedback_capture_prefix(self):
+        page = self.open()
+        page.fill("#capture-input", "fb: offline maps saved my hike #maps")
+        self.assertEqual(page.inner_text("#capture-type"), "Feedback")
+        page.press("#capture-input", "Enter")
+        page.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'feedback/offline-maps-saved-my-hike.md')")
+        self.assertIn("status: new", self.note_text(page, "feedback/offline-maps-saved-my-hike.md"))
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_view_on_a_phone_in_dark_mode(self):
+        page = self.open(viewport=(390, 844), theme="dark")
+        page.evaluate("location.hash = '#/vibe'")
+        page.wait_for_selector(".vibe-figures")
+        overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        self.assertLessEqual(overflow, 0)
         self.assertEqual(self.errors, [])
 
     def test_capture_routes_to_task_with_tags(self):
