@@ -12,7 +12,7 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
-import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, useHeld } from "./drawer.js";
+import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { showWelcome } from "./welcome.js";
@@ -181,6 +181,7 @@ function wireGlobal() {
     const open = target.closest("[data-open]");
     if (open && !target.closest("[data-action]")) {
       event.preventDefault();
+      if (event.altKey && state.open && open.dataset.open !== state.open) return openSplit(open.dataset.open);
       return openNote(open.dataset.open, { heading: open.dataset.heading || null, newTab: event.ctrlKey || event.metaKey });
     }
     const missing = target.closest("[data-missing]");
@@ -376,6 +377,10 @@ function wireGlobal() {
       event.preventDefault();
       return handlePluginSubmit(event.target);
     }
+    if (event.target.matches("[data-plugin-form]")) {
+      event.preventDefault(); // settings save as they change; Enter must not reload the page
+      return;
+    }
     const quick = event.target.closest("[data-quick]");
     if (!quick) return;
     event.preventDefault();
@@ -437,6 +442,10 @@ function wireGlobal() {
       if (key === "t") {
         event.preventDefault();
         return reopenClosedTab();
+      }
+      if ((key === "\\" || event.code === "Backslash") && state.open) {
+        event.preventDefault();
+        return toggleSplit();
       }
     }
     if (event.key === "Escape") {

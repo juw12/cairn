@@ -72,11 +72,11 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | **Ideas wall** | Raw → Exploring → Ready → Parked. Drag ideas right as they firm up. **Spark** drops a thinking prompt into an idea; **Promote to task** creates a linked task. |
 | **Board** | To do → Doing → Done with drag and drop, checklists and progress bars. |
 | **Decisions** | Lightweight decision records (context, options, decision, consequences), numbered and reviewed in PRs like code. |
-| **Notes, Journal** | Markdown editor with preview, `[[wikilinks]]`, backlinks, tags and a page per day. |
+| **Notes, Journal** | Markdown editor with preview, `[[wikilinks]]`, backlinks, tags and a page per day. Open notes as **tabs**, and put a second note **beside** the first (columns button, <kbd>Alt</kbd>+click a link or tab, or drag a tab to the right): both stay editable, links in the side note open there, and the layout is remembered. |
 | **Map** | A live graph of every note: drag notes (they stay pinned), zoom, pinch, hover to light up neighbours with direction arrows, click for an inspector with summary and links in/out. **Shift-click** two notes for the path between them, **Alt-drag** one onto another to write a `[[link]]`, double-click a hollow "unwritten" link to create that note. Local graph (1-3 hops), search, colour by type / folder / cluster / status, tag hubs, orphan filter, a time-lapse of how the brain grew. Canvas-rendered, smooth with thousands of notes, and every note stays reachable by keyboard. |
 | **Canvas** | Infinite boards of notes, cards, links and groups joined by arrows, saved as Obsidian-compatible `.canvas` files. <kbd>Shift</kbd>-drag to box-select, <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> / <kbd>D</kbd> to copy, paste and duplicate (pasting a link, a `[[note]]` or text makes the right card), drag notes in from the **Notes** panel. A note shows the canvases it sits on, and the Map draws each canvas as a square joined to its notes. |
 | **Obsidian sync** | Import an Obsidian vault and keep it in sync both ways (notes and canvases). Files are mirrored as they are; nothing is converted. |
-| **Plugins** | Community plugins: install from the list, a GitHub repo or a link. Write your own in one file ([PLUGINS.md](PLUGINS.md)). |
+| **Plugins** | Community plugins: install from the list, a GitHub repo or a link. Each plugin gets a **settings page** drawn from its own options, a plugin that breaks is flagged on its row with a **Restart** button, and the list of plugins you use can be **saved into the brain** so your other devices offer to install the same ones (sources only, never code). Write your own in one file ([PLUGINS.md](PLUGINS.md)). |
 | **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
 | **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
 | **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture. |
@@ -225,6 +225,8 @@ The editor speaks Obsidian-flavoured Markdown, so a vault reads the same in both
   vault both ways; fields Cairn doesn't know are kept.
 - **Tabs:** keep several notes open. Ctrl/⌘+click or middle-click any note to open it in a new tab; drag tabs to
   reorder, Ctrl+Alt+←/→ to switch, Ctrl+Alt+W to close, Ctrl+Alt+T to reopen. Tabs are remembered per brain.
+- **Split view:** Ctrl+Alt+\\ (or the columns button) opens a second note beside the first; Alt+click any note,
+  link or tab to open it there. Read or edit it, click its title to swap sides, × to close.
 - **Community plugins:** turn them on under **Plugins**, then install from the built-in list (Note queries,
   Calendar, Writing stats, Recent files), from any GitHub repo (`owner/repo`) or from a link. A plugin is one
   JavaScript file that can add commands, sidebar pages, ```` ```lang ```` block renderers and event hooks; see

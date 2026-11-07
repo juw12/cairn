@@ -3,7 +3,7 @@
 import { escapeHtml as esc } from "./md.js";
 import { $, TYPE_META, ask, byRecent, icon, toast } from "./ui.js";
 import { VIEWS, createNote, noteByPath, readOnly, refreshTodos, state } from "./state.js";
-import { bookmarkOpenNote, closeOtherTabs, closeTab, cycleTab, flushPending, insertIntoOpenNote, openInNewTab, openNote, openTabs, renameOpenNote, reopenClosedTab } from "./drawer.js";
+import { bookmarkOpenNote, closeOtherTabs, closeSplit, closeTab, cycleTab, flushPending, insertIntoOpenNote, openInNewTab, openNote, openTabs, pickSplit, renameOpenNote, reopenClosedTab } from "./drawer.js";
 import { chooseCanvas, newCanvas } from "./canvas.js";
 import { pluginCommands, pluginViews } from "./plugins.js";
 import { capture, commitBrain, newNote, openSettings, openToday, saveContext, switchBrain, syncBrain, toggleTheme } from "./actions.js";
@@ -36,6 +36,10 @@ function commands() {
   if (state.open) list.push({ label: "Toggle bookmark on this note", kind: "Note", icon: "star", run: () => bookmarkOpenNote() });
   list.push({ label: "Open a canvas…", kind: "Navigate", icon: "canvas", run: chooseCanvas });
   list.push({ label: "Open a note in a new tab…", kind: "Tabs", icon: "tabs", run: openInNewTab });
+  if (state.open) {
+    list.push({ label: "Open a note beside this one…", kind: "Split  Ctrl+Alt+\\", icon: "columns", run: pickSplit });
+    if (state.split && state.split !== state.open) list.push({ label: "Close the side note", kind: "Split", icon: "x", run: closeSplit });
+  }
   const tabs = openTabs();
   if (tabs.length > 1) {
     list.push(

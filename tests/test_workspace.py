@@ -383,6 +383,65 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(len(tabs()), 3)
         self.assertEqual(self.errors, [])
 
+    def test_split_view_shows_two_notes_side_by_side(self):
+        page = self.open()
+        page.click('#nav [data-go="ideas"]')
+        page.click('.item-card[data-open="ideas/offline-maps.md"]')
+        page.wait_for_selector("#ed-body")
+        side_title = page.evaluate("() => window.cairn.state.notes.find((n) => n.path === 'ideas/share-trip-link.md').title")
+        # The columns button picks a note to open beside the current one.
+        page.click("[data-split-toggle]")
+        page.fill(".palette input", side_title)
+        page.keyboard.press("Enter")
+        page.wait_for_selector('.split-pane[data-split-path="ideas/share-trip-link.md"]')
+        self.assertTrue(page.locator(".drawer.has-split").is_visible())
+        self.assertTrue(page.locator("#ed-body").is_visible(), "the main note stays editable")
+        main_box = page.locator(".drawer-panes > .drawer-body").bounding_box()
+        side_box = page.locator(".split-pane").bounding_box()
+        self.assertGreater(side_box["x"], main_box["x"] + main_box["width"] / 2, "side by side, not stacked")
+        self.assertLess(abs(side_box["y"] - main_box["y"]), 80, "both panes start on the same row")
+        # Both notes can be edited at once and each saves to its own file.
+        page.click('[data-split-mode="write"]')
+        page.fill("#split-body", "Written in the side pane.")
+        page.fill("#ed-body", "Written in the main pane.")
+        page.wait_for_function("""() => {
+            const text = (p) => window.cairn.state.files.find((f) => f.path === p).text;
+            return text('ideas/share-trip-link.md').includes('Written in the side pane.')
+                && text('ideas/offline-maps.md').includes('Written in the main pane.');
+        }""")
+        # Swap sides, then the layout is remembered after a reload.
+        page.click(".split-title")
+        page.wait_for_function("() => window.cairn.state.open === 'ideas/share-trip-link.md' && window.cairn.state.split === 'ideas/offline-maps.md'")
+        page.reload()
+        page.wait_for_selector("#nav button")
+        page.click('#nav [data-go="ideas"]')
+        page.click('.item-card[data-open="ideas/share-trip-link.md"]')
+        page.wait_for_selector('.split-pane[data-split-path="ideas/offline-maps.md"]')
+        # Close it; Ctrl+Alt+\\ opens the picker again.
+        page.click("[data-split-close]")
+        page.wait_for_selector(".split-pane", state="detached")
+        self.assertIsNone(page.evaluate("() => window.cairn.state.split"))
+        page.keyboard.press("Control+Alt+Backslash")
+        page.wait_for_selector(".palette input")
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".palette-wrap", state="detached")
+        # Alt+click on a tab opens that tab beside the current note.
+        page.keyboard.press("Escape")
+        page.wait_for_selector("#drawer-layer", state="detached")
+        page.click('.item-card[data-open="ideas/weather-overlay.md"]', modifiers=["Control"])
+        page.wait_for_selector('.note-tab[data-tab="ideas/weather-overlay.md"].on')
+        page.click('.note-tab[data-tab="ideas/share-trip-link.md"]', modifiers=["Alt"])
+        page.wait_for_selector('.split-pane[data-split-path="ideas/share-trip-link.md"]')
+        self.assertTrue(page.locator('.note-tab[data-tab="ideas/share-trip-link.md"].beside').count() == 1)
+        # On a phone the two notes stack and nothing scrolls sideways.
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(200)
+        self.assertLessEqual(page.evaluate("() => document.documentElement.scrollWidth"), 390)
+        main_box = page.locator(".drawer-panes > .drawer-body").bounding_box()
+        side_box = page.locator(".split-pane").bounding_box()
+        self.assertGreaterEqual(side_box["y"], main_box["y"] + main_box["height"] - 2, "stacked on a phone")
+        self.assertEqual(self.errors, [])
+
     def test_deleting_a_note_closes_its_tab(self):
         page = self.open()
         page.click('#nav [data-go="ideas"]')
@@ -441,6 +500,80 @@ class WorkspaceTests(unittest.TestCase):
         page.wait_for_selector('[data-plugins-toggle="on"]')
         self.assertEqual(page.locator('#nav [data-go^="plugin:"]').count(), 0)
         self.assertEqual(self.errors, [])
+
+    def test_plugin_settings_problems_and_the_brains_plugin_list(self):
+        page = self.open()
+        page.click('#nav [data-go="plugins"]')
+        page.click('[data-plugins-toggle="on"]')
+        page.click('[data-plugin-install="plugins/writing-stats.js"]')
+        page.wait_for_selector('.plugin-row[data-plugin="writing-stats"]')
+        # A settings page drawn from the plugin's own description of its options.
+        page.click('[data-plugin-settings="writing-stats"]')
+        page.wait_for_selector('[data-plugin-form="writing-stats"]')
+        self.assertEqual(page.input_value('[data-setting="wordsPerMinute"]'), "230")
+        self.assertEqual(page.input_value('[data-setting="chartDays"]'), "30")
+        page.select_option('[data-setting="chartDays"]', "14")
+        page.fill('[data-setting="wordsPerMinute"]', "100")
+        page.press('[data-setting="wordsPerMinute"]', "Tab")
+        stored = lambda key: page.evaluate("(k) => JSON.parse(localStorage.getItem('cairn.plugin.writing-stats.' + k))", key)  # noqa: E731
+        self.assertEqual(stored("chartDays"), "14")
+        self.assertEqual(stored("wordsPerMinute"), 100)
+        page.click('#nav [data-go="plugin:writing-stats:stats"]')
+        page.wait_for_selector(".ws-tiles")
+        self.assertIn("last 14 days", page.inner_text("#view"))
+        page.click('#nav [data-go="plugins"]')
+        # The settings stay open while you look at the result.
+        page.wait_for_selector('[data-plugin-form="writing-stats"]')
+        self.assertEqual(page.get_attribute('[data-plugin-settings="writing-stats"]', "aria-expanded"), "true")
+        page.click('[data-plugin-settings-reset="writing-stats"]')
+        page.wait_for_function("() => JSON.parse(localStorage.getItem('cairn.plugin.writing-stats.chartDays')) === '30'")
+        # A plugin that fails while running is marked on its row until it is restarted.
+        page.evaluate("""async () => {
+            const plugins = await import('./plugins.js');
+            const code = 'export const manifest = { id: "broken", name: "Broken", version: "1.0.0" };'
+              + 'export default function (cairn) { cairn.addCommand({ id: "boom", name: "Explode now", run() { throw new Error("kaboom"); } }); }';
+            const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+            await plugins.installPlugin({ url, label: 'a test link', spec: 'https://example.com/broken.js' }, { quiet: true });
+        }""")
+        page.keyboard.press("Control+k")
+        page.fill(".palette input", "Explode now")
+        page.keyboard.press("Enter")
+        page.click('#nav [data-go="home"]')
+        page.click('#nav [data-go="plugins"]')
+        page.wait_for_selector('.plugin-row.has-error[data-plugin="broken"]')
+        self.assertIn("kaboom", page.inner_text('.plugin-row[data-plugin="broken"]'))
+        self.assertIn("1 with a problem", page.inner_text("#view"))
+        page.click('[data-plugin-restart="broken"]')
+        page.wait_for_selector('.plugin-row[data-plugin="broken"]:not(.has-error)')
+        # The plugin list can travel with the brain: a note naming where each plugin comes from.
+        page.click("[data-plugins-save-list]")
+        page.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'cairn/plugins.md')")
+        listed = page.evaluate("() => window.cairn.state.notes.find((n) => n.path === 'cairn/plugins.md').meta.plugins")
+        self.assertEqual(sorted(listed), ["https://example.com/broken.js", "plugins/writing-stats.js"])
+        text = page.evaluate("() => window.cairn.state.files.find((f) => f.path === 'cairn/plugins.md').text")
+        self.assertNotIn("export default", text, "only sources travel, never code")
+        # Another device added the calendar to the list: this one offers to install it.
+        page.evaluate("""async () => {
+            const { saveNote } = await import('./state.js');
+            await saveNote('cairn/plugins.md', { properties: { plugins: ['plugins/writing-stats.js', 'https://example.com/broken.js', 'plugins/calendar.js'] } });
+        }""")
+        page.click('#nav [data-go="home"]')
+        page.click('#nav [data-go="plugins"]')
+        page.wait_for_selector(".plugin-brain-missing")
+        self.assertIn("plugins/calendar.js", page.inner_text(".plugin-brain-missing"))
+        page.click("[data-plugins-install-list]")
+        page.click(".modal button[type=submit]")
+        page.wait_for_selector('.plugin-row[data-plugin="calendar"]')
+        page.wait_for_selector(".plugin-brain-missing", state="detached")
+        self.assertTrue(page.locator("[data-plugins-save-list]").is_disabled(), "list and device agree")
+        # Removing a plugin keeps the brain's list in step.
+        page.click('[data-plugin-remove="broken"]')
+        page.click(".modal button[type=submit]")
+        page.wait_for_function("""() => {
+            const note = window.cairn.state.notes.find((n) => n.path === 'cairn/plugins.md');
+            return note && !note.meta.plugins.includes('https://example.com/broken.js');
+        }""")
+        self.assertEqual([e for e in self.errors if "kaboom" not in e], [])
 
     def test_disable_remove_and_install_from_a_link(self):
         page = self.open()

@@ -1150,3 +1150,50 @@ pre.math { white-space: pre-wrap; }
 .map-canvas rect { fill: color-mix(in srgb, var(--accent) 22%, var(--surface)); stroke: var(--accent); }
 .map-canvas text { fill: var(--ink-2); }
 .map-edge-canvas { stroke-dasharray: 4 3; }
+/* ---------- split view: a second note beside the open one */
+.drawer-panes { flex: 1; min-height: 0; display: flex; position: relative; }
+.drawer-panes > .drawer-body { min-width: 0; }
+.drawer.has-split { width: min(1320px, 100vw); }
+.split-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); }
+.split-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line); }
+.split-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 0; background: none; padding: 0; color: var(--ink); font-family: var(--display); font-size: 20px; cursor: pointer; }
+.split-title:hover { color: var(--accent); }
+.split-head .segmented button { height: 28px; padding: 0 8px; font-size: 12.5px; }
+.split-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 40px; }
+.split-scroll .body-input { min-height: 100%; height: calc(100% - 4px); }
+.has-split .split-editor { grid-template-columns: 1fr; }
+.has-split .split-editor .body-input { position: static; min-height: 300px; }
+.has-split .split-editor .prose { max-height: none; }
+.drawer-head [data-split-toggle].on { color: var(--accent); background: var(--accent-soft, transparent); }
+.note-tab.beside { box-shadow: inset 0 -2px 0 var(--accent); }
+.drawer-panes.drop-split::after { content: "Open beside"; position: absolute; top: 12px; right: 12px; bottom: 12px; width: calc(50% - 18px); display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-weight: 600; pointer-events: none; }
+@media (max-width: 900px) {
+  .drawer-panes { flex-direction: column; overflow-y: auto; }
+  .has-split .drawer-panes > .drawer-body { flex: none; overflow: visible; }
+  .split-pane { flex: none; border-left: 0; border-top: 1px solid var(--line); }
+  .split-scroll { overflow: visible; padding: 18px; }
+  .split-scroll .body-input { min-height: 260px; height: auto; }
+  .split-head { flex-wrap: wrap; padding: 10px 14px; }
+  .split-head .save-state { display: none; }
+  .split-title { flex-basis: calc(100% - 120px); font-size: 18px; }
+}
+/* ---------- plugin settings, problems and the brain's plugin list */
+.plugin-row [data-plugin-settings].on { color: var(--accent); }
+.plugin-row.has-error { box-shadow: inset 3px 0 0 var(--danger); padding-left: 12px; }
+.plugin-error .btn { margin-left: 8px; vertical-align: middle; }
+.plugin-problems { margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--danger-soft); color: var(--danger); font-weight: 600; font-size: 11.5px; }
+.plugin-settings { margin: 0 0 6px; padding: 14px 18px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; background: var(--surface); display: grid; gap: 14px; }
+.plugin-setting { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 260px); align-items: center; gap: 6px 18px; }
+.plugin-setting > label { display: flex; flex-direction: column; gap: 2px; font-weight: 500; font-size: 13.5px; }
+.plugin-setting > label .muted { font-weight: 400; font-size: 12.5px; }
+.plugin-setting.inline > .switch { justify-self: end; }
+.plugin-setting textarea { resize: vertical; }
+.plugin-settings-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.plugin-brain p { font-size: 13.5px; max-width: 680px; }
+.plugin-brain-missing { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 10px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.plugin-brain-missing p { margin: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plugin-brain-hint { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; font-size: 13.5px; color: var(--ink-2); }
+@media (max-width: 700px) {
+  .plugin-setting { grid-template-columns: 1fr; }
+  .plugin-setting.inline { grid-template-columns: 1fr auto; }
+}
