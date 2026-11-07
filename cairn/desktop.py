@@ -9,7 +9,10 @@ Everything a person needs is inside the app, no terminal and no git commands:
     "Switch brain" opens any folder, clones a GitHub repo or starts a new brain.
   * Sync: one button commits your edits, pulls everyone else's and pushes (and it happens on
     its own every few minutes). GitHub sign-in is handled by Git Credential Manager's window.
-  * Settings: start with Windows, sync automatically, check for updates.
+  * Settings: start with Windows, sync automatically, update automatically.
+  * Updates arrive on their own: a new web app is swapped in with a page reload the moment you
+    stop typing; a new Python part restarts Cairn quietly (in the tray, or when you're idle) and
+    reopens it where you were. Nobody has to restart anything by hand.
 
 The window is pywebview (Edge WebView2 on Windows) and the tray icon is pystray; both are
 imported only when the app actually starts, so this module stays importable (and testable)
@@ -38,8 +41,8 @@ APP_ROOT = Path(__file__).resolve().parent.parent  # the git checkout the instal
 PORT = 47777  # own fixed port: saved settings survive restarts; never clashes with `cairn serve` (4777)
 SYNC_FIRST_SECONDS = 60
 SYNC_EVERY_SECONDS = 10 * 60
-UPDATE_FIRST_SECONDS = 120
-UPDATE_EVERY_SECONDS = 3 * 60 * 60
+UPDATE_FIRST_SECONDS = 60
+UPDATE_EVERY_SECONDS = 20 * 60
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE = "Cairn"
 MAX_RECENT = 8
@@ -229,6 +232,26 @@ def app_head() -> str:
     return result.stdout.strip() if result and result.returncode == 0 else ""
 
 
+def changed_files(old: str, new: str) -> list[str] | None:
+    """Paths that differ between two builds of the app, or None when git can't tell."""
+    result = app_git("diff", "--name-only", f"{old}..{new}")
+    if result is None or result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def needs_restart(paths: list[str]) -> bool:
+    """True when an update touches code the running process has loaded.
+
+    The web app (docs/) is read from disk on every request, so changes there only need the
+    page to reload. Python code, the launcher and the package metadata need a fresh process.
+    """
+    for path in paths:
+        if path in ("Cairn.pyw", "pyproject.toml") or (path.startswith("cairn/") and path.endswith(".py")):
+            return True
+    return False
+
+
 # ============================================================ what the web app can ask for
 
 class DesktopHooks:
@@ -239,7 +262,8 @@ class DesktopHooks:
         self.server = server
         self.pick_folder = None  # set by the app: () -> str | None (native folder dialog)
         self.request_restart = None  # set by the app: () -> None
-        self.loaded_head = app_head()
+        self.loaded_head = app_head()  # the build whose Python code is running
+        self.page_head = self.loaded_head  # the build whose web app the window has loaded
 
     # -------------------------------------------------- state
     def state(self) -> dict:
@@ -257,6 +281,7 @@ class DesktopHooks:
             "version": __version__,
             "build": self.loaded_head,
             "updates": (APP_ROOT / ".git").exists(),
+            "autoUpdate": self.config.get("autoUpdate", True),
             "autostart": autostart_enabled(),
             "autostartSupported": sys.platform == "win32",
             "autoSync": self.config.get("autoSync", True),
@@ -273,8 +298,10 @@ class DesktopHooks:
             "new": lambda: self.new_brain(str(payload.get("name", "")) or "My brain"),
             "autostart": lambda: self.toggle_autostart(bool(payload.get("on"))),
             "auto-sync": lambda: self.toggle_auto_sync(bool(payload.get("on"))),
+            "auto-update": lambda: self.toggle_auto_update(bool(payload.get("on"))),
             "check-update": self.check_update,
             "update": self.update,
+            "restart": self.restart_now,
         }
         if action not in handlers:
             raise ValueError(f"unknown desktop action: {action}")
@@ -321,6 +348,10 @@ class DesktopHooks:
         self.config.set("autoSync", on)
         return {"autoSync": on}
 
+    def toggle_auto_update(self, on: bool) -> dict:
+        self.config.set("autoUpdate", on)
+        return {"autoUpdate": on}
+
     def check_update(self) -> dict:
         if app_git("fetch", "--quiet") is None:
             return {"available": False, "reason": "This copy of Cairn wasn't installed with the installer."}
@@ -332,14 +363,34 @@ class DesktopHooks:
         pulled = app_git("pull", "--ff-only", "--quiet")
         if pulled is None or pulled.returncode != 0:
             raise SyncError("Couldn't download the update (offline?). Try again later.")
-        if app_head() != self.loaded_head and self.request_restart:
+        kind = self.pending_update()
+        if kind == "restart" and self.request_restart:
             threading.Timer(0.5, self.request_restart).start()
             return {"updated": True, "restarting": True}
+        if kind == "reload":
+            self.page_head = app_head()
+            return {"updated": True, "reload": True}
         return {"updated": False}
 
-    def update_waiting(self) -> bool:
+    def restart_now(self) -> dict:
+        """The page asks for this once it's idle and has saved everything."""
+        if self.pending_update() != "restart" or not self.request_restart:
+            return {"restarting": False}
+        threading.Timer(0.3, self.request_restart).start()
+        return {"restarting": True}
+
+    def pending_update(self) -> str:
+        """What it takes to run the build on disk: "" (nothing), "reload" (page only) or "restart"."""
         head = app_head()
-        return bool(head and self.loaded_head and head != self.loaded_head)
+        if not head or not self.loaded_head or head == self.loaded_head == self.page_head:
+            return ""
+        files = changed_files(self.loaded_head, head)
+        if files is None or needs_restart(files):
+            return "restart"  # when in doubt, a restart is always correct
+        return "reload" if head != self.page_head else ""
+
+    def update_waiting(self) -> bool:
+        return self.pending_update() == "restart"
 
 
 # ============================================================ the native app (Windows-first)
@@ -453,6 +504,7 @@ class DesktopApp:
         self.visible = not start_hidden
         self.quitting = False
         self.restart_requested = False
+        self.restart_visible = False
         self.stopping = threading.Event()
         self.config = Config()
         self.hooks = DesktopHooks(self.config)
@@ -566,9 +618,11 @@ class DesktopApp:
             pass
         self.window.destroy()
 
-    def restart(self):
+    def restart(self, show: bool | None = None):
+        """Quit and start again on the new build; the window comes back if it was open."""
         log("restarting to apply an update")
         self.restart_requested = True
+        self.restart_visible = self.visible if show is None else show
         self.quit()
 
     # -------------------------------------------------- background work
@@ -611,14 +665,45 @@ class DesktopApp:
         wait = UPDATE_FIRST_SECONDS
         while not self.stopping.wait(wait):
             wait = UPDATE_EVERY_SECONDS
-            before = app_head()
-            app_git("pull", "--ff-only", "--quiet")
-            after = app_head()
-            if before and after and before != after:
-                log(f"downloaded update {before} -> {after}")
-            if self.hooks.update_waiting() and not self.visible:
-                self.restart()
+            if not self.config.get("autoUpdate", True):
+                continue
+            if self.apply_update():
                 return
+
+    def apply_update(self) -> bool:
+        """Download the latest build and put it to use without bothering anyone.
+
+        Web-only changes: the page reloads itself as soon as you pause (your note stays open).
+        Python changes: restart right away when Cairn is in the tray, otherwise the page asks
+        for the restart once you've been idle for a while. Returns True when restarting now.
+        """
+        before = app_head()
+        app_git("pull", "--ff-only", "--quiet")
+        after = app_head()
+        if before and after and before != after:
+            log(f"downloaded update {before} -> {after}")
+        kind = self.hooks.pending_update()
+        if kind == "restart":
+            if not self.visible:
+                self.restart()
+                return True
+            self.ask_page_to_update(restart=True)
+        elif kind == "reload":
+            self.hooks.page_head = after
+            log(f"reloading the page for update {after}")
+            self.ask_page_to_update(restart=False)
+        return False
+
+    def ask_page_to_update(self, restart: bool) -> None:
+        flag = "true" if restart else "false"
+        # A page from before auto-update existed has no applyUpdate(): a plain reload brings in the
+        # new web app, which handles every later update itself.
+        fallback = "" if restart else " else location.reload();"
+        script = f"if (window.cairn && window.cairn.applyUpdate) window.cairn.applyUpdate({{restart: {flag}}});{fallback}"
+        try:
+            self.window.evaluate_js(script)
+        except Exception as error:
+            log(f"could not ask the page to update: {error}")
 
     # -------------------------------------------------- run
     def run(self) -> None:
@@ -631,8 +716,11 @@ class DesktopApp:
         finally:
             self.instance.release()
         if self.restart_requested:
+            args = [pythonw_executable(), str(APP_ROOT / "Cairn.pyw")]
+            if not self.restart_visible:
+                args.append("--hidden")
             subprocess.Popen(
-                [pythonw_executable(), str(APP_ROOT / "Cairn.pyw"), "--hidden"],
+                args,
                 cwd=str(APP_ROOT),
                 creationflags=NO_WINDOW,
             )
