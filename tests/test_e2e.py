@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
         raise
     sync_playwright = None
 
-VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "code", "context", "people"]
+VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "code", "context", "people", "proof"]
 
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
@@ -32,9 +32,11 @@ class EndToEndTests(unittest.TestCase):
         cls.pw.stop()
         cls.server.shutdown()
 
-    def open(self, query="?demo=1", viewport=(1440, 900), theme="light", wait="#nav button"):
+    def open(self, query="?demo=1", viewport=(1440, 900), theme="light", wait="#nav button", setup=None):
         context = self.browser.new_context(viewport={"width": viewport[0], "height": viewport[1]})
         self.github_log = install_github_mock(context)
+        if setup:
+            setup(self.github_log)
         page = context.new_page()
         self.errors = []
         page.on("console", lambda m: self.errors.append(m.text) if m.type == "error" else None)
@@ -576,6 +578,136 @@ class EndToEndTests(unittest.TestCase):
         self.assertGreaterEqual(page.locator(".repo-row").count(), 1)
         self.assertEqual(self.errors, [])
 
+    # ------------------------------------------------------------ proof of work: claims, levels, vouches
+
+    def test_proof_rules(self):
+        page = self.open()
+        result = page.evaluate("""async () => {
+            const P = await import('./proof.js');
+            const core = window.cairn.core;
+            const ev = (u) => P.parseEvidence(u);
+            const claim = { slug: 'built-x', title: 'Built X' };
+            const vouch = (meta) => '---\\n' + Object.entries(meta).map(([k, v]) => k + ': ' + v).join('\\n') + '\\n---\\nSaw it ship.\\n';
+            const fileLink = ev('https://github.com/alice/brain/blob/main/vouches/bob/built-x.md');
+            return {
+                kinds: ['https://github.com/a/b', 'https://github.com/a/b/pull/3', 'https://github.com/a/b/commit/abc1234',
+                        'https://github.com/a/b/releases/tag/v1.0', 'https://github.com/a/b/tree/main/src', 'https://example.com/x',
+                        'https://github.com/a/b/issues/2'].map((u) => ev(u).kind),
+                ownRepo: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { owner: 'bob', stars: 0, forks: 0 }).level,
+                starred: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { owner: 'Bob', stars: 3, forks: 0 }).level,
+                forked: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { owner: 'bob', stars: 0, forks: 1 }).level,
+                notMine: P.judgeEvidence('bob', ev('https://github.com/eve/x'), { owner: 'eve', stars: 99, forks: 9 }).ok,
+                fork: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { owner: 'bob', fork: true }).ok,
+                prOther: P.judgeEvidence('bob', ev('https://github.com/eve/x/pull/1'), { owner: 'eve', author: 'bob', merged: true }).level,
+                prOwn: P.judgeEvidence('bob', ev('https://github.com/bob/x/pull/1'), { owner: 'bob', author: 'bob', merged: true }).level,
+                prOpen: P.judgeEvidence('bob', ev('https://github.com/eve/x/pull/1'), { owner: 'eve', author: 'bob', merged: false }).ok,
+                prStolen: P.judgeEvidence('bob', ev('https://github.com/eve/x/pull/1'), { owner: 'eve', author: 'eve', merged: true }).ok,
+                commit: P.judgeEvidence('bob', ev('https://github.com/eve/x/commit/abcdef1'), { owner: 'eve', author: 'bob' }).level,
+                missing: P.judgeEvidence('bob', ev('https://github.com/bob/x'), { error: 'Not found on GitHub.' }).note,
+                vouchOk: P.judgeVouch('bob', claim, fileLink, vouch({ vouch_for: 'bob', claim: 'built-x', relation: 'client' })).level,
+                vouchSelf: P.judgeVouch('alice', claim, fileLink, vouch({ vouch_for: 'alice', claim: 'built-x' })).ok,
+                vouchWrongClaim: P.judgeVouch('bob', claim, fileLink, vouch({ vouch_for: 'bob', claim: 'other' })).ok,
+                vouchWrongPerson: P.judgeVouch('bob', claim, fileLink, vouch({ vouch_for: 'carol', claim: 'built-x' })).ok,
+                vouchMissing: P.judgeVouch('bob', claim, fileLink, null).ok,
+                levelNone: P.claimLevel([]),
+                levelBest: P.claimLevel([{ ok: true, level: 2 }, { ok: false, level: 4 }, { ok: true, level: 3 }]),
+                isPublic: [{ publish: 'true' }, { publish: true }, { publish: 'yes' }, { publish: 'true', private: 'true' }, {}].map(P.isPublic),
+                claims: P.claimsFromNotes([
+                    core.noteFromFile('n/a.md', '---\\nclaim: Did A\\nevidence: [https://github.com/a/b]\\ncreated: 2026-01-01\\n---\\n'),
+                    core.noteFromFile('n/b.md', '---\\ntitle: no claim\\n---\\n'),
+                    core.noteFromFile('n/c.md', '---\\nclaim: Did C\\nevidence:\\n  - https://github.com/a/c/pull/1\\npublish: true\\ncreated: 2026-02-01\\n---\\n'),
+                ]).map((c) => [c.slug, c.evidence.map((e) => e.kind).join(','), c.isPublic]),
+                url: P.vouchUrl({ subject: 'Bob', claim, voucher: 'alice', repo: 'brain', today: '2026-11-07' }),
+                link: P.vouchLink({ subject: 'Bob', claim, voucher: 'alice', repo: 'brain' }),
+            };
+        }""")
+        self.assertEqual(result["kinds"], ["repo", "pr", "commit", "release", "repo", "link", "link"])
+        self.assertEqual((result["ownRepo"], result["starred"], result["forked"]), (2, 3, 3))
+        self.assertFalse(result["notMine"])
+        self.assertFalse(result["fork"])
+        self.assertEqual((result["prOther"], result["prOwn"]), (3, 2))
+        self.assertFalse(result["prOpen"])
+        self.assertFalse(result["prStolen"])
+        self.assertEqual(result["commit"], 2)
+        self.assertEqual(result["missing"], "Not found on GitHub.")
+        self.assertEqual(result["vouchOk"], 4)
+        self.assertFalse(result["vouchSelf"])
+        self.assertFalse(result["vouchWrongClaim"])
+        self.assertFalse(result["vouchWrongPerson"])
+        self.assertFalse(result["vouchMissing"])
+        self.assertEqual((result["levelNone"], result["levelBest"]), (1, 3))
+        self.assertEqual(result["isPublic"], [True, True, False, False, False])
+        self.assertEqual(result["claims"], [["c", "pr", True], ["a", "repo", False]])
+        self.assertTrue(result["url"].startswith("https://github.com/alice/brain/new/main?filename=vouches%2Fbob%2Fbuilt-x.md&value="))
+        self.assertIn("vouch_for%3A%20Bob", result["url"])
+        self.assertEqual(result["link"], "https://github.com/alice/brain/blob/main/vouches/bob/built-x.md")
+        # The publish rule is the same in Python (cairn publish) and JS (the app's Public/Private pill).
+        from cairn.publish import is_public
+        cases = [{"publish": "true"}, {"publish": True}, {"publish": "yes"}, {"publish": "true", "private": "true"}, {}]
+        self.assertEqual([is_public(c) for c in cases], result["isPublic"])
+
+    def test_profile_claims_are_checked_on_github(self):
+        def setup(mock):
+            claims = {
+                "brain/notes/claim-pr.md": "---\nclaim: Fixed offline sync in someone/tool\nevidence: [https://github.com/someone/tool/pull/7]\ncreated: 2026-11-03\n---\n",
+                "brain/notes/claim-vouched.md": "---\nclaim: Ran the Trailmix beta\nevidence: [https://github.com/juw12/cairn/commit/abcdef1]\nattested_by: [https://github.com/alice/brain/blob/main/vouches/juw12/claim-vouched.md]\ncreated: 2026-11-02\n---\n",
+                "brain/notes/claim-stolen.md": "---\nclaim: Wrote the parser\nevidence: [https://github.com/someone/tool/pull/8]\ncreated: 2026-11-01\n---\n",
+                "brain/notes/claim-bare.md": "---\nclaim: Mentored three interns\ncreated: 2026-10-01\n---\n",
+            }
+            for path, text in claims.items():
+                mock.set_text("juw12/cairn", path, text)
+            mock.extra["/repos/someone/tool/pulls/7"] = {"user": {"login": "juw12"}, "merged_at": "2026-11-03T10:00:00Z"}
+            mock.extra["/repos/someone/tool/pulls/8"] = {"user": {"login": "someone"}, "merged_at": "2026-11-01T10:00:00Z"}
+            mock.extra["/repos/juw12/cairn/commits/abcdef1"] = {"author": {"login": "juw12"}, "commit": {"author": {"date": "2026-11-02T09:00:00Z"}}}
+            mock.repos["alice/brain"] = {
+                "meta": dict(mock.repos["juw12/cairn"]["meta"], name="brain", full_name="alice/brain", owner={"login": "alice"}),
+                "files": {"vouches/juw12/claim-vouched.md": "---\nvouch_for: juw12\nclaim: claim-vouched\nrelation: client\n---\nI ran the beta with Juwen.\n"},
+            }
+
+        page = self.open("?u=juw12", setup=setup)
+        page.wait_for_selector(".claims .lvl-summary", timeout=15000)
+        level = lambda slug: page.inner_text(f'.claim[data-claim="{slug}"] .lvl-badge')  # noqa: E731
+        self.assertIn("L3", level("claim-built-cairn"))  # own repo, 3 stars
+        self.assertIn("L3", level("claim-pr"))  # merged into someone else's repo
+        self.assertIn("L4", level("claim-vouched"))  # alice vouched in her own repo
+        self.assertIn("L1", level("claim-stolen"))  # PR opened by someone else
+        self.assertIn("L1", level("claim-bare"))  # no evidence at all
+        stolen = page.inner_text('.claim[data-claim="claim-stolen"]')
+        self.assertIn("Opened by @someone, not @juw12", stolen)
+        # Per level: L1 stolen + bare, L2 none, L3 repo + merged PR, L4 the vouched one.
+        self.assertEqual(page.locator(".claims .lvl-num").all_inner_texts(), ["2", "0", "2", "1"])
+        # Signed out, so anyone may vouch: the button opens GitHub's new-file page in the voucher's repo.
+        self.assertGreaterEqual(page.locator('.claim [data-action="vouch"]').count(), 5)
+        self.assertEqual(self.errors, [])
+
+    def test_proof_view_lists_claims_and_creates_one(self):
+        page = self.open()
+        self.go(page, "proof")
+        self.assertIn("No claims yet", page.inner_text("#view"))
+        page.click('[data-action="new-claim"]')
+        page.fill(".modal input", "Shipped offline maps")
+        page.click(".modal button[type=submit]")
+        page.wait_for_selector(".drawer")
+        text = page.evaluate("window.cairn.state.files.find((f) => f.text.includes('claim: Shipped offline maps'))?.text")
+        self.assertIsNotNone(text)
+        self.assertIn("evidence: []", text)
+        self.assertIn("publish: false", text)
+        page.keyboard.press("Escape")
+        self.go(page, "proof")
+        card = page.inner_text(".claim")
+        self.assertIn("Shipped offline maps", card)
+        self.assertIn("Private", card)
+        self.assertIn("Not checked", card)
+        self.assertEqual(self.errors, [])
+
+    def test_proof_view_of_someone_elses_brain_checks_itself(self):
+        page = self.open("?brain=juw12/cairn#/proof", wait=".claim")
+        page.wait_for_selector(".lvl-summary", timeout=15000)
+        self.assertIn("L3", page.inner_text('.claim[data-claim="claim-built-cairn"] .lvl-badge'))
+        self.assertEqual(page.inner_text('#nav [data-go="proof"] .count'), "1")
+        self.assertEqual(page.locator('[data-action="new-claim"]').count(), 0)  # read-only: no create button
+        self.assertEqual(self.errors, [])
+
     def test_unknown_user_and_bad_input(self):
         page = self.open()
         page.click('#nav [data-go="people"]')
@@ -599,7 +731,7 @@ class EndToEndTests(unittest.TestCase):
         page = self.open("?brain=juw12/cairn")
         page.wait_for_selector(".ro-banner")
         self.assertTrue(page.locator("#capture-form").is_hidden())
-        self.assertEqual(page.evaluate("window.cairn.state.notes.length"), 18)
+        self.assertEqual(page.evaluate("window.cairn.state.notes.length"), 19)
         join = page.get_attribute(".ro-banner a.btn.primary", "href")
         self.assertTrue(join.startswith("https://github.com/juw12/cairn/issues/new?title="), join)
         self.assertIn("Request%20to%20join", join)

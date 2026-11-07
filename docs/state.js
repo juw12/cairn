@@ -18,6 +18,7 @@ export const VIEWS = [
   { id: "context", label: "Context pack", icon: "sparkle", group: "Project" },
   { id: "obsidian", label: "Obsidian sync", icon: "vault", group: "Project" },
   { id: "people", label: "People", icon: "users", group: "Network" },
+  { id: "proof", label: "Proof", icon: "check", group: "Network" },
 ];
 
 export const REPO_URL = "https://github.com/juw12/cairn";
@@ -45,6 +46,7 @@ export const state = {
   profile: null,
   discover: null,
   obsidian: null,
+  proofCheck: null,
 };
 
 export const readOnly = () => Boolean(state.info?.readOnly);

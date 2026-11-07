@@ -9,6 +9,8 @@ import { openSignIn as showSignInDialog } from "./signin.js";
 import { $, icon, pageHead, relativeTime, toast, today } from "./ui.js";
 import { LAST_BRAIN_KEY, readOnly, state } from "./state.js";
 import { flushPending, renderDrawer } from "./drawer.js";
+import { claimsFromNotes } from "./proof.js";
+import { profileClaims, runCheck } from "./proofview.js";
 import { applyInfo, render, renderSidebarFoot, renderView, setView } from "./app.js";
 
 // ============================================================ network: profiles, discover, read-only brains
@@ -60,8 +62,15 @@ export async function lookupProfile(raw) {
     renderView();
     if (brains.length) {
       const loaded = await gh.loadBrainFiles(brains[0].owner, brains[0].name, brains[0].branch);
-      state.profile.proof = proofOfWork(brainNotes(loaded.files));
-      state.profile.proofRepo = brains[0];
+      const notes = brainNotes(loaded.files);
+      const profile = state.profile;
+      profile.proof = proofOfWork(notes);
+      profile.proofRepo = brains[0];
+      profile.claims = { items: claimsFromNotes(notes), checked: null, running: false };
+      if (state.view === "people") renderView();
+      if (profile.claims.items.length) {
+        await runCheck(profile.claims, user.login, profile.claims.items, () => state.profile === profile);
+      }
     }
   } catch (error) {
     state.profile = { ...(state.profile || {}), loading: false, error: error.message };
@@ -130,6 +139,7 @@ function profileBlock() {
           ? `<p class="muted">Reading their brain…</p>`
           : `<div class="notice">${icon("lock")}<div><strong>@${esc(user.login)} hasn't published a brain yet.</strong><br>A brain becomes visible here when its repo has the <code>${gh.BRAIN_TOPIC}</code> topic. Nothing private is ever shown.</div></div>`
     }
+    ${profileClaims(p)}
     ${
       brains.length
         ? `<h3 class="section-title">Published brains</h3><div class="repo-list">${brains.map(repoRow).join("")}</div>`

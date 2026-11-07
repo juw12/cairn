@@ -127,6 +127,21 @@ This repo dogfoods it: see [@juw12's profile](https://juw12.github.io/cairn/?u=j
 other people's brains are always read-only. Unsigned GitHub API calls are limited to 60 per hour per IP, so
 results are cached for 10 minutes.
 
+### Show proof of work
+
+Write a claim as a note with a `claim:` line and links to the work under `evidence:` (repos, merged
+pull requests, commits, releases). The **Proof** view and everyone's profile check each link on
+GitHub and show a level nobody can type in: L1 claimed, L2 backed by work you own, L3 used by others
+(merged into someone else's repo, forked or starred), L4 vouched (another person committed a vouch
+file in their own repo; the **Vouch** button prefills it). Keep your brain private and publish only
+the notes marked `publish: true`:
+
+```sh
+python -m cairn publish --to YOUR-NAME/brain --source "path/to/your/vault"
+```
+
+The full format is in [PROOF.md](PROOF.md).
+
 ### Edit your brain from any device
 
 Sign in with GitHub on the web app and your brain repo becomes editable from your phone, a borrowed laptop or

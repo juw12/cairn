@@ -126,6 +126,41 @@ def cmd_obsidian(brain: Brain, args) -> int:
         return 0
 
 
+def cmd_publish(brain: Brain, args) -> int:
+    from pathlib import Path
+
+    from . import publish
+
+    source = Path(args.source).expanduser() if args.source else brain.dir
+    if not source.is_dir():
+        print(f"No folder at {source}", file=sys.stderr)
+        return 2
+    try:
+        if args.folder:
+            report = publish.publish_to_folder(source, Path(args.folder).expanduser())
+        else:
+            if not args.to:
+                print("Where to? Example: cairn publish --to YOUR-NAME/brain", file=sys.stderr)
+                return 2
+            http = publish.make_http(publish.find_token())
+            report = publish.publish_to_github(source, args.to, http, _today(), dry_run=args.dry_run)
+    except publish.PublishError as error:
+        print(f"Publish stopped: {error}", file=sys.stderr)
+        return 1
+    verb = "would" if args.dry_run else "did"
+    for path in report["write"]:
+        print(f"  {verb} write: {path}")
+    for path in report["delete"]:
+        print(f"  {verb} remove: {path}")
+    if report.get("created"):
+        print(f"  {verb} create the public repo {report['repo']}")
+    if not report["write"] and not report["delete"]:
+        print("Nothing to publish: the public brain is up to date.")
+    elif report.get("commit"):
+        print(f"Published to https://github.com/{report['repo']} ({report['commit'][:7]})")
+    return 0
+
+
 def cmd_serve(brain: Brain, args) -> int:
     from .server import serve
 
@@ -176,6 +211,16 @@ def build_parser() -> argparse.ArgumentParser:
     obsidian_parser.add_argument("--watch", type=float, default=0, metavar="SECONDS", help="keep syncing every N seconds")
     obsidian_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     obsidian_parser.add_argument("--unlink", action="store_true", help="stop syncing (keeps the notes)")
+    publish_parser = sub.add_parser(
+        "publish",
+        help="copy notes marked publish: true to your public brain repo",
+        description="Copy every note whose frontmatter says publish: true to brain/ in a public GitHub repo, in one "
+        "commit, and tag it cairn-brain. Nothing else leaves your brain. Links to private notes become plain text.",
+    )
+    publish_parser.add_argument("--to", metavar="OWNER/REPO", help="public repo (created if missing), e.g. you/brain")
+    publish_parser.add_argument("--source", help="folder to publish from (default: the brain; can be an Obsidian vault)")
+    publish_parser.add_argument("--folder", help="write into this local clone instead of using the GitHub API")
+    publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     return parser
 
 
@@ -192,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         "todos": cmd_todos,
         "context": cmd_context,
         "obsidian": cmd_obsidian,
+        "publish": cmd_publish,
         "serve": cmd_serve,
         "desktop": cmd_desktop,
         None: cmd_serve,
