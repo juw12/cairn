@@ -6,3 +6,6 @@ dist/
 .venv/
 .shots/
 *.cairn-tmp
+
+# wrangler local cache
+.wrangler/
