@@ -20,8 +20,8 @@
       "id": "writing-stats",
       "name": "Writing stats",
       "author": "Cairn",
-      "version": "1.0.0",
-      "description": "Words written, notes per type, your longest notes and a 30-day activity chart. Adds a word-count command for the open note.",
+      "version": "1.1.0",
+      "description": "Words written, notes per type, your longest notes and an activity chart, with settings for reading speed and chart length. Adds a word-count command for the open note.",
       "main": "plugins/writing-stats.js"
     },
     {

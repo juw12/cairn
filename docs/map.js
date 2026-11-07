@@ -20,6 +20,7 @@ const DEFAULTS = {
   orphans: true,
   unresolved: false,
   attachments: false,
+  canvases: true,
   arrows: false,
   colour: "auto",
   depth: 1,
@@ -80,6 +81,13 @@ function colourMode(graph) {
   return typed >= graph.nodes.length * 0.3 || !graph.nodes.some((n) => n.folder) ? "type" : "folder";
 }
 
+async function openCanvasNode(id) {
+  const node = model?.byId.get(id);
+  if (node?.kind !== "canvas") return;
+  const { openCanvas } = await import("./canvas.js");
+  openCanvas(node.path);
+}
+
 function buildModel() {
   const graph = core.buildGraph(state.notes);
   const adj = G.adjacency(graph);
@@ -110,6 +118,17 @@ function buildModel() {
   }
   if (settings.attachments) {
     for (const a of graph.attachments) if (shown.has(a.from)) extra("@", "file", a.target.split("/").pop(), a.from);
+  }
+  if (settings.canvases) {
+    // A canvas is a hub: one square per board, joined to every shown note it holds or links.
+    for (const { canvas, note } of core.canvasLinks(state.files, state.notes)) {
+      if (!shown.has(note)) continue;
+      const id = `canvas:${canvas}`;
+      if (!nodes.some((n) => n.id === id)) {
+        nodes.push({ id, path: canvas, title: canvas.split("/").pop().replace(/\.canvas$/i, ""), kind: "canvas", type: "note", folder: "", tags: [], r: 6 });
+      }
+      edges.push({ source: id, target: note, both: false, kind: "canvas" });
+    }
   }
   const mentions = G.unlinkedMentions(state.notes, graph);
   return { graph, adj, degree, clusters, nodes, edges, mentions, mode: colourMode(graph), byId: new Map(nodes.map((n) => [n.id, n])) };
@@ -211,9 +230,9 @@ export function mapView() {
   const nodeSvg = is3d ? "" : m.nodes
     .map((n) => {
       const links = m.degree(n.id);
-      const label = n.kind === "note" ? `${n.title}, ${plural(links, "link")}` : n.kind === "ghost" ? `${n.title}, missing note` : `${n.title}, attachment`;
-      const shape = n.kind === "file"
-        ? `<rect x="${-n.r}" y="${-n.r}" width="${n.r * 2}" height="${n.r * 2}" rx="1.5"/>`
+      const label = n.kind === "note" ? `${n.title}, ${plural(links, "link")}` : n.kind === "ghost" ? `${n.title}, missing note` : n.kind === "canvas" ? `${n.title}, canvas` : `${n.title}, attachment`;
+      const shape = n.kind === "file" || n.kind === "canvas"
+        ? `<rect x="${-n.r}" y="${-n.r}" width="${n.r * 2}" height="${n.r * 2}" rx="${n.kind === "canvas" ? 2.5 : 1.5}"/>`
         : `<circle r="${n.r.toFixed(1)}"${n.kind === "note" ? ` style="fill:${colour.of(n)}"` : ""}/>`;
       return `<g class="map-dot ${n.kind === "note" ? "map-node" : `map-${n.kind}`}" data-node="${esc(n.id)}" tabindex="-1" role="button" aria-label="${esc(label)}"><rect class="hit"/>${shape}<text class="quiet"></text></g>`;
     })
@@ -279,7 +298,7 @@ function sidePanel(m) {
       <input id="map-filter" class="input" type="search" placeholder="Words, #tag, path:folder" value="${esc(settings.query)}" aria-label="Filter notes on the map">
       <div class="chips">${typeChips}</div>
       <select id="map-folder" class="input" aria-label="Folder">${folderOptions}</select>
-      <div class="checks">${check("orphans", "Orphans")}${check("unresolved", "Missing notes")}${check("attachments", "Attachments")}${check("arrows", "Arrows")}</div>
+      <div class="checks">${check("orphans", "Orphans")}${check("unresolved", "Missing notes")}${check("attachments", "Attachments")}${check("canvases", "Canvases")}${check("arrows", "Arrows")}</div>
       <label class="field-row">Colour by <select id="map-colour" class="input" aria-label="Colour by">${colourOptions}</select></label>
     </section>
     <section class="map-section">
@@ -616,7 +635,8 @@ function renderCard() {
   if (node.kind !== "note") {
     const fix = model.graph.unresolved.find((u) => node.kind === "ghost" && u.target.toLowerCase() === node.title.toLowerCase() && u.suggestion);
     card.innerHTML = `<div class="map-card-head"><strong>${esc(node.title)}</strong><button class="btn sm icon-only ghost" data-map="deselect" aria-label="Clear selection">${icon("x")}</button></div>
-      <p class="muted">${node.kind === "ghost" ? "Linked to, but this note doesn't exist yet." : "An attachment (image or file) embedded in a note."}</p>
+      <p class="muted">${node.kind === "ghost" ? "Linked to, but this note doesn't exist yet." : node.kind === "canvas" ? `A canvas that holds ${model.edges.filter((e) => e.source === node.id).length} of the notes shown here.` : "An attachment (image or file) embedded in a note."}</p>
+      ${node.kind === "canvas" ? `<div class="map-card-actions"><button class="btn primary sm" data-map="open-canvas">Open canvas</button></div>` : ""}
       ${fix ? `<p>Probably means <button class="row-link" data-map-select="${esc(fix.suggestion)}">${esc(noteByPath(fix.suggestion)?.title || fix.suggestion)}</button>.</p>` : ""}
       ${node.kind === "ghost" && !readOnly() ? `<div class="map-card-actions"><button class="btn primary sm" data-map="create">Create this note</button></div>` : ""}`;
     return;
@@ -893,6 +913,7 @@ const mapActions = {
     placeLabels();
   },
   deselect: () => select(null, { focus: false }),
+  "open-canvas": () => session.selected && openCanvasNode(session.selected),
   local: () => {
     session.local = session.local === session.selected ? null : session.selected;
     renderView();
@@ -1024,6 +1045,7 @@ function wire3d(wrap) {
     onSelect: (id) => select(id, { focus: false }),
     onOpen: (id) => {
       if (model.byId.get(id)?.kind === "note") openNote(id);
+      else if (model.byId.get(id)?.kind === "canvas") openCanvasNode(id);
     },
     onHover: (id) => {
       session.hover = id;
@@ -1210,6 +1232,8 @@ function wire2d(wrap) {
   svg.addEventListener("dblclick", (event) => {
     const el = event.target.closest(".map-node");
     if (el) openNote(el.dataset.node);
+    const board = event.target.closest(".map-canvas");
+    if (board) openCanvasNode(board.dataset.node);
     const ghost = event.target.closest(".map-ghost");
     if (ghost) createMissing(ghost.dataset.node);
   });
@@ -1237,6 +1261,9 @@ function wirePanel(wrap) {
       if (session.selected && model.byId.get(session.selected)?.kind === "note") {
         event.preventDefault();
         openNote(session.selected);
+      } else if (session.selected && model.byId.get(session.selected)?.kind === "canvas") {
+        event.preventDefault();
+        openCanvasNode(session.selected);
       }
     } else if (key === "Escape") {
       if (session.path) mapActions["clear-path"]();
@@ -1245,6 +1272,7 @@ function wirePanel(wrap) {
       else return;
       event.stopPropagation();
     } else if (key.toLowerCase() === "l" && session.selected) {
+      event.preventDefault();
       mapActions.local();
     } else if (key.toLowerCase() === "f") {
       mapActions.fit();
