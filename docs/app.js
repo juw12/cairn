@@ -15,6 +15,7 @@ import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vo
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
+import { showShortcuts } from "./shortcuts.js";
 import { showWelcome } from "./welcome.js";
 import { maybeStartTour, startTour } from "./tour.js";
 import { initHoverPreview } from "./hover.js";
@@ -458,6 +459,9 @@ function wireGlobal() {
     if (event.key === "/") {
       event.preventDefault();
       openPalette();
+    } else if (event.key === "?") {
+      event.preventDefault();
+      showShortcuts();
     } else if (event.key === "c") {
       event.preventDefault();
       captureInput.focus();

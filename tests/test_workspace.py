@@ -442,6 +442,49 @@ class WorkspaceTests(unittest.TestCase):
         self.assertGreaterEqual(side_box["y"], main_box["y"] + main_box["height"] - 2, "stacked on a phone")
         self.assertEqual(self.errors, [])
 
+    def test_question_mark_shows_every_shortcut(self):
+        page = self.open()
+        page.keyboard.press("Shift+Slash")
+        page.wait_for_selector(".modal.shortcuts")
+        sheet = page.text_content(".modal.shortcuts")
+        for heading in ("Everywhere", "Tabs", "Split view", "Writing", "Canvas"):
+            self.assertIn(heading, sheet)
+        self.assertIn("Duplicate the selection", sheet)
+        self.assertGreater(page.locator(".modal.shortcuts kbd").count(), 30)
+        # Escape closes only the sheet; the palette command opens it again.
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".modal-wrap", state="detached")
+        page.keyboard.press("Control+k")
+        page.fill(".palette input", "keyboard shortcuts")
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".modal.shortcuts")
+        page.click(".modal.shortcuts [data-close]")
+        page.wait_for_selector(".modal-wrap", state="detached")
+        # Typing a ? in a text field is just a question mark.
+        page.focus("#capture-input")
+        page.keyboard.type("why?")
+        self.assertEqual(page.locator(".modal.shortcuts").count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_canvas_opens_readable_on_a_phone(self):
+        page = self.open(viewport=(390, 844))
+        page.evaluate("() => document.querySelector('#nav [data-go=\"canvas\"]').click()")
+        page.click(f'.cv-card[data-cv-open="{CANVAS}"]')
+        page.wait_for_selector(".cv-node")
+        page.wait_for_function("() => /scale\\(/.test(document.querySelector('#cv-world').style.transform)")
+        page.wait_for_timeout(150)
+        zoom = page.evaluate("() => parseFloat(document.querySelector('#cv-world').style.transform.match(/scale\\(([\\d.]+)\\)/)[1])")
+        self.assertGreaterEqual(zoom, 0.5, "cards are readable on first open, not shrunk to fit")
+        # The first card sits in view near the top-left; Fit still shows the whole board.
+        wrap = page.locator("#cv-wrap").bounding_box()
+        boxes = page.eval_on_selector_all(".cv-node", "els => els.map((e) => e.getBoundingClientRect()).map((r) => [r.left, r.top])")
+        self.assertTrue(any(wrap["x"] <= x < wrap["x"] + wrap["width"] and wrap["y"] <= y < wrap["y"] + wrap["height"] for x, y in boxes))
+        page.click('[data-cv="fit"]')
+        page.wait_for_timeout(350)
+        fitted = page.evaluate("() => parseFloat(document.querySelector('#cv-world').style.transform.match(/scale\\(([\\d.]+)\\)/)[1])")
+        self.assertLess(fitted, zoom)
+        self.assertEqual(self.errors, [])
+
     def test_deleting_a_note_closes_its_tab(self):
         page = self.open()
         page.click('#nav [data-go="ideas"]')

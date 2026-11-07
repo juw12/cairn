@@ -79,8 +79,31 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | **Plugins** | Community plugins: install from the list, a GitHub repo or a link. Each plugin gets a **settings page** drawn from its own options, a plugin that breaks is flagged on its row with a **Restart** button, and the list of plugins you use can be **saved into the brain** so your other devices offer to install the same ones (sources only, never code). Write your own in one file ([PLUGINS.md](PLUGINS.md)). |
 | **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
 | **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
-| **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture. |
+| **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture, <kbd>?</kbd> shows [every shortcut](#keyboard-shortcuts). |
 | **People** | Look up anyone on GitHub and see their proof of work, read from their brain's files: working on, shipped, decisions, open to collaborate. Open their brain read-only and **Ask to join** (opens a prefilled GitHub issue). |
+
+<table>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/media/canvas.png" alt="A canvas of notes, cards and groups joined by arrows"><br><sub><b>Canvas.</b> Notes, cards, links and groups on an infinite board, saved as Obsidian <code>.canvas</code> files.</sub></td>
+    <td width="50%" valign="top"><img src="docs/media/split.png" alt="Two notes open side by side in split view"><br><sub><b>Tabs and split view.</b> Keep several notes open and edit two side by side.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/media/plugins.png" alt="The plugins page with a plugin's settings open"><br><sub><b>Plugins.</b> Install from the list, a repo or a link; each plugin gets its own settings page.</sub></td>
+    <td width="50%" valign="top"><img src="docs/media/shortcuts.png" alt="The keyboard shortcuts sheet"><br><sub><b>Keyboard first.</b> Press <kbd>?</kbd> anywhere for every shortcut.</sub></td>
+  </tr>
+</table>
+
+### Keyboard shortcuts
+
+Press <kbd>?</kbd> anywhere in the app (or pick **Keyboard shortcuts** in the palette) for the full sheet. The ones you'll use most:
+
+| Where | Keys |
+|---|---|
+| Everywhere | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> palette · <kbd>/</kbd> search · <kbd>C</kbd> capture · <kbd>?</kbd> shortcuts · <kbd>Esc</kbd> close |
+| Tabs | <kbd>Ctrl</kbd>+click a link opens a tab · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> switch · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> close · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> reopen |
+| Split view | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>&#92;</kbd> open/close · <kbd>Alt</kbd>+click a link or tab · drag a tab to the right half |
+| Writing | <kbd>Ctrl</kbd>+<kbd>B</kbd>/<kbd>I</kbd> bold/italic · <kbd>[[</kbd> link a note · <kbd>Enter</kbd> continues a list |
+| Canvas | double-click add · <kbd>Shift</kbd>+drag select · <kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd>/<kbd>D</kbd> copy/paste/duplicate · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · arrows nudge · <kbd>Shift</kbd>+<kbd>1</kbd> fit |
 
 ## Use it
 

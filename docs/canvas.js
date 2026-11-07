@@ -239,7 +239,7 @@ function boardShell(path) {
       <div class="cv-wrap" id="cv-wrap" tabindex="0" role="application" aria-roledescription="canvas" aria-label="Canvas ${esc(canvasName(path))}. Tab to move between cards, arrow keys move the selection, Enter edits or opens.">
         <div class="cv-world" id="cv-world"></div>
         <div class="cv-select-bar" id="cv-select-bar" hidden></div>
-        <p class="cv-hint">${editable ? "Double-click to add a card · drag a dot on a card's edge to connect · " : ""}drag the board to pan · Shift + drag to select · Ctrl + scroll to zoom</p>
+        <p class="cv-hint">${editable ? "Double-click to add a card · drag a dot on a card's edge to connect · " : ""}drag the board to pan · Shift + drag to select · Ctrl + scroll to zoom · <kbd>?</kbd> for all shortcuts</p>
         ${editable ? notesPanel() : ""}
       </div>
     </div>`;
@@ -699,7 +699,7 @@ export function wireCanvas() {
   }
   if (!board.view) {
     board.view = { x: 0, y: 0, zoom: 1 };
-    requestAnimationFrame(() => fit(false));
+    requestAnimationFrame(() => fit(false, { firstOpen: true }));
   }
   draw();
   wired?.abort();
@@ -727,7 +727,12 @@ export function wireCanvas() {
   window.addEventListener("beforeunload", () => flushCanvas(), { signal });
 }
 
-function fit(animate = true) {
+// On a phone, fitting a wide board shrinks every card past reading size, so the first open
+// starts at a readable zoom on the board's top-left corner instead. Fit (Shift+1) still fits all.
+const READABLE_ZOOM = 0.6;
+const NARROW_WRAP = 640;
+
+function fit(animate = true, { firstOpen = false } = {}) {
   const wrap = $("#cv-wrap");
   if (!wrap || !board.data) return;
   const rect = wrap.getBoundingClientRect();
@@ -736,7 +741,11 @@ function fit(animate = true) {
     board.view = { x: rect.width / 2, y: rect.height / 2, zoom: 1 };
   } else {
     const zoom = Math.max(0.1, Math.min(1, (rect.width - 80) / box.width, (rect.height - 80) / box.height));
-    board.view = { zoom, x: rect.width / 2 - (box.x + box.width / 2) * zoom, y: rect.height / 2 - (box.y + box.height / 2) * zoom };
+    if (firstOpen && rect.width < NARROW_WRAP && zoom < READABLE_ZOOM) {
+      board.view = { zoom: READABLE_ZOOM, x: 16 - box.x * READABLE_ZOOM, y: 16 - box.y * READABLE_ZOOM };
+    } else {
+      board.view = { zoom, x: rect.width / 2 - (box.x + box.width / 2) * zoom, y: rect.height / 2 - (box.y + box.height / 2) * zoom };
+    }
   }
   const world = $("#cv-world");
   if (world && animate) {

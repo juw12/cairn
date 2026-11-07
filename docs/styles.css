@@ -1197,3 +1197,19 @@ pre.math { white-space: pre-wrap; }
   .plugin-setting { grid-template-columns: 1fr; }
   .plugin-setting.inline { grid-template-columns: 1fr auto; }
 }
+/* ---------- keyboard shortcuts sheet */
+.modal.shortcuts { width: min(860px, 100%); max-height: calc(100vh - 32px); overflow: auto; outline: none; }
+.shortcuts-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.shortcuts-grid { columns: 2 320px; column-gap: 32px; }
+.shortcuts-grid section { break-inside: avoid; margin: 0 0 18px; }
+.shortcuts-grid h3 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.shortcuts-grid dl { margin: 0; }
+.shortcuts-grid dl > div { display: grid; grid-template-columns: minmax(118px, auto) 1fr; gap: 12px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.shortcuts-grid dt { white-space: nowrap; }
+.shortcuts-grid dd { margin: 0; color: var(--ink-2); font-size: 13px; }
+.shortcuts-grid .sc-plus, .shortcuts-grid .sc-or { margin: 0 3px; color: var(--muted); font-size: 11px; }
+.cv-hint kbd { font-size: 10.5px; padding: 0 4px; }
+@media (max-width: 640px) {
+  .modal.shortcuts { padding: 18px; }
+  .shortcuts-grid dl > div { grid-template-columns: 1fr; gap: 2px; }
+}
