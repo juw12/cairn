@@ -659,6 +659,50 @@ export function scanTodos(text, path) {
   return items;
 }
 
+// ------------------------------------------------------------ journal (daily log), mirrored in cairn/core.py
+
+const LOG_LINE_RE = /^- (?:(\d{1,2}:\d{2})\s+)?(.*\S.*)$/;
+const LOG_LINK_RE = /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g;
+const DAY_SLUG_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function logEntries(body) {
+  const entries = [];
+  for (const line of String(body || "").replaceAll("\r\n", "\n").split("\n")) {
+    const match = LOG_LINE_RE.exec(line);
+    if (!match) continue;
+    const text = match[2].trim();
+    if (/^\[[ xX]\]\s*$/.test(text)) continue;
+    entries.push({ time: match[1] || "", text });
+  }
+  return entries;
+}
+
+export function plainLogText(text) {
+  return String(text)
+    .replace(LOG_LINK_RE, (_, target, alias) => alias || target.split("/").pop())
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function recentLog(notes, today, days = 3) {
+  const pages = notes
+    .filter((n) => n.type === "journal" && DAY_SLUG_RE.test(n.slug) && n.slug <= today)
+    .sort((a, b) => (a.slug !== b.slug ? (a.slug < b.slug ? 1 : -1) : a.path < b.path ? 1 : a.path > b.path ? -1 : 0));
+  const out = [];
+  for (const note of pages) {
+    const entries = logEntries(note.body);
+    if (entries.length && !out.some((item) => item.day === note.slug)) out.push({ day: note.slug, path: note.path, entries });
+    if (out.length >= days) break;
+  }
+  return out;
+}
+
+function clip(text, limit) {
+  const chars = [...text];
+  return chars.length <= limit ? text : chars.slice(0, limit - 3).join("").trimEnd() + "...";
+}
+
 // ------------------------------------------------------------ context pack
 
 export function summary(body) {
@@ -709,6 +753,16 @@ export function contextPack(notes, project, today) {
     out.push(`## ${heading}`, "");
     if (items.length) out.push(...items.map(bullet));
     else out.push("_Nothing yet._");
+    out.push("");
+  }
+  const lately = recentLog(notes, today);
+  if (lately.length) {
+    out.push("## Lately (from the journal)", "");
+    for (const item of lately) {
+      const shown = item.entries.slice(0, 4).map((e) => clip(plainLogText(e.text), 80));
+      const more = item.entries.length - shown.length;
+      out.push(`- **${item.day}**: ${shown.join("; ")}` + (more ? ` (+${more} more)` : ""));
+    }
     out.push("");
   }
   out.push("## How to use this file", "");

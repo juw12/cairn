@@ -301,11 +301,11 @@ const DEMO_KEY = "cairn.demo.v1";
 // Recent journal days for the demo, dated relative to today so the streak, heatmap, mood chart and
 // look-backs (a week / month / year ago) have something to show. Plain "## Log" pages like any other.
 const DEMO_DAYS = [
-  [-1, ["09:12 Standup: GPX import is the last beta blocker #beta", "13:40 Paired with Sam on the segment bug, found the timezone issue", "Mood: 🙂 good (4/5)", "18:05 Task: [[gpx-import|GPX import]] is close, tests pass locally"]],
-  [-2, ["10:02 Five beta hikers confirmed for the weekend test #beta", "15:30 Weather overlay looks great on the elevation profile", "Mood: 😄 great (5/5)"]],
+  [-1, ["09:12 Standup: GPX import is the last beta blocker #beta", "13:40 Paired with @sam on the segment bug, found the timezone issue", "Mood: 🙂 good (4/5)", "18:05 Task: [[gpx-import|GPX import]] is close, tests pass locally"]],
+  [-2, ["10:02 Five beta hikers confirmed for the weekend test, thanks @ana #beta", "15:30 Weather overlay looks great on the elevation profile", "Mood: 😄 great (5/5)"]],
   [-3, ["08:50 Read the interview notes again, offline is the #1 ask #research", "16:20 Decided to keep the map corridor at 2 km", "Mood: 😐 okay (3/5)"]],
   [-5, ["11:15 Tile sizes are fine: 40 km route is 26 MB #maps", "Mood: 🙂 good (4/5)"]],
-  [-7, ["09:30 Kicked off the beta plan with the team #beta", "14:00 Idea: share a live trip link with family", "Mood: 🙂 good (4/5)"]],
+  [-7, ["09:30 Kicked off the beta plan with @sam and @ana #beta", "14:00 Idea: share a live trip link with family", "Mood: 🙂 good (4/5)"]],
   [-10, ["17:45 Long day, the PMTiles build kept failing #maps", "Mood: 🙁 low (2/5)"]],
   [-14, ["10:10 First hike test on the Ridge trail, map held up offline", "Mood: 😄 great (5/5)"]],
   ["month", ["12:00 Wrote the first [[user-interviews]] summary #research", "Mood: 🙂 good (4/5)"]],

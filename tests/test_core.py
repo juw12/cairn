@@ -174,5 +174,44 @@ class LosslessEditTests(unittest.TestCase):
         self.assertEqual(core.update_note_text("plain\n", {"status": "done"}), "---\nstatus: done\n---\nplain\n")
 
 
+
+class JournalLogTests(unittest.TestCase):
+    def test_append_log_creates_and_extends_the_log_section(self):
+        body = core.append_log("", "08:10", "Walked to work")
+        self.assertEqual(body, "## Log\n\n- 08:10 Walked to work\n")
+        body = core.append_log("# Friday\n\nSome notes.\n", "09:00", "Standup")
+        self.assertEqual(body, "# Friday\n\nSome notes.\n\n## Log\n\n- 09:00 Standup\n")
+        body = core.append_log("## Log\n\n- 09:00 Standup\n\n## Later\n\ntext\n", "10:00", "Review")
+        self.assertEqual(body, "## Log\n\n- 09:00 Standup\n- 10:00 Review\n\n## Later\n\ntext\n")
+        # An empty "- " placeholder bullet from the template is dropped.
+        self.assertEqual(core.append_log("## Log\n\n- \n", "11:00", "x"), "## Log\n\n- 11:00 x\n")
+
+    def test_log_entries_and_plain_text(self):
+        entries = core.log_entries("## Log\n\n- 09:00 Task: [[ship-beta|Ship beta]]\n- untimed\n- [ ] \n")
+        self.assertEqual(entries, [{"time": "09:00", "text": "Task: [[ship-beta|Ship beta]]"}, {"time": "", "text": "untimed"}])
+        self.assertEqual(core.plain_log_text("Task: [[ship-beta|Ship beta]] and [[notes/x]] **bold**"), "Task: Ship beta and x bold")
+
+    def test_recent_log_and_context_lately_section(self):
+        files = {
+            "journal/2026-11-03.md": "## Log\n\n- 09:00 Older day\n",
+            "journal/2026-11-04.md": "## Log\n\n" + "".join(f"- 1{i}:00 Entry {i}\n" for i in range(6)),
+            "journal/2026-11-05.md": "## Log\n\n- 08:00 " + "long " * 30 + "\n",
+            "journal/2026-11-06.md": "## Log\n\n- 08:00 Future day\n",
+            "journal/2026-11-02.md": "No bullets here.\n",
+            "tasks/a.md": "---\ntitle: A\ntype: task\nstatus: todo\n---\n",
+        }
+        notes = [core.note_from_file(p, t) for p, t in files.items()]
+        lately = core.recent_log(notes, "2026-11-05")
+        self.assertEqual([item["day"] for item in lately], ["2026-11-05", "2026-11-04", "2026-11-03"])
+        pack = core.context_pack(notes, "demo", "2026-11-05")
+        self.assertIn("## Lately (from the journal)", pack)
+        self.assertLess(pack.index("## Lately"), pack.index("How to use") if "How to use" in pack else len(pack))
+        self.assertIn("- **2026-11-04**: Entry 0; Entry 1; Entry 2; Entry 3 (+2 more)", pack)
+        self.assertIn("...", pack.split("**2026-11-05**")[1].split("\n")[0])
+        self.assertNotIn("Future day", pack)
+        quiet = core.context_pack([core.note_from_file("tasks/a.md", files["tasks/a.md"])], "demo", "2026-11-05")
+        self.assertNotIn("Lately", quiet)
+
+
 if __name__ == "__main__":
     unittest.main()
