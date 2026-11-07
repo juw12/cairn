@@ -27,6 +27,10 @@ const CATALOG_URL = "plugins/index.json";
 const DOCS_URL = "https://github.com/juw12/cairn/blob/main/PLUGINS.md";
 const BUILT_IN_BLOCKS = new Set(["mermaid", "math"]);
 const EVENTS = ["note-open", "notes-changed", "view-change"];
+const SETTING_TYPES = new Set(["toggle", "text", "number", "select", "textarea"]);
+// The plugin list that travels with a brain: a note listing where each plugin comes from (never its code).
+export const PLUGIN_LIST_PATH = "cairn/plugins.md";
+let openSettings = null; // id of the plugin whose settings are showing
 
 const active = new Map(); // id -> { manifest, cleanups: [], error }
 const registry = {
@@ -72,6 +76,76 @@ async function importCode(code) {
   }
 }
 
+// ============================================================ plugin settings
+// A plugin describes its options in `manifest.settings` (or with cairn.addSettings) and Cairn draws the
+// settings page: [{ key, label, type: "toggle" | "text" | "number" | "select" | "textarea", default,
+// options, description, min, max, step }]. Values are stored per device with cairn.settings.
+
+export function normalizeSettings(fields) {
+  if (!Array.isArray(fields)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const field of fields.slice(0, 40)) {
+    if (!field || typeof field !== "object") continue;
+    const key = String(field.key || "");
+    if (!/^[\w.-]{1,40}$/.test(key) || seen.has(key)) continue;
+    const type = SETTING_TYPES.has(field.type) ? field.type : "text";
+    const options = type === "select" && Array.isArray(field.options)
+      ? field.options.slice(0, 50).map((o) => (o && typeof o === "object" ? { value: String(o.value), label: String(o.label ?? o.value) } : { value: String(o), label: String(o) }))
+      : [];
+    if (type === "select" && !options.length) continue;
+    seen.add(key);
+    out.push({
+      key,
+      type,
+      label: String(field.label || key).slice(0, 80),
+      description: String(field.description || "").slice(0, 300),
+      default: field.default ?? (type === "toggle" ? false : type === "number" ? 0 : type === "select" ? options[0].value : ""),
+      options,
+      min: Number.isFinite(field.min) ? field.min : null,
+      max: Number.isFinite(field.max) ? field.max : null,
+      step: Number.isFinite(field.step) ? field.step : null,
+    });
+  }
+  return out;
+}
+
+function readSetting(id, key, fallback) {
+  try {
+    const raw = localStorage.getItem(`cairn.plugin.${id}.${key}`);
+    if (raw !== null) return JSON.parse(raw);
+  } catch {
+    /* fall through to the default */
+  }
+  if (fallback !== undefined) return fallback;
+  const field = active.get(id)?.settings?.find((f) => f.key === key);
+  return field ? field.default : null;
+}
+
+function writeSetting(id, key, value) {
+  localStorage.setItem(`cairn.plugin.${id}.${key}`, JSON.stringify(value));
+  const record = active.get(id);
+  for (const listener of record?.settingListeners || []) {
+    if (listener.key && listener.key !== key) continue;
+    try {
+      listener.handler(value, key);
+    } catch (error) {
+      reportError(id, error, "a settings change");
+    }
+  }
+}
+
+// A plugin went wrong while running (a command, a view, a code block, an event). Its row on the
+// Plugins page shows the error until the plugin is restarted; the rest of Cairn keeps working.
+function reportError(id, error, where) {
+  console.error(`[plugin ${id}]`, error);
+  const record = active.get(id);
+  if (!record) return;
+  record.lastError = { message: error?.message || String(error), where, at: new Date().toISOString() };
+}
+
+export const pluginProblems = () => [...active.values()].filter((r) => r.error || r.lastError).map((r) => r.manifest.id);
+
 // ============================================================ the API a plugin receives
 
 function noteCopy(note) {
@@ -92,7 +166,6 @@ function noteCopy(note) {
 function makeApi(manifest, record) {
   const id = manifest.id;
   const own = (cleanup) => record.cleanups.push(cleanup);
-  const settingsKey = (key) => `cairn.plugin.${id}.${key}`;
   const requireEditable = () => {
     if (readOnly()) throw new Error("This brain is read-only.");
   };
@@ -182,7 +255,7 @@ function makeApi(manifest, record) {
         try {
           handler(payload);
         } catch (error) {
-          console.error(`[plugin ${id}]`, error);
+          reportError(id, error, `its “${event}” handler`);
         }
       };
       registry.listeners[event].add(wrapped);
@@ -203,17 +276,23 @@ function makeApi(manifest, record) {
     icon: (name, cls = "sm") => icon(name, cls),
     renderMarkdown: (markdown, fromPath = state.open || "") => renderNote({ path: fromPath, body: String(markdown) }, { source: String(markdown), tasks: false }),
     settings: {
-      get(key, fallback = null) {
-        try {
-          const raw = localStorage.getItem(settingsKey(key));
-          return raw === null ? fallback : JSON.parse(raw);
-        } catch {
-          return fallback;
-        }
+      // With no fallback, a key declared in the plugin's settings returns its default.
+      get: (key, fallback) => readSetting(id, String(key), fallback),
+      set: (key, value) => writeSetting(id, String(key), value),
+      onChange(key, handler) {
+        if (typeof key === "function") [key, handler] = [null, key];
+        if (typeof handler !== "function") throw new Error("settings.onChange needs a function.");
+        const listener = { key: key ? String(key) : null, handler };
+        record.settingListeners.push(listener);
+        own(() => {
+          record.settingListeners = record.settingListeners.filter((l) => l !== listener);
+        });
       },
-      set(key, value) {
-        localStorage.setItem(settingsKey(key), JSON.stringify(value));
-      },
+    },
+    addSettings(fields) {
+      const extra = normalizeSettings(fields);
+      const keys = new Set(extra.map((f) => f.key));
+      record.settings = [...record.settings.filter((f) => !keys.has(f.key)), ...extra];
     },
   };
   return Object.freeze(api);
@@ -224,10 +303,11 @@ function makeApi(manifest, record) {
 async function activate(entry) {
   const { manifest, code } = entry;
   deactivate(manifest.id);
-  const record = { manifest, cleanups: [], error: "" };
+  const record = { manifest, cleanups: [], error: "", lastError: null, settings: [], settingListeners: [] };
   active.set(manifest.id, record);
   try {
     const module = await importCode(code);
+    record.settings = normalizeSettings(module.manifest?.settings);
     const api = makeApi(manifest, record);
     const main = module.default;
     let cleanup = null;
@@ -296,7 +376,13 @@ export function pluginCommands() {
     label: command.name,
     kind: command.pluginName,
     icon: command.icon,
-    run: () => Promise.resolve(command.run()).catch((error) => toast(`${command.pluginName}: ${error.message || error}`, { error: true })),
+    run: () =>
+      Promise.resolve()
+        .then(() => command.run())
+        .catch((error) => {
+          reportError(command.plugin, error, `the command “${command.name}”`);
+          toast(`${command.pluginName}: ${error.message || error}`, { error: true });
+        }),
   }));
 }
 
@@ -312,6 +398,7 @@ export function renderPluginView(view, container) {
   try {
     entry.render(container);
   } catch (error) {
+    reportError(entry.plugin, error, `the view “${entry.name}”`);
     container.innerHTML = `<div class="plugin-error">${esc(error.message || String(error))}</div>`;
   }
 }
@@ -332,6 +419,7 @@ function enhanceBlocks(root) {
     try {
       block.render(code.textContent, out, { notePath, language: lang });
     } catch (error) {
+      reportError(block.plugin, error, `a \`\`\`${lang} block`);
       out.innerHTML = `<div class="plugin-error">${esc(error.message || String(error))}</div>`;
     }
   }
@@ -364,12 +452,12 @@ async function fetchText(url) {
 // "owner/repo" (a GitHub repo with main.js at its root), a GitHub URL, or a direct https URL to a .js file.
 export function pluginSource(input) {
   const value = String(input || "").trim();
-  if (/^plugins\/[\w-]+\.js$/.test(value)) return { url: value, label: `Cairn plugin list (${value})` };
+  if (/^plugins\/[\w-]+\.js$/.test(value)) return { url: value, label: `Cairn plugin list (${value})`, spec: value };
   const repo = /^(?:https?:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(value);
   if (repo && !/^https?:\/\/(?!github\.com)/i.test(value)) {
-    return { url: `https://raw.githubusercontent.com/${repo[1]}/${repo[2]}/HEAD/main.js`, label: `${repo[1]}/${repo[2]}` };
+    return { url: `https://raw.githubusercontent.com/${repo[1]}/${repo[2]}/HEAD/main.js`, label: `${repo[1]}/${repo[2]}`, spec: `${repo[1]}/${repo[2]}` };
   }
-  if (/^https:\/\/\S+\.m?js(\?\S*)?$/i.test(value)) return { url: value, label: value };
+  if (/^https:\/\/\S+\.m?js(\?\S*)?$/i.test(value)) return { url: value, label: value, spec: value };
   return null;
 }
 
@@ -394,11 +482,12 @@ export async function installPlugin(input, { quiet = false } = {}) {
     author: String(manifest.author || "").slice(0, 60),
     description: String(manifest.description || "").slice(0, 300),
   };
-  store.installed[manifest.id] = { manifest: clean, code, source: source.label, enabled: true, installedAt: new Date().toISOString() };
+  store.installed[manifest.id] = { manifest: clean, code, source: source.label, spec: source.spec || source.label, enabled: true, installedAt: new Date().toISOString() };
   store.enabled = true;
   saveStore(store);
   const record = await activate(store.installed[manifest.id]);
   renderNav();
+  if (!quiet) syncBrainList();
   if (!quiet) {
     if (record.error) toast(`Installed “${clean.name}”, but it couldn't start: ${record.error}`, { error: true });
     else toast(`Installed and turned on “${clean.name}”.`);
@@ -414,8 +503,91 @@ export function removePlugin(id) {
   delete store.installed[id];
   saveStore(store);
   for (const key of Object.keys(localStorage)) if (key.startsWith(`cairn.plugin.${id}.`)) localStorage.removeItem(key);
+  if (openSettings === id) openSettings = null;
   renderNav();
   toast(`Removed “${entry.manifest.name}”.`);
+  syncBrainList();
+}
+
+export async function restartPlugin(id) {
+  const store = loadStore();
+  const entry = store.installed[id];
+  if (!entry || !store.enabled || !entry.enabled) return;
+  const record = await activate(entry);
+  renderNav();
+  if (record.error) toast(`“${entry.manifest.name}” couldn't start: ${record.error}`, { error: true });
+  else toast(`Restarted “${entry.manifest.name}”.`);
+}
+
+// ============================================================ the plugin list that travels with the brain
+// Brains hold only notes and canvases, so the list is a note: brain/cairn/plugins.md, with the source of
+// each plugin in its front matter. Other devices see it on the Plugins page and can install the list in
+// one step; nothing is installed or run without asking, because anyone who can edit the brain can edit it.
+
+const specOf = (entry) => entry.spec || /\((plugins\/[\w-]+\.js)\)$/.exec(entry.source || "")?.[1] || entry.source;
+
+export function brainPluginList() {
+  const note = noteByPath(PLUGIN_LIST_PATH);
+  const list = Array.isArray(note?.meta?.plugins) ? note.meta.plugins : [];
+  return [...new Set(list.map((item) => String(item).trim()).filter((item) => pluginSource(item)))];
+}
+
+function installedSpecs() {
+  return Object.values(loadStore().installed).map(specOf);
+}
+
+export async function saveBrainList({ quiet = false } = {}) {
+  if (readOnly()) throw new Error("This brain is read-only.");
+  const specs = installedSpecs();
+  const existing = noteByPath(PLUGIN_LIST_PATH);
+  if (existing) {
+    await saveNote(PLUGIN_LIST_PATH, { properties: { plugins: specs } });
+  } else {
+    const body = "The community plugins this brain uses. Cairn lists them on the Plugins page of every device that opens this brain and offers to install them; nothing is installed or run without asking.\n\nEdit the list on the Plugins page (Save list to this brain), or here.\n";
+    const text = core.serializeNote({ title: "Cairn plugins", type: "note", tags: [], plugins: specs }, body);
+    const { mtime } = await state.store.write(PLUGIN_LIST_PATH, text, null);
+    upsertFile(PLUGIN_LIST_PATH, text, mtime);
+  }
+  render();
+  if (!quiet) toast(`Saved the plugin list to brain/${PLUGIN_LIST_PATH} (${specs.length}).`);
+  return specs;
+}
+
+// Once a brain has a plugin list, installing or removing a plugin keeps it up to date.
+function syncBrainList() {
+  if (!noteByPath(PLUGIN_LIST_PATH) || readOnly()) return;
+  const saved = brainPluginList();
+  const now = installedSpecs();
+  if (saved.length === now.length && saved.every((s) => now.includes(s))) return;
+  saveBrainList({ quiet: true }).catch((error) => console.error("[plugins] couldn't update the brain's plugin list", error));
+}
+
+export function missingFromBrainList() {
+  const have = new Set(installedSpecs());
+  return brainPluginList().filter((spec) => !have.has(spec));
+}
+
+async function installBrainList() {
+  const missing = missingFromBrainList();
+  if (!missing.length) return;
+  const external = missing.filter((spec) => !spec.startsWith("plugins/"));
+  const ok = await ask({
+    title: `Install ${missing.length} plugin${missing.length === 1 ? "" : "s"} from this brain?`,
+    text: `${missing.join(", ")}. ${external.length ? "Plugins run with the same access as Cairn on this device; only continue if you trust where they come from." : "These come with Cairn."}`,
+    confirm: "Install",
+    noInput: true,
+  });
+  if (!ok) return;
+  let done = 0;
+  for (const spec of missing) {
+    try {
+      await installPlugin(spec, { quiet: true });
+      done += 1;
+    } catch (error) {
+      toast(`${spec}: ${error.message || error}`, { error: true });
+    }
+  }
+  if (done) toast(`Installed ${done} plugin${done === 1 ? "" : "s"} from this brain.`);
 }
 
 export async function setPluginEnabled(id, enabled) {
@@ -456,7 +628,8 @@ async function loadCatalog() {
 export function pluginsView() {
   const store = loadStore();
   const installed = Object.values(store.installed);
-  const head = pageHead("Plugins", "Add features made by the community: calendars, queries, stats and more. Plugins live on this device and never travel with a shared brain.", "", "Project");
+  const head = pageHead("Plugins", "Add features made by the community: calendars, queries, stats and more. Plugin code lives on this device; the list of plugins can travel with the brain.", "", "Project");
+  const listed = brainPluginList();
   const intro = `
     <section class="plugin-gate${store.enabled ? " on" : ""}">
       <div>
@@ -466,26 +639,54 @@ export function pluginsView() {
       <button class="btn ${store.enabled ? "" : "primary"}" data-plugins-toggle="${store.enabled ? "off" : "on"}">${store.enabled ? "Turn off" : "Turn on community plugins"}</button>
     </section>`;
   if (!store.enabled) {
-    return `${head}${intro}<p class="muted plugin-docs">Want to write one? A plugin is a single JavaScript file. <a href="${DOCS_URL}" target="_blank" rel="noopener">Read the plugin guide</a>.</p>`;
+    const hint = listed.length ? `<p class="plugin-brain-hint">${icon("note", "sm")} This brain lists ${listed.length} plugin${listed.length === 1 ? "" : "s"} (${listed.map(esc).join(", ")}). Turn on community plugins to install ${listed.length === 1 ? "it" : "them"}.</p>` : "";
+    return `${head}${intro}${hint}<p class="muted plugin-docs">Want to write one? A plugin is a single JavaScript file. <a href="${DOCS_URL}" target="_blank" rel="noopener">Read the plugin guide</a>.</p>`;
   }
   const rows = installed.length
     ? installed.map((entry) => {
-        const record = active.get(entry.manifest.id);
-        const error = entry.enabled && record?.error ? `<p class="plugin-error">Couldn't start: ${esc(record.error)}</p>` : "";
-        return `<div class="plugin-row" data-plugin="${esc(entry.manifest.id)}">
+        const id = entry.manifest.id;
+        const record = active.get(id);
+        const startError = entry.enabled && record?.error ? `<p class="plugin-error" role="alert">Couldn't start: ${esc(record.error)} <button class="btn sm" data-plugin-restart="${esc(id)}">${icon("refresh", "sm")} Try again</button></p>` : "";
+        const runError = entry.enabled && !record?.error && record?.lastError
+          ? `<p class="plugin-error" role="alert">Went wrong in ${esc(record.lastError.where)}: ${esc(record.lastError.message)} <button class="btn sm" data-plugin-restart="${esc(id)}">${icon("refresh", "sm")} Restart</button></p>`
+          : "";
+        const fields = entry.enabled && store.enabled ? record?.settings || [] : [];
+        const open = openSettings === id && fields.length;
+        const gear = fields.length
+          ? `<button class="btn sm ghost${open ? " on" : ""}" data-plugin-settings="${esc(id)}" aria-expanded="${Boolean(open)}" title="Settings">${icon("gear", "sm")}<span class="sr-only">Settings for ${esc(entry.manifest.name)}</span></button>`
+          : "";
+        return `<div class="plugin-row${record?.error || record?.lastError ? " has-error" : ""}" data-plugin="${esc(id)}">
           <div class="plugin-main">
             <strong>${esc(entry.manifest.name)}</strong> <span class="muted">v${esc(entry.manifest.version)}${entry.manifest.author ? ` · ${esc(entry.manifest.author)}` : ""}</span>
             <p>${esc(entry.manifest.description || "")}</p>
             <span class="plugin-source">${icon("link", "sm")} ${esc(entry.source)}</span>
-            ${error}
+            ${startError}${runError}
           </div>
-          <label class="switch" title="${entry.enabled ? "Turn off" : "Turn on"}"><input type="checkbox" data-plugin-enable="${esc(entry.manifest.id)}" ${entry.enabled ? "checked" : ""} aria-label="Turn ${esc(entry.manifest.name)} on or off"><span></span></label>
-          <button class="btn sm ghost danger" data-plugin-remove="${esc(entry.manifest.id)}" title="Remove">${icon("trash", "sm")}<span class="sr-only">Remove ${esc(entry.manifest.name)}</span></button>
-        </div>`;
+          ${gear}
+          <label class="switch" title="${entry.enabled ? "Turn off" : "Turn on"}"><input type="checkbox" data-plugin-enable="${esc(id)}" ${entry.enabled ? "checked" : ""} aria-label="Turn ${esc(entry.manifest.name)} on or off"><span></span></label>
+          <button class="btn sm ghost danger" data-plugin-remove="${esc(id)}" title="Remove">${icon("trash", "sm")}<span class="sr-only">Remove ${esc(entry.manifest.name)}</span></button>
+        </div>${open ? settingsForm(id, entry.manifest.name, fields) : ""}`;
       }).join("")
     : emptyState("puzzle", "No plugins installed", "Pick one from the list below, or install one from GitHub.");
+  const problems = pluginProblems().length;
+  const missing = missingFromBrainList();
+  const listNote = noteByPath(PLUGIN_LIST_PATH);
+  const inSync = listNote && !missing.length && installed.every((entry) => listed.includes(specOf(entry)));
+  const brainSection = `
+    <section class="plugin-section plugin-brain">
+      <h2>Plugins in this brain</h2>
+      ${missing.length
+        ? `<div class="plugin-brain-missing"><p>${icon("note", "sm")} This brain uses ${missing.length} plugin${missing.length === 1 ? "" : "s"} that ${missing.length === 1 ? "isn't" : "aren't"} on this device: ${missing.map((s) => `<code>${esc(s)}</code>`).join(", ")}.</p>
+            <button class="btn primary sm" data-plugins-install-list>Install ${missing.length === 1 ? "it" : "them"}</button></div>`
+        : ""}
+      <p class="muted">${listNote
+        ? `The list is kept in <a href="#" data-open="${esc(PLUGIN_LIST_PATH)}">brain/${esc(PLUGIN_LIST_PATH)}</a>${inSync ? " and matches this device." : "."} It names where each plugin comes from, never its code, and other devices ask before installing.`
+        : "Save the list of plugins you use into this brain, so your other devices (and anyone you share the brain with) can install the same ones. Only where each plugin comes from is saved, never its code."}</p>
+      ${readOnly() ? "" : `<button class="btn sm" data-plugins-save-list ${inSync ? "disabled" : ""}>${icon("save", "sm")} ${listNote ? "Update the list in this brain" : "Save list to this brain"}</button>`}
+    </section>`;
   return `${head}${intro}
-    <section class="plugin-section"><h2>Installed</h2>${rows}</section>
+    <section class="plugin-section"><h2>Installed${problems ? ` <span class="plugin-problems">${problems} with a problem</span>` : ""}</h2>${rows}</section>
+    ${installed.length || listed.length ? brainSection : ""}
     <section class="plugin-section"><h2>Browse</h2><div class="plugin-catalog" id="plugin-catalog"><p class="muted">Loading the plugin list…</p></div></section>
     <section class="plugin-section">
       <h2>Install from GitHub or a link</h2>
@@ -495,6 +696,25 @@ export function pluginsView() {
       </form>
       <p class="muted plugin-docs">A GitHub plugin keeps its code in <code>main.js</code> at the root of its repo. <a href="${DOCS_URL}" target="_blank" rel="noopener">How to write a plugin</a>.</p>
     </section>`;
+}
+
+function settingsForm(id, name, fields) {
+  const control = (field) => {
+    const value = readSetting(id, field.key);
+    const attrs = `id="ps-${esc(id)}-${esc(field.key)}" data-setting="${esc(field.key)}" data-setting-type="${field.type}"`;
+    if (field.type === "toggle") return `<label class="switch"><input type="checkbox" ${attrs} ${value ? "checked" : ""}><span></span></label>`;
+    if (field.type === "select") return `<select class="select" ${attrs}>${field.options.map((o) => `<option value="${esc(o.value)}" ${String(value) === o.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
+    if (field.type === "textarea") return `<textarea class="input" rows="3" ${attrs}>${esc(value ?? "")}</textarea>`;
+    if (field.type === "number") return `<input class="input" type="number" ${attrs} value="${esc(value ?? "")}"${field.min !== null ? ` min="${field.min}"` : ""}${field.max !== null ? ` max="${field.max}"` : ""}${field.step !== null ? ` step="${field.step}"` : ""}>`;
+    return `<input class="input" type="text" ${attrs} value="${esc(value ?? "")}">`;
+  };
+  return `<form class="plugin-settings" data-plugin-form="${esc(id)}" aria-label="${esc(name)} settings">
+    ${fields.map((field) => `<div class="plugin-setting${field.type === "toggle" ? " inline" : ""}">
+      <label for="ps-${esc(id)}-${esc(field.key)}">${esc(field.label)}${field.description ? `<span class="muted">${esc(field.description)}</span>` : ""}</label>
+      ${control(field)}
+    </div>`).join("")}
+    <div class="plugin-settings-foot"><span class="muted">Saved as you change them, on this device.</span><button type="button" class="btn sm ghost" data-plugin-settings-reset="${esc(id)}">Reset to defaults</button></div>
+  </form>`;
 }
 
 export function wirePlugins() {
@@ -551,6 +771,44 @@ export async function handlePluginClick(target) {
     renderView();
     return true;
   }
+  const gear = target.closest("[data-plugin-settings]");
+  if (gear) {
+    openSettings = openSettings === gear.dataset.pluginSettings ? null : gear.dataset.pluginSettings;
+    renderView();
+    $(`[data-plugin-form="${CSS.escape(gear.dataset.pluginSettings)}"] [data-setting]`)?.focus();
+    return true;
+  }
+  const reset = target.closest("[data-plugin-settings-reset]");
+  if (reset) {
+    const id = reset.dataset.pluginSettingsReset;
+    for (const field of active.get(id)?.settings || []) {
+      localStorage.removeItem(`cairn.plugin.${id}.${field.key}`);
+      writeSetting(id, field.key, field.default);
+    }
+    toast("Settings reset to their defaults.");
+    renderView();
+    return true;
+  }
+  const restart = target.closest("[data-plugin-restart]");
+  if (restart) {
+    await restartPlugin(restart.dataset.pluginRestart);
+    renderView();
+    return true;
+  }
+  if (target.closest("[data-plugins-save-list]")) {
+    try {
+      await saveBrainList();
+    } catch (error) {
+      toast(error.message || String(error), { error: true });
+    }
+    renderView();
+    return true;
+  }
+  if (target.closest("[data-plugins-install-list]")) {
+    await installBrainList();
+    renderView();
+    return true;
+  }
   const remove = target.closest("[data-plugin-remove]");
   if (remove) {
     const ok = await ask({ title: "Remove this plugin?", text: "Its code and its settings on this device are deleted. Your notes are not touched.", confirm: "Remove", noInput: true, danger: true });
@@ -562,6 +820,19 @@ export async function handlePluginClick(target) {
 }
 
 export async function handlePluginChange(target) {
+  const setting = target.closest("[data-setting]");
+  const form = setting?.closest("[data-plugin-form]");
+  if (setting && form) {
+    const type = setting.dataset.settingType;
+    let value = setting.value;
+    if (type === "toggle") value = setting.checked;
+    else if (type === "number") {
+      value = setting.value === "" ? null : Number(setting.value);
+      if (value !== null && !Number.isFinite(value)) return true;
+    }
+    writeSetting(form.dataset.pluginForm, setting.dataset.setting, value);
+    return true;
+  }
   const enable = target.closest("[data-plugin-enable]");
   if (!enable) return false;
   await setPluginEnabled(enable.dataset.pluginEnable, enable.checked);

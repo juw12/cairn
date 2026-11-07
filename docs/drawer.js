@@ -36,6 +36,7 @@ export function openNote(path, { heading = null, newTab = false } = {}) {
 
 export function closeDrawer() {
   flushPending();
+  flushSplit();
   state.open = null;
   state.spark = null;
   closeSuggest();
@@ -59,6 +60,7 @@ function ensureTabs() {
     if (saved && Array.isArray(saved.tabs)) {
       state.tabs = saved.tabs.filter((p) => typeof p === "string" && noteByPath(p)).slice(0, MAX_TABS);
       state.lastTab = state.tabs.includes(saved.active) ? saved.active : state.tabs[0] || null;
+      state.split = typeof saved.split === "string" && noteByPath(saved.split) ? saved.split : null;
     }
   } catch {
     /* start with no tabs */
@@ -67,7 +69,7 @@ function ensureTabs() {
 
 function saveTabs() {
   try {
-    localStorage.setItem(tabsKey(), JSON.stringify({ tabs: state.tabs, active: state.open || state.lastTab }));
+    localStorage.setItem(tabsKey(), JSON.stringify({ tabs: state.tabs, active: state.open || state.lastTab, split: state.split || null }));
   } catch {
     /* storage full or blocked: tabs just aren't remembered */
   }
@@ -157,6 +159,7 @@ export function forgetTab(path) {
   ensureTabs();
   state.tabs = state.tabs.filter((p) => p !== path);
   if (state.lastTab === path) state.lastTab = state.tabs[0] || null;
+  if (state.split === path) state.split = null;
   saveTabs();
 }
 
@@ -164,6 +167,153 @@ export function resetTabs() {
   state.tabs = null;
   state.lastTab = null;
   state.closedTabs = [];
+  state.split = null;
+}
+
+// ------------------------------------------------------------ split view
+// A second note beside the open one, like Obsidian's split: read it or edit it while you write.
+// Links clicked inside it open in the same pane. It is remembered with the tabs.
+
+let splitPending = null;
+let splitTimer = null;
+
+function splitNote() {
+  const path = state.split;
+  return path && path !== state.open ? noteByPath(path) : null;
+}
+
+export function openSplit(path) {
+  if (!noteByPath(path)) return;
+  if (!state.open) return openNote(path);
+  if (path === state.open) return toast("That note is already open on the left.");
+  flushSplit();
+  state.split = path;
+  saveTabs();
+  renderDrawer();
+}
+
+export function closeSplit() {
+  flushSplit();
+  state.split = null;
+  saveTabs();
+  if (state.open) renderDrawer();
+}
+
+export async function pickSplit() {
+  const notes = [...state.notes].filter((n) => n.path !== state.open).sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+  const chosen = await pick(notes.map((n) => ({ label: n.title, kind: n.path, icon: TYPE_META[n.type].icon, value: n.path })), "Open a note beside this one…");
+  if (chosen) openSplit(chosen);
+}
+
+export function toggleSplit() {
+  if (!state.open) return;
+  if (splitNote()) closeSplit();
+  else pickSplit();
+}
+
+// The side note becomes the main one and the main one moves to the side.
+function swapSplit() {
+  const side = splitNote();
+  if (!side) return;
+  flushSplit();
+  state.split = state.open;
+  openNote(side.path);
+}
+
+function queueSplit(path, body) {
+  splitPending = { path, body };
+  setSplitState("Saving…", true);
+  clearTimeout(splitTimer);
+  splitTimer = setTimeout(flushSplit, state.info?.saveDelay || 450);
+}
+
+export function flushSplit() {
+  clearTimeout(splitTimer);
+  if (!splitPending) return Promise.resolve();
+  const { path, body } = splitPending;
+  splitPending = null;
+  return saveNote(path, { body })
+    .then((saved) => {
+      if (saved) setSplitState(state.info?.savedLabel || "Saved");
+      renderView();
+    })
+    .catch(() => setSplitState("Not saved"));
+}
+
+function setSplitState(text, saving = false) {
+  const el = $("#split-save");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("saving", saving);
+}
+
+function splitPaneHtml(side) {
+  const mode = readOnly() ? "preview" : state.splitMode === "write" ? "write" : "preview";
+  return `<section class="split-pane" aria-label="Beside: ${esc(side.title)}" data-split-path="${esc(side.path)}">
+    <div class="split-head">
+      ${typePill(side.type)}
+      <button class="split-title" data-split-swap title="Make this the main note (swap sides)">${esc(side.title)}</button>
+      <span class="save-state" id="split-save">${readOnly() ? "Read-only" : "Saved"}</span>
+      ${readOnly() ? "" : `<div class="segmented sm" role="tablist" aria-label="Side note mode">
+        <button class="${mode === "preview" ? "on" : ""}" data-split-mode="preview" role="tab" aria-selected="${mode === "preview"}">Read</button>
+        <button class="${mode === "write" ? "on" : ""}" data-split-mode="write" role="tab" aria-selected="${mode === "write"}">Edit</button>
+      </div>`}
+      <button class="btn ghost sm icon-only" data-split-swap aria-label="Swap sides" title="Swap sides">${icon("shuffle", "sm")}</button>
+      <button class="btn ghost sm icon-only" data-split-close aria-label="Close the side note" title="Close the side note (Ctrl+Alt+\\)">${icon("x", "sm")}</button>
+    </div>
+    <div class="split-scroll">
+      ${mode === "write"
+        ? `<textarea id="split-body" class="body-input" aria-label="${esc(side.title)} body" spellcheck="true">${esc(side.body)}</textarea>`
+        : `<div class="prose" id="split-preview">${previewHtml(side, side.body)}</div>`}
+    </div>
+  </section>`;
+}
+
+function wireSplit(layer) {
+  $("[data-split-toggle]", layer)?.addEventListener("click", toggleSplit);
+  const pane = $(".split-pane", layer);
+  const panes = $(".drawer-panes", layer);
+  // Drag a tab onto the right half of the editor to open it beside the current note.
+  panes?.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer?.types.includes("application/x-cairn-tab")) return;
+    const rect = panes.getBoundingClientRect();
+    const right = event.clientX > rect.left + rect.width / 2;
+    panes.classList.toggle("drop-split", right);
+    if (right) event.preventDefault();
+  });
+  panes?.addEventListener("dragleave", (event) => {
+    if (!panes.contains(event.relatedTarget)) panes.classList.remove("drop-split");
+  });
+  panes?.addEventListener("drop", (event) => {
+    const path = event.dataTransfer?.getData("application/x-cairn-tab");
+    panes.classList.remove("drop-split");
+    if (!path || path === state.open) return;
+    event.preventDefault();
+    openSplit(path);
+  });
+  if (!pane) return;
+  const path = pane.dataset.splitPath;
+  const preview = $("#split-preview", pane);
+  if (preview) hydrateAssets(preview, path);
+  pane.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-split-close]")) return closeSplit();
+    if (event.target.closest("[data-split-swap]")) return swapSplit();
+    const modeButton = event.target.closest("[data-split-mode]");
+    if (modeButton) {
+      await flushSplit();
+      state.splitMode = modeButton.dataset.splitMode;
+      return renderDrawer();
+    }
+    // Links inside the side note open in the side note; Ctrl/Cmd+click still opens a new tab.
+    const link = event.target.closest("[data-open]");
+    if (link && !event.ctrlKey && !event.metaKey && noteByPath(link.dataset.open)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (link.dataset.open === state.open) return;
+      openSplit(link.dataset.open);
+    }
+  });
+  $("#split-body", pane)?.addEventListener("input", (event) => queueSplit(path, event.target.value));
 }
 
 function tabStrip(note) {
@@ -174,7 +324,8 @@ function tabStrip(note) {
     .map((path) => {
       const tab = noteByPath(path);
       const on = path === note.path;
-      return `<div class="note-tab${on ? " on" : ""}" role="tab" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-tab="${esc(path)}" draggable="true" title="brain/${esc(path)} · middle-click to close">
+      const beside = path === state.split && !on;
+      return `<div class="note-tab${on ? " on" : ""}${beside ? " beside" : ""}" role="tab" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-tab="${esc(path)}" draggable="true" title="brain/${esc(path)} · Alt+click to open beside · middle-click to close">
         <span class="dot t-${tab.type}"></span><span class="note-tab-title">${esc(tab.title)}</span>
         <button class="note-tab-close" data-tab-close="${esc(path)}" tabindex="-1" aria-label="Close ${esc(tab.title)}">${icon("x", "sm")}</button>
       </div>`;
@@ -193,6 +344,10 @@ function wireTabs(layer) {
       return closeTab(close.dataset.tabClose);
     }
     const tab = event.target.closest("[data-tab]");
+    if (tab && event.altKey) {
+      event.preventDefault();
+      return openSplit(tab.dataset.tab);
+    }
     if (tab && tab.dataset.tab !== state.open) openNote(tab.dataset.tab);
   });
   strip.addEventListener("auxclick", (event) => {
@@ -229,6 +384,7 @@ function wireTabs(layer) {
     dragged = tab.dataset.tab;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", dragged);
+    event.dataTransfer.setData("application/x-cairn-tab", dragged);
   });
   strip.addEventListener("dragover", (event) => {
     if (dragged) event.preventDefault();
@@ -438,12 +594,14 @@ export function renderDrawer() {
   if (!state.tabs.includes(note.path)) placeTab(note.path);
   const statuses = core.STATUSES[note.type];
   const backs = core.backlinks(state.notes, note.path).map(noteByPath).filter(Boolean);
+  const boards = core.canvasBacklinks(state.files, state.notes, note.path);
   const created = typeof note.meta.created === "string" ? note.meta.created : "";
   const source = typeof note.meta.source === "string" ? note.meta.source : "";
   const isIdea = note.type === "idea" && !readOnly();
   if (readOnly()) state.editorMode = "preview";
   if (!["write", "split", "preview"].includes(state.editorMode)) state.editorMode = "write";
   const mode = state.editorMode;
+  const side = splitNote();
   const lockedAttr = readOnly() ? "disabled" : "";
   const starred = isBookmarked(note.path);
   const words = wordCount(note.body);
@@ -453,7 +611,7 @@ export function renderDrawer() {
   const preview = `<div class="prose" id="ed-preview">${previewHtml(note, note.body)}</div>`;
   layer.innerHTML = `
     <div class="scrim" data-action="close-drawer"></div>
-    <aside class="drawer${mode === "split" ? " wide" : ""}" role="dialog" aria-modal="true" aria-label="Edit ${esc(note.title)}">
+    <aside class="drawer${mode === "split" || side ? " wide" : ""}${side ? " has-split" : ""}" role="dialog" aria-modal="true" aria-label="Edit ${esc(note.title)}">
       ${tabStrip(note)}
       <div class="drawer-head">
         ${typePill(note.type)}
@@ -461,9 +619,11 @@ export function renderDrawer() {
         <span class="save-state${state.held?.path === note.path ? " unsaved" : ""}" id="save-state">${readOnly() ? "Read-only" : state.held?.path === note.path ? "Not saved" : "Saved"}</span>
         <button class="btn ghost sm icon-only bookmark${starred ? " on" : ""}" data-action="bookmark" aria-pressed="${starred}" aria-label="${starred ? "Remove bookmark" : "Bookmark this note"}" title="${starred ? "Bookmarked" : "Bookmark"}">${icon("star")}</button>
         ${readOnly() ? "" : `<button class="btn ghost sm icon-only" data-action="rename" aria-label="Rename or move" title="Rename or move (links are updated)">${icon("pencil")}</button>`}
+        <button class="btn ghost sm icon-only${side ? " on" : ""}" data-split-toggle aria-pressed="${Boolean(side)}" aria-label="${side ? "Close the side note" : "Open a note beside this one"}" title="${side ? "Close the side note" : "Open a note beside this one"} (Ctrl+Alt+\\)">${icon("columns")}</button>
         <button class="btn ghost sm icon-only" data-tab-new aria-label="Open another note in a new tab" title="Open another note in a new tab (or Ctrl+click any note)">${icon("tabs")}</button>
         <button class="btn ghost sm icon-only" data-action="close-drawer" aria-label="Close">${icon("x")}</button>
       </div>
+      <div class="drawer-panes">
       <div class="drawer-body">
         ${heldBanner(note)}
         ${state.spark && isIdea ? `<div class="spark-card">${icon("zap")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Added to the note below. Answer it in a line or two.</span></div></div>` : ""}
@@ -493,16 +653,30 @@ export function renderDrawer() {
           <h3>Linked from</h3>
           ${backs.length ? backs.map((n) => rowItem(n, TYPE_META[n.type].label)).join("") : `<div class="empty">Nothing links here yet. Link to it from another note with <code>[[${esc(note.slug)}]]</code>.</div>`}
         </div>
+        ${boards.length ? `<div class="backlinks on-canvases">
+          <h3>On canvases</h3>
+          ${boards.map((path) => `<button class="row-item" data-open-canvas="${esc(path)}">${icon("canvas", "sm")}<span class="title">${esc(path.split("/").pop().replace(/\.canvas$/i, ""))}</span><span class="meta">Canvas</span></button>`).join("")}
+        </div>` : ""}
         ${outgoingHtml(note)}
         ${mentionsHtml()}
+      </div>
+      ${side ? splitPaneHtml(side) : ""}
       </div>
     </aside>`;
   $("#layer").appendChild(layer);
   wireDrawer(layer, note);
   wireTabs(layer);
+  wireSplit(layer);
 }
 
 function wireDrawer(layer, note) {
+  for (const button of layer.querySelectorAll("[data-open-canvas]")) {
+    button.addEventListener("click", async () => {
+      closeDrawer();
+      const { openCanvas } = await import("./canvas.js");
+      openCanvas(button.dataset.openCanvas);
+    });
+  }
   $("#ed-title", layer).addEventListener("input", (e) => queueChange({ title: e.target.value.trim() || note.slug }));
   $("#ed-tags", layer).addEventListener("input", (e) =>
     queueChange({ tags: e.target.value.split(",").map((t) => t.trim().replace(/^#/, "").toLowerCase()).filter(Boolean) }),

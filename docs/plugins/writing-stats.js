@@ -3,15 +3,24 @@
 export const manifest = {
   id: "writing-stats",
   name: "Writing stats",
-  version: "1.0.0",
+  version: "1.1.0",
   author: "Cairn",
-  description: "Words written, notes per type, longest notes and a 30-day activity chart.",
+  description: "Words written, notes per type, longest notes and an activity chart.",
+  settings: [
+    { key: "wordsPerMinute", label: "Reading speed", type: "number", default: 230, min: 60, max: 1000, step: 10, description: "Words per minute, for the reading-time estimates." },
+    { key: "chartDays", label: "Activity chart", type: "select", default: "30", options: [{ value: "14", label: "Last 14 days" }, { value: "30", label: "Last 30 days" }, { value: "90", label: "Last 90 days" }] },
+  ],
 };
 
 export const countWords = (text) => String(text).replace(/```[\s\S]*?```/g, " ").split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 
 export default function activate(cairn) {
   const esc = cairn.escape;
+  const speed = () => Math.max(60, Number(cairn.settings.get("wordsPerMinute")) || 230);
+  const days = () => Number(cairn.settings.get("chartDays")) || 30;
+  cairn.settings.onChange(() => {
+    if (document.querySelector(".ws-tiles")) cairn.rerender(); // only when the stats page is showing
+  });
 
   function draw(el) {
     const notes = cairn.notes();
@@ -22,14 +31,15 @@ export default function activate(cairn) {
     const longest = [...words].sort((a, b) => b.words - a.words).slice(0, 8);
     const day = 86_400_000;
     const now = Date.now();
-    const buckets = Array.from({ length: 30 }, () => 0);
+    const span = days();
+    const buckets = Array.from({ length: span }, () => 0);
     for (const n of notes) {
       const age = Math.floor((now - (n.mtime || 0)) / day);
-      if (n.mtime && age >= 0 && age < 30) buckets[29 - age] += 1;
+      if (n.mtime && age >= 0 && age < span) buckets[span - 1 - age] += 1;
     }
     const peak = Math.max(1, ...buckets);
     const bars = buckets.map((count, i) => {
-      const date = new Date(now - (29 - i) * day).toISOString().slice(0, 10);
+      const date = new Date(now - (span - 1 - i) * day).toISOString().slice(0, 10);
       return `<span class="ws-bar" style="--h:${Math.round((count / peak) * 100)}%" title="${date}: ${count} note${count === 1 ? "" : "s"} edited"></span>`;
     }).join("");
     el.innerHTML = `
@@ -38,9 +48,9 @@ export default function activate(cairn) {
         <div class="ws-tile"><strong>${total.toLocaleString()}</strong><span>words</span></div>
         <div class="ws-tile"><strong>${notes.length.toLocaleString()}</strong><span>notes</span></div>
         <div class="ws-tile"><strong>${notes.length ? Math.round(total / notes.length).toLocaleString() : 0}</strong><span>words per note</span></div>
-        <div class="ws-tile"><strong>${Math.max(1, Math.round(total / 230)).toLocaleString()} min</strong><span>to read it all</span></div>
+        <div class="ws-tile"><strong>${Math.max(1, Math.round(total / speed())).toLocaleString()} min</strong><span>to read it all</span></div>
       </div>
-      <section class="ws-section"><h2>Notes edited, last 30 days</h2><div class="ws-chart" role="img" aria-label="Notes edited per day over the last 30 days">${bars}</div></section>
+      <section class="ws-section"><h2>Notes edited, last ${span} days</h2><div class="ws-chart" role="img" aria-label="Notes edited per day over the last ${span} days">${bars}</div></section>
       <section class="ws-section"><h2>By type</h2><ul class="ws-types">${Object.entries(byType).sort((a, b) => b[1] - a[1]).map(([type, count]) => `<li><span>${esc(type)}</span><strong>${count}</strong></li>`).join("")}</ul></section>
       <section class="ws-section"><h2>Longest notes</h2><ol class="ws-longest">${longest.map((w) => `<li><a class="wikilink" href="#" data-open="${esc(w.note.path)}">${esc(w.note.title)}</a> <span class="muted">${w.words.toLocaleString()} words</span></li>`).join("")}</ol></section>`;
   }
@@ -54,7 +64,7 @@ export default function activate(cairn) {
       const note = cairn.activeNote();
       if (!note) return cairn.toast("Open a note first.");
       const words = countWords(note.body);
-      cairn.toast(`“${note.title}”: ${words.toLocaleString()} words, about ${Math.max(1, Math.round(words / 230))} min to read.`);
+      cairn.toast(`“${note.title}”: ${words.toLocaleString()} words, about ${Math.max(1, Math.round(words / speed()))} min to read.`);
     },
   });
 

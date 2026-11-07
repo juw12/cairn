@@ -453,6 +453,64 @@ export function resolveLink(notes, target, from = "") {
   return path ? notes.find((n) => n.path === path) || null : null;
 }
 
+// ------------------------------------------------------------ canvases as references
+// A .canvas file points at notes two ways: file cards ({"type":"file","file":"notes/x.md"}) and [[links]]
+// written inside text cards. Obsidian counts both, so the Map and a note's backlinks do too.
+export function canvasTargets(text) {
+  let data;
+  try {
+    data = JSON.parse(String(text ?? "") || "{}");
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const node of Array.isArray(data?.nodes) ? data.nodes : []) {
+    if (!node || typeof node !== "object") continue;
+    if (node.type === "file" && typeof node.file === "string" && node.file.trim()) out.push({ target: node.file.trim(), kind: "file" });
+    else if ((node.type === "text" || !node.type) && typeof node.text === "string") {
+      for (const { target } of linkTargets(node.text)) out.push({ target, kind: "link" });
+    }
+  }
+  return out;
+}
+
+// File cards hold a vault-relative path; Cairn may keep the vault inside a brain folder, so the canvas's
+// own top folder is tried as a prefix too.
+function resolveCanvasTarget(index, { target, kind }, canvasPath) {
+  if (kind === "file") {
+    const clean = target.replace(/^\/+/, "").replaceAll("\\", "/");
+    if (!isNotePath(clean)) return null;
+    const top = canvasPath.includes("/") ? canvasPath.split("/")[0] : "";
+    for (const option of [clean, top ? `${top}/${clean}` : ""]) {
+      const hit = option && index.byPath.get(option.toLowerCase());
+      if (hit) return hit;
+    }
+  }
+  return resolveTarget(index, target, canvasPath);
+}
+
+// [{ canvas, note }] for every note a canvas in `files` refers to (each pair once).
+export function canvasLinks(files, notes) {
+  const index = linkIndex(notes);
+  const pairs = [];
+  for (const file of files) {
+    if (!isCanvasPath(file.path)) continue;
+    const seen = new Set();
+    for (const ref of canvasTargets(file.text)) {
+      const note = resolveCanvasTarget(index, ref, file.path);
+      if (note && !seen.has(note)) {
+        seen.add(note);
+        pairs.push({ canvas: file.path, note });
+      }
+    }
+  }
+  return pairs;
+}
+
+export function canvasBacklinks(files, notes, path) {
+  return canvasLinks(files, notes).filter((pair) => pair.note === path).map((pair) => pair.canvas);
+}
+
 export function backlinks(notes, path) {
   if (!notes.some((n) => n.path === path)) return [];
   const index = linkIndex(notes);

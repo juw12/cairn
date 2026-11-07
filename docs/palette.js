@@ -3,13 +3,14 @@
 import { escapeHtml as esc } from "./md.js";
 import { $, TYPE_META, ask, byRecent, icon, toast } from "./ui.js";
 import { VIEWS, createNote, noteByPath, readOnly, refreshTodos, state } from "./state.js";
-import { bookmarkOpenNote, closeOtherTabs, closeTab, cycleTab, flushPending, insertIntoOpenNote, openInNewTab, openNote, openTabs, renameOpenNote, reopenClosedTab } from "./drawer.js";
+import { bookmarkOpenNote, closeOtherTabs, closeSplit, closeTab, cycleTab, flushPending, insertIntoOpenNote, openInNewTab, openNote, openTabs, pickSplit, renameOpenNote, reopenClosedTab } from "./drawer.js";
 import { chooseCanvas, newCanvas } from "./canvas.js";
 import { pluginCommands, pluginViews } from "./plugins.js";
 import { capture, commitBrain, newNote, openSettings, openToday, saveContext, switchBrain, syncBrain, toggleTheme } from "./actions.js";
 import { syncObsidian } from "./obsidian.js";
 import { fillTemplate, searchNotes, searchScore, templates } from "./vault.js";
 import { startTour } from "./tour.js";
+import { showShortcuts } from "./shortcuts.js";
 import { render, setView } from "./app.js";
 
 function commands() {
@@ -36,6 +37,10 @@ function commands() {
   if (state.open) list.push({ label: "Toggle bookmark on this note", kind: "Note", icon: "star", run: () => bookmarkOpenNote() });
   list.push({ label: "Open a canvas…", kind: "Navigate", icon: "canvas", run: chooseCanvas });
   list.push({ label: "Open a note in a new tab…", kind: "Tabs", icon: "tabs", run: openInNewTab });
+  if (state.open) {
+    list.push({ label: "Open a note beside this one…", kind: "Split  Ctrl+Alt+\\", icon: "columns", run: pickSplit });
+    if (state.split && state.split !== state.open) list.push({ label: "Close the side note", kind: "Split", icon: "x", run: closeSplit });
+  }
   const tabs = openTabs();
   if (tabs.length > 1) {
     list.push(
@@ -61,6 +66,7 @@ function commands() {
     { label: "Rescan code for TODOs", kind: "Project", icon: "code", run: () => setView("code") || refreshTodos() },
     { label: "Toggle light / dark theme", kind: "App", icon: "moon", run: toggleTheme },
     { label: "Take the tour", kind: "Help", icon: "help", run: startTour },
+    { label: "Keyboard shortcuts", kind: "Help  ?", icon: "help", run: showShortcuts },
     { label: "Switch brain", kind: "App", icon: "folder", run: switchBrain },
   );
   if (state.info?.canGit) list.push({ label: "Commit brain", kind: "Project", icon: "git", run: commitBrain });
@@ -128,8 +134,17 @@ export function pick(items, placeholder = "Choose…") {
     };
     const done = (value) => {
       wrap.remove();
+      document.removeEventListener("keydown", onEscape, true);
       resolve(value);
     };
+    // Escape closes the picker even if something else grabbed focus while it opened.
+    const onEscape = (e) => {
+      if (e.key !== "Escape" || !wrap.isConnected) return;
+      e.preventDefault();
+      e.stopPropagation();
+      done(null);
+    };
+    document.addEventListener("keydown", onEscape, true);
     input.addEventListener("input", () => {
       active = 0;
       draw();
@@ -142,9 +157,6 @@ export function pick(items, placeholder = "Choose…") {
       } else if (e.key === "Enter") {
         e.preventDefault();
         done(shown[active] ? shown[active].value : null);
-      } else if (e.key === "Escape") {
-        e.stopPropagation();
-        done(null);
       }
     });
     listEl.addEventListener("click", (e) => {
@@ -202,7 +214,18 @@ export function openPalette() {
       section(q ? "Notes" : "Commands", first, 0) + section(q ? "Commands" : "Recent", second, first.length) ||
       `<div class="empty">No matches. Press Enter to capture “${esc(input.value)}” as an idea.</div>`;
   };
-  const close = () => wrap.remove();
+  const close = () => {
+    wrap.remove();
+    document.removeEventListener("keydown", onEscape, true);
+  };
+  // Escape closes the palette even if something else grabbed focus while it opened.
+  const onEscape = (e) => {
+    if (e.key !== "Escape" || !wrap.isConnected) return;
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+  };
+  document.addEventListener("keydown", onEscape, true);
   const runActive = () => {
     const item = items[active];
     close();
@@ -225,9 +248,6 @@ export function openPalette() {
     } else if (e.key === "Enter") {
       e.preventDefault();
       runActive();
-    } else if (e.key === "Escape") {
-      e.stopPropagation();
-      close();
     }
   });
   listEl.addEventListener("click", (e) => {
