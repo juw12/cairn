@@ -270,6 +270,12 @@ export async function openBrainDialog() {
   });
 }
 
+function publishStatus(last) {
+  if (!last) return "Not published from this computer yet.";
+  if (last.error) return `Last try ${last.at}: ${last.error}`;
+  return `Last published ${last.at}${last.commit ? ` (${last.commit})` : ""} to ${last.repo}.`;
+}
+
 export async function openSettings() {
   let info;
   try {
@@ -286,6 +292,17 @@ export async function openSettings() {
       ${info.autostartSupported ? `<label class="check"><input type="checkbox" data-settings="autostart" ${info.autostart ? "checked" : ""}> Start with Windows <span class="muted">(opens quietly in the tray)</span></label>` : ""}
       <label class="check"><input type="checkbox" data-settings="auto-sync" ${info.autoSync ? "checked" : ""}> Sync automatically every 10 minutes <span class="muted">(when the brain is linked to GitHub)</span></label>
       ${info.updates ? `<label class="check"><input type="checkbox" data-settings="auto-update" ${info.autoUpdate !== false ? "checked" : ""}> Update automatically <span class="muted">(in the background; no restart needed)</span></label>` : ""}
+      <fieldset class="settings-publish">
+        <legend>Public brain</legend>
+        <label class="field">Publish notes marked <code>publish: true</code> to
+          <input type="text" data-publish-to placeholder="you/brain" value="${esc(info.publishTo || "")}" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="check"><input type="checkbox" data-publish-auto ${info.autoPublish ? "checked" : ""}> Publish automatically after each sync <span class="muted">(only when a public note changed)</span></label>
+        <div class="publish-row">
+          <button class="btn sm" data-settings="publish">${icon("refresh", "sm")} Publish now</button>
+          <small class="muted" data-publish-status>${esc(publishStatus(info.lastPublish))}</small>
+        </div>
+      </fieldset>
       <div class="settings-update">
         <span>Cairn ${esc(info.version)}${info.build ? ` <span class="muted">· ${esc(info.build)}</span>` : ""}</span>
         ${info.updates ? `<button class="btn sm" data-settings="check-update">${icon("refresh", "sm")} Check for updates</button>` : `<span class="muted">Updates come with your package manager.</span>`}
@@ -294,6 +311,17 @@ export async function openSettings() {
       <div class="actions"><button type="button" class="btn primary" data-cancel>Done</button></div>
     </div>`, (wrap, close) => {
     wrap.addEventListener("change", async (e) => {
+      if (e.target.matches("[data-publish-to], [data-publish-auto]")) {
+        const to = $("[data-publish-to]", wrap).value.trim();
+        const auto = $("[data-publish-auto]", wrap);
+        const result = await desktopAction("publish-settings", { to, auto: auto.checked });
+        if (result) {
+          $("[data-publish-to]", wrap).value = result.publishTo;
+          auto.checked = result.autoPublish;
+          if (e.target === auto && auto.checked !== result.autoPublish) toast("Add the repo to publish to first.");
+        }
+        return;
+      }
       const box = e.target.closest("input[data-settings]");
       if (!box) return;
       const result = await desktopAction(box.dataset.settings, { on: box.checked });
@@ -318,6 +346,18 @@ export async function openSettings() {
         } else {
           button.textContent = result?.reason || "You're up to date";
         }
+        return;
+      }
+      if (button.dataset.settings === "publish") {
+        const status = $("[data-publish-status]", wrap);
+        button.disabled = true;
+        status.textContent = "Publishing…";
+        const result = await desktopAction("publish", {});
+        button.disabled = false;
+        const fresh = await state.store.desktop().catch(() => null);
+        status.textContent = fresh ? publishStatus(fresh.lastPublish) : "";
+        if (result?.published) toast(`Published ${plural(result.changed, "change")}.`);
+        else if (result) toast("Your public brain is already up to date.");
         return;
       }
       if (button.dataset.settings === "update") {

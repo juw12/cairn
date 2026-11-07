@@ -22,6 +22,7 @@ anywhere.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import shutil
@@ -252,6 +253,54 @@ def needs_restart(paths: list[str]) -> bool:
     return False
 
 
+
+# ============================================================ publishing the public brain
+
+def public_digest(source: Path) -> str:
+    """Fingerprint of what would be published (notes marked publish: true, private links removed).
+
+    Lets the app skip GitHub entirely when nothing public changed since the last publish.
+    """
+    from . import publish
+
+    files = publish.unlink_private(publish.select_public(source))
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        digest.update(path.encode("utf-8") + b"\0" + files[path].encode("utf-8") + b"\0")
+    return digest.hexdigest()
+
+
+def publish_now(source: Path, repo: str, config: "Config", force: bool = False) -> dict:
+    """Publish public notes to `repo` if they changed (or always with force). Records the outcome."""
+    from . import publish
+
+    digest = public_digest(source)
+    if not force and digest == config.get("publishedDigest"):
+        return {"published": False, "reason": "up to date"}
+    stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        http = publish.make_http(publish.find_token())
+        report = publish.publish_to_github(source, repo, http, dt.date.today().isoformat())
+    except publish.PublishError as error:
+        config.set("lastPublish", {"at": stamp, "error": str(error), "repo": repo})
+        raise SyncError(str(error)) from error
+    config.data["publishedDigest"] = digest
+    config.set("lastPublish", {
+        "at": stamp, "repo": repo, "commit": (report.get("commit") or "")[:7],
+        "changed": len(report["write"]) + len(report["delete"]),
+    })
+    return {"published": bool(report.get("commit")), "commit": report.get("commit"), "changed": len(report["write"]) + len(report["delete"])}
+
+
+def valid_repo(text: str) -> str:
+    text = text.strip().removeprefix("https://github.com/").strip("/")
+    if text.endswith(".git"):
+        text = text[:-4]
+    parts = text.split("/")
+    if len(parts) != 2 or not all(parts) or any(not ch.isalnum() and ch not in "-_." for ch in "".join(parts)):
+        raise ValueError("Use OWNER/REPO, for example juw12/brain.")
+    return text
+
 # ============================================================ what the web app can ask for
 
 class DesktopHooks:
@@ -282,6 +331,9 @@ class DesktopHooks:
             "build": self.loaded_head,
             "updates": (APP_ROOT / ".git").exists(),
             "autoUpdate": self.config.get("autoUpdate", True),
+            "publishTo": self.config.get("publishTo", ""),
+            "autoPublish": bool(self.config.get("autoPublish", False)),
+            "lastPublish": self.config.get("lastPublish"),
             "autostart": autostart_enabled(),
             "autostartSupported": sys.platform == "win32",
             "autoSync": self.config.get("autoSync", True),
@@ -302,6 +354,8 @@ class DesktopHooks:
             "check-update": self.check_update,
             "update": self.update,
             "restart": self.restart_now,
+            "publish-settings": lambda: self.publish_settings(str(payload.get("to", "")), bool(payload.get("auto"))),
+            "publish": self.publish,
         }
         if action not in handlers:
             raise ValueError(f"unknown desktop action: {action}")
@@ -347,6 +401,29 @@ class DesktopHooks:
     def toggle_auto_sync(self, on: bool) -> dict:
         self.config.set("autoSync", on)
         return {"autoSync": on}
+
+    def publish_settings(self, to: str, auto: bool) -> dict:
+        repo = valid_repo(to) if to.strip() else ""
+        if repo != self.config.get("publishTo"):
+            self.config.data.pop("publishedDigest", None)  # a new target gets everything
+        self.config.data["publishTo"] = repo
+        self.config.set("autoPublish", bool(auto and repo))
+        return {"publishTo": repo, "autoPublish": bool(auto and repo)}
+
+    def publish(self) -> dict:
+        repo = self.config.get("publishTo")
+        if not repo:
+            raise ValueError("Choose where to publish first, e.g. you/brain.")
+        brain = self.server.RequestHandlerClass.brain
+        return publish_now(brain.dir, repo, self.config, force=True)
+
+    def maybe_publish(self) -> dict | None:
+        """After a sync: publish public notes if auto-publish is on and something public changed."""
+        repo = self.config.get("publishTo")
+        if not repo or not self.config.get("autoPublish") or self.server is None:
+            return None
+        brain = self.server.RequestHandlerClass.brain
+        return publish_now(brain.dir, repo, self.config)
 
     def toggle_auto_update(self, on: bool) -> dict:
         self.config.set("autoUpdate", on)
@@ -660,6 +737,17 @@ class DesktopApp:
         while not self.stopping.wait(wait):
             wait = SYNC_EVERY_SECONDS
             self.sync_once()
+            self.publish_once()
+
+    def publish_once(self) -> None:
+        try:
+            result = self.hooks.maybe_publish()
+            if result and result.get("published"):
+                log(f"published {result['changed']} change(s) to {self.config.get('publishTo')}")
+        except SyncError as error:
+            log(f"publish skipped: {error}")
+        except Exception as error:  # never let a background publish take the app down
+            log(f"publish failed: {error}")
 
     def update_loop(self):
         wait = UPDATE_FIRST_SECONDS

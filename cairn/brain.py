@@ -32,9 +32,17 @@ ATTACHMENT_TYPES = {
 }
 MAX_TODOS = 500
 LOCAL_WRITE_TIMEOUT = 120  # add/commit of a big vault on a machine with busy antivirus
-NETWORK_TIMEOUT = 180  # pull / push / clone; sign-in prompts from Git Credential Manager count too
+NETWORK_TIMEOUT = 180  # one clone, or a fetch/push that may wait for a GitHub sign-in window
+ROUTE_TIMEOUT = 75  # one fetch/push attempt over one network route before trying the next
 # No console window flashing up for every git call when Cairn runs as a windowed app on Windows.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+# Signs that git couldn't get through (as opposed to "GitHub said no"): worth trying another route.
+NETWORK_ERRORS = (
+    "unable to access", "could not resolve", "timed out", "connection was reset", "connection reset",
+    "recv failure", "failed to connect", "proxy", "407", "early eof", "rpc failed", "unexpected disconnect",
+    "the remote end hung up", "schannel", "ssl", "operation too slow",
+)
+PROXY_VARIABLES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
 
 BRAIN_README = """# brain/
 
@@ -284,6 +292,12 @@ class Brain:
             timeout=timeout, env=env, creationflags=NO_WINDOW,
         )
 
+    def _network(self, *args: str) -> subprocess.CompletedProcess:
+        """git fetch / pull / push: tries every way out of this network (see git_over_network)."""
+        remote = self._remote_name() or "origin"
+        url = self._git("remote", "get-url", remote).stdout.strip()
+        return git_over_network(list(args), self.root, url)
+
     def git_available(self) -> bool:
         if not shutil.which("git"):
             return False
@@ -333,14 +347,14 @@ class Brain:
 
     def _link_upstream(self, remote: str, branch: str, has_commits: bool) -> str | None:
         """First sync on this device: connect the branch to the same branch on the remote."""
-        fetch = self._git("fetch", remote, timeout=NETWORK_TIMEOUT)
+        fetch = self._network("fetch", remote)
         if fetch.returncode != 0:
             raise SyncError(_explain_git_failure(fetch, "fetch"))
         remote_ref = f"refs/remotes/{remote}/{branch}"
         if self._git("rev-parse", "--verify", "-q", remote_ref).returncode != 0:
             return None  # nothing there yet: the first push creates it
         if not has_commits:
-            pull = self._git("pull", remote, branch, timeout=NETWORK_TIMEOUT)
+            pull = self._network("pull", remote, branch)
             if pull.returncode != 0:
                 raise SyncError(_explain_git_failure(pull, "pull"))
         self._git("branch", f"--set-upstream-to={remote}/{branch}", branch)
@@ -402,10 +416,14 @@ class Brain:
         before = self._git("rev-parse", "--verify", "-q", "HEAD").stdout.strip()
         upstream = self._upstream() or self._link_upstream(remote, branch, has_commits=bool(before))
         if upstream:
-            pull = self._git("pull", "--rebase", "--autostash", timeout=NETWORK_TIMEOUT)
-            if pull.returncode != 0:
+            # Fetch over whichever network route works, then replay local commits on top (no network).
+            fetch = self._network("fetch", remote)
+            if fetch.returncode != 0:
+                raise SyncError(_explain_git_failure(fetch, "pull"))
+            rebase = self._git("rebase", "--autostash", "@{u}", timeout=LOCAL_WRITE_TIMEOUT)
+            if rebase.returncode != 0:
                 self._git("rebase", "--abort")
-                raise SyncError(_explain_git_failure(pull, "pull"))
+                raise SyncError(_explain_git_failure(rebase, "pull"))
         after_pull = self._git("rev-parse", "--verify", "-q", "HEAD").stdout.strip()
         pulled = 0
         if after_pull and before != after_pull:
@@ -416,7 +434,7 @@ class Brain:
         pushed = 0
         if ahead:
             push_args = ["push"] if upstream else ["push", "-u", remote, branch]
-            push = self._git(*push_args, timeout=NETWORK_TIMEOUT)
+            push = self._network(*push_args)
             if push.returncode != 0:
                 raise SyncError(_explain_git_failure(push, "push"))
             pushed = ahead
@@ -431,10 +449,128 @@ def _explain_git_failure(result: subprocess.CompletedProcess, step: str) -> str:
                 "changes are committed locally. Resolve it in your git tool, then sync again.")
     if "authentication" in lowered or "terminal prompts disabled" in lowered or "403" in lowered:
         return "GitHub needs you to sign in. Sync again and approve the GitHub sign-in window."
-    if "could not resolve host" in lowered or "unable to access" in lowered or "timed out" in lowered:
+    if is_network_failure(result):
         return "Couldn't reach the remote (offline?). Your edits are safe and will sync next time."
     last_line = text.splitlines()[-1] if text else f"git {step} failed"
     return f"git {step} failed: {last_line}"
+
+
+
+# ------------------------------------------------------------ getting through office proxies
+
+_last_route: dict[str, str] = {}  # remote host -> name of the route that worked last time
+
+
+def _windows_system_proxy() -> list[str]:
+    """Proxies from Windows' Internet settings (what Edge uses), e.g. ['proxy.corp:80']."""
+    if os.name != "nt":
+        return []
+    try:
+        import winreg
+
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
+            server = winreg.QueryValueEx(key, "ProxyServer")[0]
+    except OSError:
+        return []
+    if not enabled or not server:
+        return []
+    found = []
+    for part in str(server).split(";"):  # "proxy:80" or "http=proxy:80;https=proxy:443"
+        part = part.strip()
+        if "=" in part:
+            scheme, _, part = part.partition("=")
+            if scheme.strip().lower() not in ("http", "https"):
+                continue
+        if part:
+            found.append(part)
+    return found
+
+
+def _proxy_url(proxy: str) -> str:
+    """http://:@host:port: the empty user:password lets git sign in to the proxy as the Windows user."""
+    proxy = proxy.strip()
+    scheme, sep, rest = proxy.partition("://")
+    if not sep:
+        scheme, rest = "http", proxy
+    rest = rest.split("@")[-1].rstrip("/")
+    return f"{scheme}://:@{rest}"
+
+
+def _remote_host(remote_url: str) -> str:
+    if "://" not in remote_url:
+        return ""
+    return remote_url.split("://", 1)[1].split("/", 1)[0].split("@")[-1]
+
+
+def network_routes(remote_url: str = "") -> list[tuple[str, tuple[str, ...]]]:
+    """Ways to reach the remote: git as configured, every proxy this computer knows about
+    (Windows settings, HTTPS_PROXY...), then no proxy. The one that worked last time goes first."""
+    host = _remote_host(remote_url)
+    scoped = [f"http.https://{host}/.proxy"] if host else []  # beats any per-host proxy in .gitconfig
+    routes: list[tuple[str, tuple[str, ...]]] = [("as configured", ())]
+    candidates = _windows_system_proxy() + [os.environ[name] for name in PROXY_VARIABLES[:4] if os.environ.get(name)]
+    seen = set()
+    for proxy in candidates:
+        url = _proxy_url(proxy)
+        if url in seen:
+            continue
+        seen.add(url)
+        flags = ["-c", f"http.proxy={url}", "-c", "http.proxyAuthMethod=anyauth"]
+        for key in scoped:
+            flags += ["-c", f"{key}={url}"]
+        routes.append((f"via {url.split('@')[-1]}", tuple(flags)))
+    direct = ["-c", "http.proxy="]
+    for key in scoped:
+        direct += ["-c", f"{key}="]
+    routes.append(("direct", tuple(direct)))
+    remembered = _last_route.get(host)
+    if remembered:
+        routes.sort(key=lambda route: route[0] != remembered)
+    return routes
+
+
+def is_network_failure(result: subprocess.CompletedProcess) -> bool:
+    text = (result.stderr or result.stdout or "").lower()
+    if "authentication" in text or "terminal prompts disabled" in text or "403" in text or "repository not found" in text:
+        return False
+    return any(sign in text for sign in NETWORK_ERRORS)
+
+
+def _run_git(args: list[str], cwd: Path | None, timeout: int, env: dict | None = None) -> subprocess.CompletedProcess:
+    command = ["git", "-C", str(cwd), *args] if cwd is not None else ["git", *args]
+    return subprocess.run(
+        command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout, env=env, creationflags=NO_WINDOW,
+    )
+
+
+def git_over_network(args: list[str], cwd: Path | None, remote_url: str, timeout: int = ROUTE_TIMEOUT) -> subprocess.CompletedProcess:
+    """Run a git command that talks to the remote, trying each network route until one gets through.
+
+    Office networks often have more than one way out (the Windows proxy, a sign-in proxy, none),
+    and any of them can stall for a while. The route that worked is remembered per host and tried
+    first next time. A real answer from the server (bad password, conflict) stops the search.
+    """
+    host = _remote_host(remote_url)
+    last: subprocess.CompletedProcess | None = None
+    for name, flags in network_routes(remote_url):
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        if name == "direct":
+            for variable in PROXY_VARIABLES:
+                env.pop(variable, None)
+        try:
+            result = _run_git([*flags, *args], cwd, timeout, env)
+        except subprocess.TimeoutExpired:
+            result = subprocess.CompletedProcess(args, 124, "", f"git {args[0]} timed out after {timeout}s ({name})")
+        if result.returncode == 0:
+            _last_route[host] = name
+            return result
+        last = result
+        if not is_network_failure(result):
+            return result
+    return last if last is not None else subprocess.CompletedProcess(args, 1, "", "no network route")
 
 
 def clone_repo(url: str, destination: Path) -> Path:
@@ -448,11 +584,7 @@ def clone_repo(url: str, destination: Path) -> Path:
     if destination.exists() and any(destination.iterdir()):
         raise SyncError(f"{destination} already exists and isn't empty.")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        ["git", "clone", url, str(destination)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=NETWORK_TIMEOUT, creationflags=NO_WINDOW,
-    )
+    result = git_over_network(["clone", url, str(destination)], None, url, timeout=NETWORK_TIMEOUT)
     if result.returncode != 0:
         raise SyncError(_explain_git_failure(result, "clone"))
     return destination

@@ -146,6 +146,11 @@ function inline(text, ctx) {
   };
   let out = String(text).replace(/%%[\s\S]*?%%/g, "");
   out = out.replace(/`([^`]+)`/g, (_, code) => keep(`<code>${escapeHtml(code)}</code>`));
+  // $x^2$ like Obsidian: no space just inside the dollars, and "$5 and $6" stays money.
+  out = out.replace(/(^|[^\\$\w])\$(?=[^\s$])([^$\n]*?[^\s\\$])\$(?![\d$])/g, (_, before, tex) =>
+    before + keep(`<span class="math-inline">${escapeHtml(tex)}</span>`));
+  out = out.replace(/(^|[^\\$\w])\$([^\s$\\])\$(?![\d$])/g, (_, before, tex) =>
+    before + keep(`<span class="math-inline">${escapeHtml(tex)}</span>`));
   out = out.replace(/!\[\[([^\]\n]+)\]\]/g, (_, raw) => keep(embedHtml(raw, ctx)));
   out = out.replace(/\[\[([^\]\n]+)\]\]/g, (_, raw) => keep(wikiHtml(raw, ctx)));
   out = out.replace(/!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, alt, url) => keep(imageHtml(alt, url, ctx)));

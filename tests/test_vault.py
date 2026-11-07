@@ -341,6 +341,58 @@ class VaultFeatureTests(unittest.TestCase):
         self.assertIsNone(page.evaluate("localStorage.getItem('cairn.updated')"))
         self.assertEqual(self.errors, [])
 
+    def test_maths_and_diagrams_render_and_fall_back_to_source(self):
+        context = self.browser.new_context(viewport={"width": 1440, "height": 900})
+        install_github_mock(context)
+        fake_katex = "window.katex = { renderToString: (tex, o) => `<span class=\"katex\">${o.displayMode ? 'D' : 'I'}:${tex.replace(/</g, '&lt;')}</span>` };"
+        fake_mermaid = "window.mermaid = { initialize() {}, async render(id, src) { return { svg: `<svg id=\"${id}\" data-lines=\"${src.split('\\n').length}\"></svg>` }; } };"
+        context.route("https://rich.test/katex.js", lambda route: route.fulfill(body=fake_katex, content_type="text/javascript"))
+        context.route("https://rich.test/katex.css", lambda route: route.fulfill(body=".katex{}", content_type="text/css"))
+        context.route("https://rich.test/mermaid.js", lambda route: route.fulfill(body=fake_mermaid, content_type="text/javascript"))
+        context.route("https://rich.test/missing.js", lambda route: route.fulfill(status=404, body=""))
+        page = context.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.add_init_script("""
+            localStorage.setItem('cairn.theme', 'light');
+            window.CAIRN_RICH_SOURCES = {
+              katex: { js: { url: 'https://rich.test/katex.js' }, css: { url: 'https://rich.test/katex.css' } },
+              mermaid: { js: { url: 'https://rich.test/mermaid.js' } },
+            };
+        """)
+        page.goto(self.url + "?empty=1")
+        page.wait_for_selector("#nav button")
+        note = "---\ntitle: Rich\n---\nEnergy $E=mc^2$ costs $5 and $6 today.\n\n$$\n\\int_0^1 x\\,dx\n$$\n\n```mermaid\ngraph TD\nA-->B\n```\n"
+        page.evaluate("(text) => window.cairn.state.store.reset({'rich.md': {text, mtime: Date.now()}})", note)
+        page.evaluate("() => window.cairn.reload()")
+        page.evaluate("() => document.querySelector('#view').insertAdjacentHTML('beforeend', `<button id='opener' data-open='rich.md'>o</button>`)")
+        page.evaluate("() => { window.cairn.state.editorMode = 'preview'; }")
+        page.click("#opener")
+        page.wait_for_selector(".drawer .math-block .katex")
+        self.assertEqual(page.inner_text(".drawer .math-inline.rendered"), "I:E=mc^2")
+        self.assertIn("D:", page.inner_text(".drawer .math-block"))
+        self.assertIn("$5 and $6", page.inner_text(".drawer"), "money is not maths")
+        page.wait_for_selector(".drawer .mermaid-diagram svg[data-lines='2']")
+        self.assertEqual(page.locator(".drawer pre code.language-mermaid").count(), 0)
+        # Offline: the renderer can't load, the source stays readable.
+        page.evaluate("() => { window.CAIRN_RICH_SOURCES.katex.js.url = 'https://rich.test/missing.js'; }")
+        offline = context.new_page()
+        offline.add_init_script("""
+            window.CAIRN_RICH_SOURCES = { katex: { js: { url: 'https://rich.test/missing.js' } }, mermaid: { js: { url: 'https://rich.test/missing.js' } } };
+        """)
+        offline.goto(self.url + "?empty=1")
+        offline.wait_for_selector("#nav button")
+        offline.evaluate("(text) => window.cairn.state.store.reset({'rich.md': {text, mtime: Date.now()}})", note)
+        offline.evaluate("() => window.cairn.reload()")
+        offline.evaluate("() => document.querySelector('#view').insertAdjacentHTML('beforeend', `<button id='opener' data-open='rich.md'>o</button>`)")
+        offline.evaluate("() => { window.cairn.state.editorMode = 'preview'; }")
+        offline.click("#opener")
+        offline.wait_for_selector(".drawer pre.math[data-rendered='source']")
+        self.assertIn("\\int_0^1", offline.inner_text(".drawer pre.math"))
+        offline.wait_for_selector(".drawer code.language-mermaid[data-rendered='source']")
+        self.assertEqual(errors, [])
+        context.close()
+
     def test_tour_runs_once_on_first_open(self):
         page = self.open(tour=True)
         page.wait_for_selector(".tour .tour-card")
