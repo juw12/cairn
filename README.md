@@ -176,6 +176,28 @@ progress. Any logged step that starts with a slash command counts as a skill run
 - **Demo:** *Load a sample week* on the Vibe page of the [demo](https://juw12.github.io/cairn/?demo=1). Stats: sessions, time, ship rate, checks passing, a 14-day activity chart, open feedback and the average
 rating. No streaks, no leaderboards: everything is evidence you can open as a file.
 
+#### Detect sessions automatically
+
+`cairn vibe watch` notices AI coding sessions without anyone typing `vibe start`:
+
+```sh
+cairn vibe watch --once          # one sync, then exit
+cairn vibe watch                 # keep watching (every 60 s; --every 30)
+cairn vibe watch --everywhere    # OpenCode sessions from any folder, not just this repo
+cairn vibe watch --install       # start hidden at Windows sign-in (--uninstall removes it)
+```
+
+- **OpenCode:** each session in OpenCode's local database becomes a session note (`source: opencode`) with active
+  minutes (gaps between messages, capped at 10 minutes), lines added/removed, files, model and cost. It is `live`
+  while messages keep arriving, `shipped` if it changed code, otherwise `done`. Re-running is idempotent, and a
+  status you set by hand is kept until the session moves again. Subagent and archived sessions are skipped.
+- **Vector:** when the Vector app is running and this repo changes, a session opens; new commits are logged, and it
+  ends when Vector closes or the repo has been quiet for 30 minutes (`shipped` with commits, else `partial`).
+  Detection is from the outside only (process list and git), so it can't see what was asked. For prompts and steps,
+  let the assistant report itself with `cairn vibe start/log/check/end`.
+- **Privacy:** the OpenCode database is opened read-only and only session metadata and message timestamps are read,
+  never message text. Nothing leaves your machine. `--no-opencode` and `--no-vector` turn either source off.
+
 ### Keep a daily log by voice
 
 Press the round **Log** button at the bottom of any screen, or <kbd>L</kbd>. The microphone starts (you can turn that off), you talk, and every sentence lands in today's page as a plain Markdown bullet:
@@ -353,6 +375,7 @@ cairn todos                              # TODO/FIXME/HACK comments in the code
 cairn context                            # write brain/CONTEXT.md
 cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ and sync both ways
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
+cairn vibe watch                         # detect OpenCode and Vector sessions automatically
 cairn serve --port 4777                  # the app (default command)
 ```
 

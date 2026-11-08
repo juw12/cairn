@@ -340,22 +340,14 @@ const DEMO_DAYS = [
   ["year", ["19:30 Sketched the first idea for an offline hiking app", "Mood: great (5/5)"]],
 ];
 
-// The sample brain's one dated journal page moves to a day the generated pages never use, so the
-// demo has the same notes (and the same count) whatever today's date is.
-const FIXED_JOURNAL_OFFSET = -4;
-
-function redateJournal(path, text) {
-  const match = /^journal\/(\d{4}-\d{2}-\d{2})\.md$/.exec(path);
-  if (!match) return [path, text];
-  const day = addDays(dayOf(), FIXED_JOURNAL_OFFSET);
-  return [`journal/${day}.md`, text.split(match[1]).join(day)];
-}
-
-function demoJournalDays() {
+// `taken` holds paths that already exist (the fixed sample journal page). A dated page that would land on
+// one moves back a day, so the demo always has the same number of notes whatever today's date is.
+function demoJournalDays(taken = new Set()) {
   const files = {};
   const base = dayOf();
   for (const [offset, lines] of DEMO_DAYS) {
-    const day = offset === "month" ? addMonths(base, -1) : offset === "year" ? addMonths(base, -12) : addDays(base, offset);
+    let day = offset === "month" ? addMonths(base, -1) : offset === "year" ? addMonths(base, -12) : addDays(base, offset);
+    while (taken.has(`journal/${day}.md`) || files[`journal/${day}.md`]) day = addDays(day, -1);
     const body = lines.map((line) => (/^\d{2}:\d{2} /.test(line) ? `- ${line}` : `- 20:00 ${line}`)).join("\n");
     files[`journal/${day}.md`] = `---\ntitle: ${day}\ntype: journal\ncreated: ${day}\n---\n## Log\n\n${body}\n`;
   }
@@ -382,11 +374,10 @@ export class DemoStore {
     let stamp = Date.now() - DEMO_FILES.length * 60_000;
     for (const file of DEMO_FILES) {
       stamp += 60_000;
-      const [path, text] = redateJournal(file.path, file.text);
-      files[path] = { text, mtime: stamp };
+      files[file.path] = { text: file.text, mtime: stamp };
     }
-    for (const [path, text] of Object.entries(demoJournalDays())) {
-      if (!files[path]) files[path] = { text, mtime: stamp - 3_600_000 };
+    for (const [path, text] of Object.entries(demoJournalDays(new Set(Object.keys(files))))) {
+      files[path] = { text, mtime: stamp - 3_600_000 };
     }
     return files;
   }

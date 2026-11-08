@@ -18,8 +18,8 @@ except ImportError:  # pragma: no cover
 VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "context", "plugins", "people", "proof"]
 
 
-# The demo brain has 27 notes: 18 from the fixture (one is a journal page, re-dated to 4 days ago) plus
-# 9 journal pages dated relative to today (docs/store.js DEMO_DAYS).
+# The demo brain has 27 notes: the original 18 plus 9 dated journal pages (docs/store.js DEMO_DAYS),
+# whatever today's date is (a dated page never overwrites the fixed sample journal page).
 DEMO_NOTES = 27
 
 
