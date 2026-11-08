@@ -18,8 +18,9 @@ except ImportError:  # pragma: no cover
 VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "context", "plugins", "people", "proof"]
 
 
-# The demo brain has 26 notes: the original 18 plus 8 dated journal pages (docs/store.js DEMO_DAYS).
-DEMO_NOTES = 26
+# The demo brain has 27 notes: the original 18 plus 9 dated journal pages (docs/store.js DEMO_DAYS),
+# whatever today's date is (a dated page never overwrites the fixed sample journal page).
+DEMO_NOTES = 27
 
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
