@@ -19,7 +19,7 @@ export const STATUSES = {
   decision: ["proposed", "accepted", "superseded"],
   note: [],
   journal: [],
-  session: ["live", "shipped", "partial", "dropped"],
+  session: ["live", "shipped", "partial", "dropped", "done"],
   feedback: ["new", "planned", "addressed", "wontfix"],
 };
 
@@ -825,7 +825,10 @@ export function stampMinutes(stamp) {
   return Math.round(date.getTime() / 60000) + hour * 60 + minute;
 }
 
+// Active minutes: `minutes` when a watcher measured it, else ended minus started.
 export function sessionMinutes(note) {
+  const measured = note.meta.minutes;
+  if (typeof measured === "string" && /^[0-9]+$/.test(measured.trim())) return Number(measured);
   const start = stampMinutes(note.meta.started);
   const end = stampMinutes(note.meta.ended);
   if (start === null || end === null || end < start) return 0;
@@ -858,6 +861,7 @@ export function vibeStats(notes, today, days = 14) {
   const sessions = notes.filter((n) => n.type === "session");
   const feedback = notes.filter((n) => n.type === "feedback");
   const finished = sessions.filter((s) => FINISHED.includes(s.status));
+  const ended = sessions.filter((s) => FINISHED.includes(s.status) || s.status === "done");
   const logs = sessions.flatMap((s) => sessionLog(s.body));
   const passed = logs.filter((e) => e.kind === "pass").length;
   const failed = logs.filter((e) => e.kind === "fail").length;
@@ -887,8 +891,9 @@ export function vibeStats(notes, today, days = 14) {
     shipped: sessions.filter((s) => s.status === "shipped").length,
     partial: sessions.filter((s) => s.status === "partial").length,
     dropped: sessions.filter((s) => s.status === "dropped").length,
+    done: sessions.filter((s) => s.status === "done").length,
     ship_rate: percent(finished.filter((s) => s.status === "shipped").length, finished.length),
-    minutes: sum(finished, sessionMinutes),
+    minutes: sum(ended, sessionMinutes),
     prompts: logs.filter((e) => e.kind === "prompt").length,
     passed,
     failed,

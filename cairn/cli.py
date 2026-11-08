@@ -231,6 +231,49 @@ def cmd_publish(brain: Brain, args) -> int:
     return 0
 
 
+
+def _vibe_watch(brain: Brain, args) -> int:
+    from . import watch
+
+    if args.uninstall:
+        print("Auto-start removed." if watch.uninstall_startup() else "Auto-start was not set up.")
+        return 0
+    options = {
+        "opencode": not args.no_opencode,
+        "vector": not args.no_vector,
+        "everywhere": args.everywhere,
+        "days": args.days,
+        "idle_minutes": args.idle,
+    }
+    if args.vector_process:
+        options["vector_names"] = tuple(args.vector_process)
+    if args.install:
+        extra = [f"--every={args.every}", f"--idle={args.idle}", f"--days={args.days}"]
+        extra += ["--everywhere"] if args.everywhere else []
+        extra += ["--no-opencode"] if args.no_opencode else []
+        extra += ["--no-vector"] if args.no_vector else []
+        extra += [f"--vector-process={name}" for name in args.vector_process or []]
+        try:
+            target = watch.install_startup(brain, extra)
+        except watch.WatchError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        print(f"The watcher now starts, hidden, when you sign in: {target}")
+        print("Start it now without signing out:  cairn vibe watch")
+        return 0
+    try:
+        if args.once:
+            messages = watch.watch_once(brain, **options)
+            print("\n".join(messages) if messages else "No new or changed sessions.")
+            return 0
+        watch.watch(brain, every=args.every, **options)
+    except watch.WatchError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("Stopped watching.")
+    return 0
+
 def cmd_vibe(brain: Brain, args) -> int:
     from . import vibe
 
@@ -257,6 +300,8 @@ def cmd_vibe(brain: Brain, args) -> int:
         elif args.action == "end":
             note = vibe.end(brain, args.result, " ".join(args.text), session_slug=args.session or "")
             print(f"Ended as {args.result}: brain/{note['path']}")
+        elif args.action == "watch":
+            return _vibe_watch(brain, args)
         else:
             print(vibe.stats_text(brain))
     except vibe.VibeError as error:
@@ -353,13 +398,23 @@ def build_parser() -> argparse.ArgumentParser:
         description="Live progress for AI-assisted coding, kept in brain/sessions/. Tell your assistant to run "
         "`cairn vibe log` after each step and `cairn vibe check -- <tests>` to record results; the app shows it as it happens.",
     )
-    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status"])
+    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch"])
     vibe_parser.add_argument("text", nargs="*", help="goal / log text / end summary; for check, the command after --")
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--task", help="start: link a task, e.g. ship-v1")
     vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor")
     vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest)")
     vibe_parser.add_argument("--result", default="shipped", choices=["shipped", "partial", "dropped"], help="end: the outcome")
+    vibe_parser.add_argument("--once", action="store_true", help="watch: one pass, then exit")
+    vibe_parser.add_argument("--every", type=int, default=60, help="watch: seconds between passes (default 60)")
+    vibe_parser.add_argument("--idle", type=int, default=30, help="watch: minutes without activity before a session ends (default 30)")
+    vibe_parser.add_argument("--days", type=int, default=14, help="watch: how far back to pick up OpenCode sessions (default 14)")
+    vibe_parser.add_argument("--everywhere", action="store_true", help="watch: OpenCode sessions from every folder, not just this repo")
+    vibe_parser.add_argument("--no-opencode", action="store_true", help="watch: skip OpenCode")
+    vibe_parser.add_argument("--no-vector", action="store_true", help="watch: skip Vector detection")
+    vibe_parser.add_argument("--vector-process", action="append", help="watch: process name(s) that mean Vector is open (default Vector.exe)")
+    vibe_parser.add_argument("--install", action="store_true", help="watch: start the watcher when you sign in to Windows")
+    vibe_parser.add_argument("--uninstall", action="store_true", help="watch: stop starting it at sign-in")
     feedback_parser = sub.add_parser("feedback", help='record feedback: cairn feedback "toggle is hard to find" --rating 3')
     feedback_parser.add_argument("text", nargs="+")
     feedback_parser.add_argument("--rating", type=int, choices=range(1, 6), metavar="1-5")

@@ -10,7 +10,7 @@ import { createNote, fileByPath, noteByPath, readOnly, saveNote, state, upsertFi
 import { renderNav, renderView } from "./app.js";
 
 const POLL_MS = 3000;
-const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped" };
+const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped", done: "Done" };
 const AGENT_HOOK = [
   'Before you start:  cairn vibe start "<goal>" --agent <your name>',
   'After each step:   cairn vibe log "<what you just did>"',
@@ -320,7 +320,7 @@ function liveCards() {
       ? ` <button class="btn sm" data-action="vibe-sample">${icon("play", "sm")} Load a sample week</button>`
       : "";
     return `<section class="vibe-live idle">
-      <p>${icon("activity")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here, or from your terminal: <code>cairn vibe start "add dark mode"</code>.`}${sample}</p>
+      <p>${icon("activity")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here, from your terminal (<code>cairn vibe start "add dark mode"</code>), or let <code>cairn vibe watch</code> pick up OpenCode and Vector sessions on its own.`}${sample}</p>
     </section>`;
   }
   return live.map((session, index) => liveCard(session, index === 0, live.length)).join("");
@@ -375,7 +375,7 @@ function figures(stats) {
   const figure = (value, label, title = "") => `<div class="figure"${title ? ` title="${esc(title)}"` : ""}><span class="value">${value}</span><span class="label">${label}</span></div>`;
   const dash = "–";
   return `<div class="figures vibe-figures">
-    ${figure(stats.sessions, stats.sessions === 1 ? "session" : "sessions", `${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped`)}
+    ${figure(stats.sessions, stats.sessions === 1 ? "session" : "sessions", `${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped${stats.done ? ` · ${stats.done} done` : ""}`)}
     ${figure(duration(stats.minutes), "time vibing", "Sum of finished sessions")}
     ${figure(stats.ship_rate === null ? dash : `${stats.ship_rate}%`, "shipped", "Finished sessions that shipped")}
     ${figure(stats.pass_rate === null ? dash : `${stats.pass_rate}%`, "checks green", `${stats.passed} passed · ${stats.failed} failed`)}
@@ -517,7 +517,7 @@ export function vibeView() {
         ${activity(stats)}
         ${skillsBlock(stats)}
         <section class="column-block">
-          <header><h2>Sessions</h2><span class="muted small">${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped</span></header>
+          <header><h2>Sessions</h2><span class="muted small">${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped${stats.done ? ` · ${stats.done} done` : ""}</span></header>
           ${sessions.length ? `<div class="rows">${sessions.slice(0, 30).map(sessionRow).join("")}</div>` : `<p class="empty">No sessions yet. Each one becomes a file in brain/sessions/.</p>`}
         </section>
       </div>
