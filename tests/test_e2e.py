@@ -168,6 +168,39 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(page.locator('[data-action="vibe-sample"]').count(), 0)
         self.assertEqual(self.errors, [])
 
+    def test_vibe_outcome_chips_and_folding_days(self):
+        page = self.open()
+        self.go(page, "vibe")
+        figures = page.inner_text(".vibe-figures")
+        self.assertIn("no checks logged yet", figures)  # a dash always says why
+        self.assertIn("no ratings yet", figures)
+        page.click('[data-action="vibe-sample"]')
+        page.wait_for_function("() => window.cairn.state.notes.filter((n) => n.type === 'session').length === 4")
+        rows = page.locator(".session-row").count()
+        chip = page.locator('.vibe-outcomes [data-action="vibe-outcome"]').first
+        outcome = chip.get_attribute("data-outcome")
+        count = int(chip.locator("b").inner_text())
+        self.assertLess(count, rows, "the sample week mixes outcomes")
+
+        chip.click()
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=count)
+        self.assertEqual(page.locator(f".session-row .dot.s-{outcome}").count(), count)
+        self.assertEqual(page.locator('.vibe-outcomes [aria-pressed="true"]').count(), 1)
+        self.assertIn("Show every outcome", page.inner_text(".vibe-sessions"))
+        page.click(f'.vibe-outcomes [data-outcome="{outcome}"]')  # pressing it again shows everything
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
+
+        head = page.locator(".day-head").first
+        in_day = page.locator(".day-group").first.locator(".session-row").count()
+        self.assertEqual(head.get_attribute("aria-expanded"), "true")
+        head.click()
+        page.wait_for_function("() => document.querySelector('.day-head').getAttribute('aria-expanded') === 'false'")
+        self.assertEqual(page.locator(".session-row").count(), rows - in_day)
+        self.assertEqual(page.evaluate("document.activeElement.classList.contains('day-head')"), True)
+        page.keyboard.press("Enter")  # a folded day opens again from the keyboard
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
+        self.assertEqual(self.errors, [])
+
     def test_feedback_capture_prefix(self):
         page = self.open()
         page.fill("#capture-input", "fb: offline maps saved my hike #maps")

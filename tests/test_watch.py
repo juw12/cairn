@@ -383,3 +383,39 @@ class ProcessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClaimTests(unittest.TestCase):
+    """One watcher writes a brain at a time: the app, the startup watcher and a terminal can overlap."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.brain = Brain(Path(self.tmp.name))
+        self.brain.init()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_first_watcher_holds_the_brain_until_it_goes_quiet(self):
+        self.assertTrue(watch.claim_watch(self.brain, "app:1", now=1000))
+        self.assertTrue(watch.claim_watch(self.brain, "app:1", now=1060), "the holder renews its claim")
+        self.assertFalse(watch.claim_watch(self.brain, "cli:2", now=1100), "a second watcher stands by")
+        stale = 1060 + watch.CLAIM_STALE_SECONDS + 1
+        self.assertTrue(watch.claim_watch(self.brain, "cli:2", now=stale), "a holder that stopped is replaced")
+        self.assertFalse(watch.claim_watch(self.brain, "app:1", now=stale + 1))
+
+    def test_release_frees_the_brain_only_for_its_holder(self):
+        watch.claim_watch(self.brain, "app:1", now=1000)
+        watch.release_watch(self.brain, "cli:2")
+        self.assertFalse(watch.claim_watch(self.brain, "cli:2", now=1001), "someone else's release changes nothing")
+        watch.release_watch(self.brain, "app:1")
+        self.assertTrue(watch.claim_watch(self.brain, "cli:2", now=1002))
+
+    def test_a_damaged_claim_file_does_not_block_watching(self):
+        watch._claim_path(self.brain).write_text("{not json", encoding="utf-8")
+        self.assertTrue(watch.claim_watch(self.brain, "app:1", now=1000))
+
+    def test_the_claim_never_lands_in_the_notes(self):
+        watch.claim_watch(self.brain, "app:1", now=1000)
+        self.assertEqual([n for n in self.brain.notes() if n["type"] == "session"], [])
+        self.assertFalse(str(watch._claim_path(self.brain)).endswith(".md"))

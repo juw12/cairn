@@ -1570,15 +1570,13 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 }
 
 /* vibe sessions: outcome dots, single-source label, legend */
-.session-row .dot.s-done, .vibe-legend .dot.s-done { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--session) 70%, var(--muted)); }
+.session-row .dot.s-done, .chip .dot.s-done { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--session) 70%, var(--muted)); }
 .session-row .dot.s-live { box-shadow: 0 0 0 3px var(--session-soft); }
-.vibe-legend { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
-.vibe-legend .dot { display: inline-block; margin-left: 6px; }
 .chip.static { cursor: default; }
 .log-fab-hint { animation: hint-in .4s ease-out both, hint-out .4s ease-in 6s forwards; }
 @keyframes hint-out { to { opacity: 0; visibility: hidden; } }
 .key.none { background: color-mix(in srgb, var(--session) 45%, transparent); }
-.session-row .dot.s-unknown, .vibe-legend .dot.s-unknown { background: transparent; box-shadow: none; outline: 1.5px dashed var(--muted); outline-offset: -1.5px; }
+.session-row .dot.s-unknown, .chip .dot.s-unknown { background: transparent; box-shadow: none; outline: 1.5px dashed var(--muted); outline-offset: -1.5px; }
 .vibe-more-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .vibe-more-row .vibe-more { margin-top: 0; }
 /* phones: the Log button becomes a round icon over the column gap, so it hides as little as possible */
@@ -1605,3 +1603,25 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .heatmap { max-width: none; scrollbar-width: thin; }
 .search-hits li.is-fuzzy { opacity: .82; }
 .search-hits .pill { font: 500 11px/1.5 var(--mono); padding: 0 6px; border-radius: 999px; background: var(--sunken); color: var(--muted); margin-left: 4px; }
+
+/* vibe sessions round 2: outcome chips (filter + legend), foldable days */
+.vibe-filters { align-items: center; justify-content: space-between; gap: 6px 16px; }
+.vibe-chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip.outcome .dot { display: inline-block; flex: none; }
+.chip.outcome.on .dot.s-shipped { background: var(--bg); }
+.chip.outcome.on .dot.s-done { box-shadow: inset 0 0 0 1.5px var(--bg); }
+.chip.outcome.on .dot.s-unknown { outline-color: var(--bg); }
+.vibe-filter-note { margin: 8px 0 0; }
+.day-head { width: 100%; background: none; border-width: 0 0 1px; border-style: solid; border-color: var(--line); color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.day-head:hover .day-name { color: var(--accent-ink, var(--ink)); }
+.day-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.day-head .day-name { display: inline-flex; align-items: center; gap: 4px; }
+.day-head .day-name .icon { width: 14px; height: 14px; color: var(--muted); transition: transform .15s ease; }
+.day-group.folded .day-head .day-name .icon { transform: rotate(-90deg); }
+.day-head .muted { font-weight: 400; }
+@media (max-width: 600px) {
+  .day-head { min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .day-head .day-name .icon { transition: none; }
+}
