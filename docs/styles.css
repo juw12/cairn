@@ -1288,7 +1288,7 @@ body.log-open .log-fab { display: none; }
 .log-form .btn { height: 46px; padding: 0 18px; }
 .log-feedback { min-height: 1.3em; margin: 6px 2px 0; font-size: 13px; color: var(--journal-ink); }
 
-.log-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0 4px; }
+.log-mood-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0 4px; }
 .mood-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .mood-chip { min-width: 40px; height: 40px; padding: 0 12px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font: inherit; font-size: 13px; line-height: 1; cursor: pointer; transition: border-color .12s ease, background .12s ease; }
 .mood-chip:hover { border-color: var(--line-strong); background: var(--surface-2); color: var(--ink); }
@@ -1556,3 +1556,19 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 @media (prefers-reduced-motion: reduce) {
   .log-fab.wake-on::before, .log-fab-hint { animation: none; }
 }
+
+/* ---- voice log round 3: offline voice, year heatmap, close matches ---- */
+.log-offline { flex-basis: 100%; border-top: 1px solid var(--line); padding-top: 10px; }
+.log-offline > summary { cursor: pointer; font-weight: 500; color: var(--accent-ink); font-size: 13px; }
+.log-offline > summary .pill { margin-left: 6px; }
+.log-offline .pill { font: 500 11.5px/1.6 var(--mono); padding: 0 7px; border-radius: 999px; background: var(--sunken); color: var(--ink-2, var(--ink)); }
+.log-offline .pill.ok { background: color-mix(in srgb, var(--journal) 18%, var(--sunken)); color: var(--journal); }
+.log-offline-text { margin: 8px 0 6px; font-size: 13.5px; color: var(--ink-2, var(--ink)); max-width: 62ch; }
+.log-offline-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 6px; font-size: 13px; }
+.log-offline progress { width: 100%; height: 6px; accent-color: var(--accent); }
+.file-btn { position: relative; cursor: pointer; }
+.file-btn input[type="file"] { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.log-voice.is-local .log-mic { box-shadow: 0 0 0 2px color-mix(in srgb, var(--journal) 45%, transparent); }
+.heatmap { max-width: none; scrollbar-width: thin; }
+.search-hits li.is-fuzzy { opacity: .82; }
+.search-hits .pill { font: 500 11px/1.5 var(--mono); padding: 0 6px; border-radius: 999px; background: var(--sunken); color: var(--muted); margin-left: 4px; }

@@ -18,8 +18,9 @@ except ImportError:  # pragma: no cover
 VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "context", "plugins", "people", "proof"]
 
 
-# The demo brain has 26 notes: the original 18 plus 8 dated journal pages (docs/store.js DEMO_DAYS).
-DEMO_NOTES = 26
+# The demo brain has 27 notes: 18 from the fixture (one is a journal page, re-dated to 4 days ago) plus
+# 9 journal pages dated relative to today (docs/store.js DEMO_DAYS).
+DEMO_NOTES = 27
 
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
@@ -57,6 +58,22 @@ class EndToEndTests(unittest.TestCase):
     def go(self, page, view):
         page.click(f'#nav [data-go="{view}"]')
         page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
+
+    def test_demo_brain_is_the_same_whatever_the_date(self):
+        import datetime
+
+        # 2026-11-05 used to clash with the fixture's fixed 2026-11-04 page and drop a note.
+        for day in ("2026-11-05", "2026-11-08", "2027-01-01"):
+            context = self.browser.new_context()
+            install_github_mock(context)
+            page = context.new_page()
+            page.clock.install(time=datetime.datetime.fromisoformat(day + "T10:00:00"))
+            page.goto(self.url + "?demo=1")
+            page.wait_for_selector("#nav button")
+            notes = page.evaluate("() => window.cairn.state.notes.length")
+            journal = page.evaluate("() => window.cairn.state.files.filter((f) => f.path.startsWith('journal/')).length")
+            context.close()
+            self.assertEqual((day, notes, journal), (day, DEMO_NOTES, 10))
 
     def test_every_view_renders_without_errors(self):
         page = self.open()

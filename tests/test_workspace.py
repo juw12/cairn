@@ -517,7 +517,7 @@ class WorkspaceTests(unittest.TestCase):
         page.wait_for_selector('.cal-cell.has[data-cal-day="2026-11-04"]')
         page.click('#nav [data-go="plugin:writing-stats:stats"]')
         page.wait_for_selector(".ws-tiles")
-        self.assertIn("26", page.inner_text(".ws-tiles"))  # demo brain: 26 notes
+        self.assertIn("27", page.inner_text(".ws-tiles"))  # demo brain: 27 notes
         # Code blocks: a ```query block in a note becomes a live table.
         page.click('#nav [data-go="notes"]')
         page.click('#view [data-open="notes/architecture.md"]')
