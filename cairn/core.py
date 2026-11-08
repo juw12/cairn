@@ -30,7 +30,7 @@ STATUSES = {
     "decision": ["proposed", "accepted", "superseded"],
     "note": [],
     "journal": [],
-    "session": ["live", "shipped", "partial", "dropped"],
+    "session": ["live", "shipped", "partial", "dropped", "done"],
     "feedback": ["new", "planned", "addressed", "wontfix"],
 }
 
@@ -823,6 +823,10 @@ def stamp_minutes(stamp) -> int | None:
 
 
 def session_minutes(note: dict) -> int:
+    """Active minutes: `minutes` when a watcher measured it, else ended minus started."""
+    measured = note["meta"].get("minutes")
+    if isinstance(measured, str) and re.fullmatch(r"[0-9]+", measured.strip()):
+        return int(measured)
     start = stamp_minutes(note["meta"].get("started"))
     end = stamp_minutes(note["meta"].get("ended"))
     if start is None or end is None or end < start:
@@ -856,6 +860,7 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
     sessions = [n for n in notes if n["type"] == "session"]
     feedback = [n for n in notes if n["type"] == "feedback"]
     finished = [s for s in sessions if s["status"] in FINISHED]
+    ended = [s for s in sessions if s["status"] in FINISHED or s["status"] == "done"]
     logs = [entry for s in sessions for entry in session_log(s["body"])]
     passed = sum(1 for e in logs if e["kind"] == "pass")
     failed = sum(1 for e in logs if e["kind"] == "fail")
@@ -882,8 +887,9 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
         "shipped": sum(1 for s in sessions if s["status"] == "shipped"),
         "partial": sum(1 for s in sessions if s["status"] == "partial"),
         "dropped": sum(1 for s in sessions if s["status"] == "dropped"),
+        "done": sum(1 for s in sessions if s["status"] == "done"),
         "ship_rate": _percent(sum(1 for s in finished if s["status"] == "shipped"), len(finished)),
-        "minutes": sum(session_minutes(s) for s in finished),
+        "minutes": sum(session_minutes(s) for s in ended),
         "prompts": sum(1 for e in logs if e["kind"] == "prompt"),
         "passed": passed,
         "failed": failed,

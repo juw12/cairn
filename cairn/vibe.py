@@ -273,6 +273,7 @@ def stats_text(brain: Brain) -> str:
     lines = [
         "Live now: " + ("; ".join(f"{n['title']} [{n['slug']}] since {n['meta'].get('started', '?')}" for n in live) or "nothing"),
         f"Sessions: {stats['sessions']} · shipped {stats['shipped']} · partial {stats['partial']} · dropped {stats['dropped']}"
+        + (f" · done {stats['done']}" if stats["done"] else "")
         + (f" · ship rate {stats['ship_rate']}%" if stats["ship_rate"] is not None else ""),
         f"Time vibing: {hours}h {minutes:02d}m · prompts {stats['prompts']}",
         f"Checks: {stats['passed']} passed · {stats['failed']} failed"

@@ -340,11 +340,14 @@ const DEMO_DAYS = [
   ["year", ["19:30 Sketched the first idea for an offline hiking app", "Mood: great (5/5)"]],
 ];
 
-function demoJournalDays() {
+// `taken` holds paths that already exist (the fixed sample journal page). A dated page that would land on
+// one moves back a day, so the demo always has the same number of notes whatever today's date is.
+function demoJournalDays(taken = new Set()) {
   const files = {};
   const base = dayOf();
   for (const [offset, lines] of DEMO_DAYS) {
-    const day = offset === "month" ? addMonths(base, -1) : offset === "year" ? addMonths(base, -12) : addDays(base, offset);
+    let day = offset === "month" ? addMonths(base, -1) : offset === "year" ? addMonths(base, -12) : addDays(base, offset);
+    while (taken.has(`journal/${day}.md`) || files[`journal/${day}.md`]) day = addDays(day, -1);
     const body = lines.map((line) => (/^\d{2}:\d{2} /.test(line) ? `- ${line}` : `- 20:00 ${line}`)).join("\n");
     files[`journal/${day}.md`] = `---\ntitle: ${day}\ntype: journal\ncreated: ${day}\n---\n## Log\n\n${body}\n`;
   }
@@ -373,8 +376,8 @@ export class DemoStore {
       stamp += 60_000;
       files[file.path] = { text: file.text, mtime: stamp };
     }
-    for (const [path, text] of Object.entries(demoJournalDays())) {
-      if (!files[path]) files[path] = { text, mtime: stamp - 3_600_000 };
+    for (const [path, text] of Object.entries(demoJournalDays(new Set(Object.keys(files))))) {
+      files[path] = { text, mtime: stamp - 3_600_000 };
     }
     return files;
   }
