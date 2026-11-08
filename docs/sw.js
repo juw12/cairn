@@ -1,5 +1,7 @@
 // Network-first service worker: always fresh when online, still opens offline.
-const CACHE = "cairn-v26";
+const CACHE = "cairn-v27";
+// Offline voice models live in their own "cairn-voice-*" cache and survive app updates.
+const KEEP = (key) => key === CACHE || key.startsWith("cairn-voice");
 const SHELL = [
   "./",
   "index.html",
@@ -19,7 +21,7 @@ const SHELL = [
   "drawer.js",
   "vault.js",
   "hover.js",
-  "tour.js", "rich.js", "canvas.js", "shortcuts.js", "daylog.js", "voicelog.js", "plugins.js",
+  "tour.js", "rich.js", "canvas.js", "shortcuts.js", "daylog.js", "voicelog.js", "localvoice.js", "plugins.js",
   "actions.js",
   "palette.js",
   "welcome.js",
@@ -46,7 +48,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => !KEEP(key)).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });

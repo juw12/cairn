@@ -196,15 +196,26 @@ function sentence(text) {
   return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : "";
 }
 
-export function voiceIntent(raw) {
+export function voiceIntent(raw, today = dayOf()) {
   let text = String(raw || "").trim().replace(FILLER_RE, "");
   const lower = text.toLowerCase().replace(/[.!?]+$/, "").trim();
   if (!lower) return { kind: "empty", text: "" };
   if (/^(stop|stop listening|that'?s all|that is all|i'?m done|im done|done|finish|end)$/.test(lower)) return { kind: "stop", text: "" };
   if (/^(undo|scratch that|never ?mind|delete (the )?last( one| entry)?|remove (the )?last( one| entry)?)$/.test(lower)) return { kind: "undo", text: "" };
-  if (/^(read( it)? back|read (me )?(today|today'?s (log|diary|journal|entries))|what did i do today|read today)$/.test(lower)) return { kind: "read", day: 0, text: "" };
-  if (/^(what did i do yesterday|read (me )?yesterday('?s (log|diary|journal))?|read yesterday)$/.test(lower)) return { kind: "read", day: -1, text: "" };
+  if (/^(read( it)? back|read (me )?(today|today'?s (log|diary|journal|entries))|what did i do today|read today)$/.test(lower)) return { kind: "read", day: 0, date: today, text: "" };
+  const readMatch = /^(?:what did i (?:do|log|say|write|get up to)|what happened|read(?: me)?(?: back)?|how was)\s+(.+)$/.exec(lower);
+  if (readMatch) {
+    const date = spokenDay(readMatch[1], today);
+    if (date && date <= today) return { kind: "read", day: dayDiff(today, date), date, text: "" };
+  }
   if (/^(open|show)( me)? (today|today'?s (page|log|journal|diary))$/.test(lower)) return { kind: "open-today", text: "" };
+  const openMatch = /^(?:open|show)(?: me)?\s+(.+)$/.exec(lower);
+  if (openMatch) {
+    const date = spokenDay(openMatch[1], today);
+    if (date && date <= today) return { kind: "open-day", date, text: "" };
+  }
+  const findMatch = /^(?:search(?: my (?:log|journal|diary))?(?: for)?|look up|find (?:entries|mentions|days) (?:about|of|with)|when did i (?:last )?(?:mention|talk about|write about|see|meet))\s+(.+)$/.exec(lower);
+  if (findMatch) return { kind: "search", query: findMatch[1].replace(/^(the word|about)\s+/, "").trim(), text: "" };
   if (/^(open|show)( me)? (my )?(memories|journal|diary|log)$/.test(lower)) return { kind: "open-journal", text: "" };
   if (/^(weekly review|review (my |the |this )?week|week in review)$/.test(lower)) return { kind: "review", text: "" };
   const routes = [
@@ -224,6 +235,152 @@ export function voiceIntent(raw) {
     if (mood) return { kind: "mood", mood, text: sentence(moodMatch[1]) };
   }
   return { kind: "log", text: sentence(text) };
+}
+
+// ------------------------------------------------------------ "Hey Cairn" (phonetic, so speech engines' guesses still match)
+
+// Consonant skeleton: "cairn", "karen", "kern", "kieran" and "corn" all become "crn".
+function skeleton(word) {
+  return word.toLowerCase().replace(/[^a-z]/g, "").replace(/[kq]/g, "c").replace(/[aeiouyhw]/g, "").replace(/(.)\1+/g, "$1");
+}
+
+const WAKE_GREETING = new Set(["hey", "hi", "hay", "hei", "ok", "okay", "oi"]);
+
+// "Hey Cairn, finished the export" -> "finished the export"; "Hey Cairn" -> ""; anything else -> null.
+export function matchWake(text) {
+  const words = String(text || "").trim().split(/\s+/);
+  for (let i = 0; i < Math.min(words.length - 1, 3); i++) {
+    if (!WAKE_GREETING.has(words[i].toLowerCase().replace(/[^a-z]/g, ""))) continue;
+    const name = skeleton(words[i + 1]);
+    let used = 0;
+    if (name === "crn" || name === "crns" || words[i + 1].toLowerCase().replace(/[^a-z]/g, "") === "cairo") used = 1;
+    else if (name === "cr" && /^(in|n)$/i.test((words[i + 2] || "").replace(/[^a-z]/gi, ""))) used = 2;
+    if (used) return words.slice(i + 1 + used).join(" ").replace(/^[\s,.!?:;-]+/, "").trim();
+  }
+  return null;
+}
+
+// ------------------------------------------------------------ spoken days ("last Friday", "3 November", "two days ago")
+
+const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const NUMBER_WORDS = {
+  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19, twenty: 20, thirty: 30, first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6,
+  seventh: 7, eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14,
+  fifteenth: 15, sixteenth: 16, seventeenth: 17, eighteenth: 18, nineteenth: 19, twentieth: 20, thirtieth: 30,
+};
+
+function spokenNumber(text) {
+  const clean = text.replace(/(st|nd|rd|th)$/, "");
+  if (/^\d+$/.test(clean)) return Number(clean);
+  const parts = text.split(/[\s-]+/);
+  if (parts.length === 2 && (parts[0] === "twenty" || parts[0] === "thirty") && NUMBER_WORDS[parts[1]] < 10) {
+    return NUMBER_WORDS[parts[0]] + NUMBER_WORDS[parts[1]];
+  }
+  return NUMBER_WORDS[text] ?? null;
+}
+
+function monthIndex(word) {
+  const w = word.toLowerCase();
+  return MONTH_NAMES.findIndex((m) => m === w || (w.length >= 3 && m.startsWith(w)));
+}
+
+function validDay(y, m, d) {
+  const date = new Date(y, m, d);
+  return date.getMonth() === m && date.getDate() === d ? dayOf(date) : null;
+}
+
+export function dayDiff(from, to) {
+  const [a, b] = [from, to].map((day) => {
+    const [y, m, d] = day.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  });
+  return Math.round((b - a) / 86400000);
+}
+
+// A spoken or typed day relative to `today` -> "YYYY-MM-DD", or null when it isn't a day.
+export function spokenDay(phrase, today) {
+  let p = String(phrase || "").toLowerCase().replace(/[.,!?]/g, " ").replace(/\s+/g, " ").trim();
+  p = p.replace(/^(on|for|from|of)\s+/, "").replace(/'s$/, "").replace(/\s+(log|diary|journal|entries|page)$/, "").replace(/'s$/, "").trim();
+  if (!p) return null;
+  if (p === "today" || p === "this morning" || p === "tonight") return today;
+  if (p === "yesterday") return addDays(today, -1);
+  if (p === "the day before yesterday" || p === "day before yesterday") return addDays(today, -2);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p)) return validDay(...p.split("-").map((n, i) => Number(n) - (i === 1 ? 1 : 0)));
+  let m = /^(.+?) (day|week|month|year)s? ago$/.exec(p);
+  if (m) {
+    const n = spokenNumber(m[1]);
+    if (!n) return null;
+    if (m[2] === "day") return addDays(today, -n);
+    if (m[2] === "week") return addDays(today, -7 * n);
+    return addMonths(today, m[2] === "month" ? -n : -12 * n);
+  }
+  if (p === "last week" || p === "a week ago") return addDays(today, -7);
+  if (p === "last month") return addMonths(today, -1);
+  if (p === "last year") return addMonths(today, -12);
+  m = /^(?:(last|this|past|previous) )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/.exec(p);
+  if (m) {
+    const target = WEEKDAY_NAMES.indexOf(m[2]);
+    let back = (weekday(today) - target + 7) % 7;
+    if (back === 0 && m[1] && m[1] !== "this") back = 7;
+    return addDays(today, -back);
+  }
+  const [ty, tm] = today.split("-").map(Number);
+  const year = /\b(\d{4})$/.exec(p)?.[1];
+  const body = year ? p.replace(/\s*\d{4}$/, "").trim() : p;
+  m = /^(?:the )?(.+?) (?:of )?([a-z]+)$/.exec(body) || null;
+  let dayNum = null;
+  let month = -1;
+  if (m && monthIndex(m[2]) >= 0) {
+    dayNum = spokenNumber(m[1]);
+    month = monthIndex(m[2]);
+  } else if ((m = /^([a-z]+) (?:the )?(.+)$/.exec(body)) && monthIndex(m[1]) >= 0) {
+    dayNum = spokenNumber(m[2]);
+    month = monthIndex(m[1]);
+  } else if ((m = /^the (.+)$/.exec(body))) {
+    dayNum = spokenNumber(m[1]);
+    month = tm - 1;
+    if (dayNum) {
+      const guess = validDay(ty, month, dayNum);
+      return guess && guess <= today ? guess : validDay(month === 0 ? ty - 1 : ty, (month + 11) % 12, dayNum);
+    }
+    return null;
+  }
+  if (!dayNum || month < 0) return null;
+  if (year) return validDay(Number(year), month, dayNum);
+  const guess = validDay(ty, month, dayNum);
+  return guess && guess > today ? validDay(ty - 1, month, dayNum) : guess;
+}
+
+// ------------------------------------------------------------ typo-tolerant matching for search
+
+// Edit distance where swapping two neighbouring letters counts as one edit ("exprot" -> "export").
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let before = null;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (before && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) row[j] = Math.min(row[j], before[j - 2] + 1);
+      best = Math.min(best, row[j]);
+    }
+    if (best > max) return max + 1;
+    before = prev;
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+// True when a word of the haystack is within 1 edit (words of 4-6 letters) or 2 edits (7+) of `word`.
+export function fuzzyHas(hayWords, word) {
+  if (word.length < 4) return false;
+  const max = word.length >= 7 ? 2 : 1;
+  return hayWords.some((h) => h.length >= 3 && (editDistance(h, word, max) <= max || (h.length > word.length + 1 && editDistance(h.slice(0, word.length), word, max) <= max)));
 }
 
 // ------------------------------------------------------------ memory over all days
@@ -308,14 +465,23 @@ export function searchEntries(days, query, limit = 60) {
   if (!q) return [];
   const words = q.split(/\s+/);
   const hits = [];
+  const close = [];
   for (const day of [...days.keys()].sort().reverse()) {
     for (const entry of days.get(day).entries) {
       const hay = `${plainText(entry.text)} ${entry.tags.map((t) => "#" + t).join(" ")}`.toLowerCase();
-      if (words.every((w) => hay.includes(w.replace(/^#/, "")) || hay.includes(w))) hits.push({ day, entry });
-      if (hits.length >= limit) return hits;
+      if (words.every((w) => hay.includes(w.replace(/^#/, "")) || hay.includes(w))) {
+        hits.push({ day, entry });
+        if (hits.length >= limit) return hits;
+        continue;
+      }
+      if (close.length < limit) {
+        const hayWords = hay.split(/[^\p{L}\p{N}@#]+/u).filter(Boolean);
+        const fits = words.every((w) => hay.includes(w.replace(/^#/, "")) || fuzzyHas(hayWords, w.replace(/^[#@]/, "")));
+        if (fits) close.push({ day, entry, fuzzy: true });
+      }
     }
   }
-  return hits;
+  return hits.concat(close).slice(0, limit);
 }
 
 // Most mentioned #tags and [[links]] over a set of days.

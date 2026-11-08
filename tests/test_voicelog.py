@@ -255,7 +255,7 @@ class VoiceLogTests(unittest.TestCase):
         page = self.open()
         page.click('#nav [data-go="journal"]')
         page.wait_for_selector(".memory-stats")
-        self.assertEqual(page.locator(".heat-grid .heat").count(), 18 * 7)
+        self.assertEqual(page.locator(".heat-grid .heat").count(), 53 * 7)
         self.assertGreater(page.locator(".heat-grid .heat.l1, .heat-grid .heat.l2, .heat-grid .heat.l3").count(), 4)
         self.assertGreaterEqual(page.locator(".lookback").count(), 3)
         self.assertEqual(page.locator(".mood-chart").count(), 1)
@@ -406,6 +406,199 @@ class VoiceLogTests(unittest.TestCase):
             page.click(".lookback-more summary")
             self.assertTrue(page.evaluate("document.querySelector('.lookback-more').open"))
         self.assertEqual(self.errors, [])
+
+
+    # ------------------------------------------------------------------ round 3: offline voice, any day, search
+
+    FAKE_VOSK = """
+      window.Vosk = {
+        createModel: async (url) => {
+          window.__voskModelUrl = url;
+          return {
+            KaldiRecognizer: class {
+              constructor(rate) { this.rate = rate; this.handlers = {}; window.__vosk = this; }
+              on(event, fn) { this.handlers[event] = fn; }
+              acceptWaveform() {}
+              retrieveFinalResult() {}
+              remove() {}
+            },
+            terminate() {},
+          };
+        },
+      };
+      window.__voskSay = (text) => window.__vosk.handlers.result({ result: { text } });
+    """
+    FAKE_MIC = """
+      navigator.mediaDevices.getUserMedia = async () => {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const dest = ctx.createMediaStreamDestination();
+        osc.connect(dest);
+        osc.start();
+        return dest.stream;
+      };
+    """
+
+    def route_offline_engine(self, page):
+        page.context.route("https://cdn.jsdelivr.net/npm/vosk-browser@*/**", lambda r: r.fulfill(body=self.FAKE_VOSK, content_type="text/javascript", headers={"access-control-allow-origin": "*"}))
+        page.context.route("https://ccoreilly.github.io/vosk-browser/models/**", lambda r: r.fulfill(body=b"\x1f\x8b" + b"m" * 20000, content_type="application/gzip", headers={"access-control-allow-origin": "*", "content-length": "20002"}))
+        page.add_init_script(self.FAKE_MIC)
+
+    def set_up_offline(self, page):
+        page.click("#log-fab")
+        page.wait_for_selector(".log-sheet")
+        page.click(".log-offline > summary")
+        page.click("[data-log='offline-get']")
+        page.wait_for_selector("#log-offline-badge:has-text('Ready')")
+
+    def test_offline_voice_downloads_once_and_logs_without_a_browser_engine(self):
+        page = self.open(speech=False)
+        page.evaluate(self.FAKE_MIC)
+        self.route_offline_engine(page)
+        self.set_up_offline(page)
+        meta = page.evaluate("JSON.parse(localStorage.getItem('cairn.voicelog.offline'))")
+        self.assertEqual((meta["lang"], meta["source"]), ("en", "download"))
+        self.assertTrue(page.evaluate("JSON.parse(localStorage.getItem('cairn.voicelog')).offline"))
+        self.assertTrue(page.evaluate("caches.open('cairn-voice-v1').then(async (c) => !!(await c.match('/__cairn-voice/model.tar.gz')) && !!(await c.match('/__cairn-voice/vosk.js')))"))
+        self.assertFalse(page.locator(".log-mic").is_disabled())
+        self.assertIn("on this device", page.inner_text("#log-status"))
+        page.click(".log-mic")
+        page.wait_for_function("() => window.__vosk && document.querySelector('.log-mic')?.getAttribute('aria-pressed') === 'true'")
+        self.assertTrue(page.evaluate("window.__voskModelUrl.startsWith('blob:')"))
+        page.evaluate("window.__voskSay('finished the export on the train')")
+        page.wait_for_function(
+            "(p) => (window.cairn.state.files.find((f) => f.path === p)?.text || '').includes('Finished the export on the train')",
+            arg=f"journal/{self.today}.md",
+        )
+        # It survives a reload (model kept in Cache Storage), and can be removed again.
+        page.keyboard.press("Escape")
+        page.reload()
+        page.wait_for_selector("#log-fab")
+        page.click("#log-fab")
+        page.wait_for_selector(".log-sheet")
+        self.assertIn("Ready", page.inner_text("#log-offline-badge"))
+        page.click(".log-offline > summary")
+        page.click("[data-log='offline-remove']")
+        page.wait_for_selector("#log-offline-badge:has-text('Off')")
+        self.assertTrue(page.locator(".log-mic").is_disabled())
+        self.assertFalse(page.evaluate("caches.has('cairn-voice-v1')"))
+        self.assertEqual(self.errors, [])
+
+    def test_offline_voice_takes_over_when_offline_or_the_speech_service_fails(self):
+        page = self.open()
+        page.evaluate(self.FAKE_MIC)
+        self.route_offline_engine(page)
+        self.set_up_offline(page)
+        page.uncheck(".log-sheet [data-pref='offline']")
+        page.keyboard.press("Escape")
+        # Online with offline voice off: the browser engine is used.
+        self.open_sheet_listening(page)
+        self.assertFalse(page.evaluate("!!window.__vosk"))
+        # The browser's speech service fails: Cairn switches to the on-device engine and keeps listening.
+        page.evaluate("window.__recognizer.onerror({ error: 'network' }); window.__recognizer.onend && window.__recognizer.onend()")
+        page.wait_for_function("() => !!window.__vosk")
+        page.wait_for_function("() => /switched to offline voice/.test(document.querySelector('#log-feedback')?.textContent || '')")
+        page.evaluate("window.__voskSay('wrote the summary')")
+        page.wait_for_function(
+            "(p) => (window.cairn.state.files.find((f) => f.path === p)?.text || '').includes('Wrote the summary')",
+            arg=f"journal/{self.today}.md",
+        )
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".log-sheet", state="detached")
+        # A fresh page that is offline also uses it.
+        page.context.set_offline(True)
+        self.assertEqual(page.evaluate("async () => (await import('./voicelog.js')).voiceEngine().mode"), "local")
+        page.context.set_offline(False)
+
+    def test_browser_on_device_engine_can_be_installed_and_used(self):
+        page = self.open()
+        page.evaluate("""() => {
+          window.SpeechRecognition.available = async () => window.__localState || 'downloadable';
+          window.SpeechRecognition.install = async () => { window.__localState = 'available'; return true; };
+        }""")
+        page.click("#log-fab")
+        page.wait_for_selector(".log-sheet")
+        page.click(".log-offline > summary")
+        page.wait_for_selector("[data-log='offline-chrome']")
+        page.click("[data-log='offline-chrome']")
+        page.wait_for_selector(".log-offline .pill:has-text('In use')")
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".log-sheet", state="detached")
+        self.open_sheet_listening(page)
+        self.assertTrue(page.evaluate("window.__recognizer.processLocally === true"))
+        self.assertIn("on this device", page.inner_text("#log-status"))
+        self.assertEqual(self.errors, [])
+
+    def test_spoken_days_and_voice_search(self):
+        page = self.open()
+        result = page.evaluate(
+            """async () => {
+              const dl = await import('./daylog.js');
+              const today = '2026-11-06';
+              return {
+                friday: dl.spokenDay('last friday', today),
+                nov3: dl.spokenDay('the 3rd of november', today),
+                ago: dl.spokenDay('two days ago', today),
+                future: dl.spokenDay('december 25', today),
+                read: dl.voiceIntent('what did I do last Monday', today),
+                open: dl.voiceIntent('open 3 November', today),
+                search: dl.voiceIntent('when did I last mention Sam', today),
+                keep: dl.voiceIntent('find a gift for mum', today).kind,
+                wake: ['hey karen walked the dog', 'ok kern', 'hey can you pass the salt'].map(dl.matchWake),
+              };
+            }"""
+        )
+        self.assertEqual((result["friday"], result["nov3"], result["ago"], result["future"]), ("2026-10-30", "2026-11-03", "2026-11-04", "2025-12-25"))
+        self.assertEqual((result["read"]["kind"], result["read"]["date"]), ("read", "2026-11-02"))
+        self.assertEqual((result["open"]["kind"], result["open"]["date"]), ("open-day", "2026-11-03"))
+        self.assertEqual((result["search"]["kind"], result["search"]["query"]), ("search", "sam"))
+        self.assertEqual(result["keep"], "log")
+        self.assertEqual(result["wake"], ["walked the dog", "", None])
+        # By voice: reading two days ago, then a search that lands in Journal with results.
+        self.open_sheet_listening(page)
+        two_ago = page.evaluate("async () => { const dl = await import('./daylog.js'); return dl.prettyDay(dl.addDays(dl.dayOf(), -2)); }")
+        self.say(page, "what did I do two days ago")
+        page.wait_for_function("(d) => (document.querySelector('#log-feedback')?.textContent || '').includes(d)", arg=two_ago)
+        self.say(page, "search for beta")
+        page.wait_for_selector(".memory-stats")
+        page.wait_for_selector("#journal-results .search-hits li")
+        self.assertEqual(page.input_value("#journal-search"), "beta")
+        self.assertEqual(self.errors, [])
+
+    def test_search_finds_close_matches_and_year_heatmap(self):
+        page = self.open()
+        hits = page.evaluate(
+            """async () => {
+              const dl = await import('./daylog.js');
+              const days = new Map([['2026-11-01', { entries: dl.parseEntries('## Log\\n\\n- 09:00 Finished the GPX export\\n- 10:00 Lunch with @sam') }]]);
+              return {
+                exact: dl.searchEntries(days, 'export').map((h) => [h.entry.text, !!h.fuzzy]),
+                typo: dl.searchEntries(days, 'exprot').map((h) => [h.entry.text, !!h.fuzzy]),
+                none: dl.searchEntries(days, 'zebra').length,
+              };
+            }"""
+        )
+        self.assertEqual(hits["exact"], [["Finished the GPX export", False]])
+        self.assertEqual(hits["typo"], [["Finished the GPX export", True]])
+        self.assertEqual(hits["none"], 0)
+        page.click('#nav [data-go="journal"]')
+        page.wait_for_selector(".memory-stats")
+        self.assertEqual(page.locator(".heat-grid .heat").count(), 53 * 7)
+        self.assertGreater(page.evaluate("document.querySelector('.heatmap').scrollLeft"), 0)
+        page.fill("#journal-search", "weathr")
+        page.wait_for_selector("#journal-results .search-hint")
+        self.assertIn("close", page.inner_text("#journal-results .search-hint"))
+        self.assertEqual(self.errors, [])
+
+    def test_log_sheet_keeps_focus_inside(self):
+        page = self.open()
+        page.click("#log-fab")
+        page.wait_for_selector(".log-sheet")
+        for _ in range(40):
+            page.keyboard.press("Tab")
+        self.assertTrue(page.evaluate("!!document.activeElement.closest('.log-wrap')"))
+        page.keyboard.press("Shift+Tab")
+        self.assertTrue(page.evaluate("!!document.activeElement.closest('.log-wrap')"))
 
 
 if __name__ == "__main__":

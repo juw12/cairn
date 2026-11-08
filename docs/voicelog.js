@@ -3,6 +3,7 @@
 
 import * as core from "./core.js";
 import * as dl from "./daylog.js";
+import * as lv from "./localvoice.js";
 import { escapeHtml as esc, renderMarkdown } from "./md.js";
 import { $, icon, pageHead, plural, toast, today } from "./ui.js";
 import { createNote, deleteNote, noteByPath, readOnly, saveNote, scheduleGitRefresh, state, upsertFile } from "./state.js";
@@ -32,8 +33,6 @@ export const LANGS = [
   ["pt-BR", "Português (Brasil)"],
   ["hi-IN", "हिन्दी"],
 ];
-// "Hey Cairn …" (and what speech engines often hear instead).
-const WAKE_RE = /\b(?:hey|hi|ok|okay)[,\s]+(?:cairn|cairns|karen|kern|kaine|cairo)\b[,.!?]*\s*(.*)$/i;
 const online = () => navigator.onLine !== false;
 
 let recognizer = null;
@@ -46,9 +45,9 @@ let journalWired = null;
 
 export function prefs() {
   try {
-    return { autoListen: true, keepListening: false, review: false, lang: "", wake: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
+    return { autoListen: true, keepListening: false, review: false, lang: "", wake: false, offline: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
   } catch {
-    return { autoListen: true, keepListening: false, review: false, lang: "", wake: false };
+    return { autoListen: true, keepListening: false, review: false, lang: "", wake: false, offline: false };
   }
 }
 
@@ -56,8 +55,34 @@ function setPref(key, value) {
   localStorage.setItem(PREFS_KEY, JSON.stringify({ ...prefs(), [key]: value }));
 }
 
-const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition || null;
-export const speechSupported = () => !!Recognition();
+const NativeRecognition = () => window.SpeechRecognition || window.webkitSpeechRecognition || null;
+const speechLang = () => prefs().lang || navigator.language || "en-US";
+let serviceDown = false; // the browser's speech service failed this session ("network")
+let offlineJob = null; // { progress } while a model downloads
+
+// Which recognizer to use. Chrome's on-device engine when offline voice is on and installed; the Vosk engine
+// when it is set up and wanted (offline voice on, no browser engine, offline, or the speech service failed);
+// otherwise the browser's own engine, which usually needs a connection.
+export function voiceEngine() {
+  const Native = NativeRecognition();
+  const p = prefs();
+  if (p.offline && Native && lv.chromeLocalReady(speechLang())) return { Engine: Native, mode: "chrome-local" };
+  if (lv.installed() && (p.offline || !Native || !online() || serviceDown)) return { Engine: lv.LocalRecognition, mode: "local" };
+  if (Native) return { Engine: Native, mode: "browser" };
+  return null;
+}
+export const speechSupported = () => !!voiceEngine();
+const onDevice = () => ["local", "chrome-local"].includes(voiceEngine()?.mode);
+
+function makeRecognizer() {
+  const picked = voiceEngine();
+  if (!picked) return null;
+  const rec = new picked.Engine();
+  rec.lang = speechLang();
+  if (picked.mode === "chrome-local") rec.processLocally = true;
+  rec.mode = picked.mode;
+  return rec;
+}
 const canSpeak = () => typeof window.speechSynthesis !== "undefined" && typeof window.SpeechSynthesisUtterance !== "undefined";
 
 const nowTime = () => new Date().toTimeString().slice(0, 5);
@@ -126,24 +151,22 @@ export function syncWake() {
 }
 
 function startWake() {
-  const Engine = Recognition();
-  if (!Engine) return;
   let engine;
   try {
-    engine = new Engine();
+    engine = makeRecognizer();
   } catch {
     return;
   }
+  if (!engine) return;
   wakeRecognizer = engine;
-  engine.lang = prefs().lang || navigator.language || "en-US";
   engine.continuous = true;
   engine.interimResults = false;
   engine.onresult = (event) => {
     for (let i = event.resultIndex ?? 0; i < event.results.length; i++) {
       const result = event.results[i];
       if (!result.isFinal) continue;
-      const match = WAKE_RE.exec(result[0]?.transcript || "");
-      if (match) return wake(match[1].trim());
+      const rest = dl.matchWake(result[0]?.transcript || "");
+      if (rest !== null) return wake(rest);
     }
   };
   engine.onerror = (event) => {
@@ -214,6 +237,22 @@ export function openLogSheet({ listen } = {}) {
   document.body.classList.add("log-open");
   const onKey = (event) => {
     if (!wrap.isConnected) return;
+    if (event.key === "Tab") {
+      // Keep keyboard focus inside the dialog.
+      const focusable = [...wrap.querySelectorAll('button:not([disabled]), textarea, input:not([type="hidden"]):not([hidden]), select, summary, [href]')]
+        .filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !wrap.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !wrap.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
     if (event.key === "Escape" && !event.target.closest?.(".log-entry input")) {
       event.preventDefault();
       event.stopPropagation();
@@ -226,6 +265,7 @@ export function openLogSheet({ listen } = {}) {
   wrap.addEventListener("change", onSheetChange);
   wrap.addEventListener("keydown", onSheetKeydown);
   drawSheet();
+  refreshChromeStatus();
   const auto = listen ?? prefs().autoListen;
   if (auto && speechSupported()) startListening();
   else $("#log-text")?.focus();
@@ -279,7 +319,7 @@ function drawSheet() {
       <button type="submit" class="btn primary" data-log="save">Save</button>
     </form>
     <p class="log-feedback" id="log-feedback" role="status" aria-live="polite"></p>
-    <div class="log-row">
+    <div class="log-mood-row">
       <div class="mood-chips" role="group" aria-label="How do you feel?">
         ${dl.MOODS.map((m) => `<button type="button" class="mood-chip" data-mood="${m.score}" title="${m.label}" aria-label="Mood: ${m.label}, ${m.score} out of 5">${m.label}</button>`).join("")}
       </div>
@@ -306,8 +346,9 @@ function drawSheet() {
       <label class="check"><input type="checkbox" data-pref="autoListen" ${p.autoListen ? "checked" : ""}> Start the mic when I open this</label>
       <label class="check" title="Keeps the microphone on while Cairn is open and opens this sheet when you say “Hey Cairn …”"><input type="checkbox" data-pref="wake" ${p.wake ? "checked" : ""} ${supported ? "" : "disabled"}> Listen for “Hey Cairn”</label>
       <label class="log-lang">Language
-        <select data-pref-select="lang" aria-label="Speech language">${LANGS.map(([code, name]) => `<option value="${code}" ${code === (p.lang || "") ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
+        <select data-pref-select="lang" aria-label="Speech language">${LANGS.map(([code, name]) => `<option value="${code}" ${code === (p.lang || "") ? "selected" : ""}>${esc(name)}${code && !lv.modelFor(code) ? " (no offline model)" : ""}</option>`).join("")}</select>
       </label>
+      ${offlineVoiceHtml()}
       <details class="log-help">
         <summary>Voice commands</summary>
         <ul>
@@ -316,7 +357,8 @@ function drawSheet() {
           <li><b>“idea …”</b>, <b>“decision …”</b>, <b>“note …”</b> → that kind of note, linked</li>
           <li><b>“mood good”</b>, <b>“I feel tired”</b> → a mood check-in</li>
           <li><b>“undo”</b> / <b>“scratch that”</b> → remove the last entry</li>
-          <li><b>“read it back”</b>, <b>“what did I do yesterday”</b> → read aloud</li>
+          <li><b>“read it back”</b>, <b>“what did I do last Friday”</b>, <b>“read 3 November”</b> → read that day aloud</li>
+          <li><b>“open last Monday”</b> → open that day's page; <b>“search for gpx”</b>, <b>“when did I last mention Sam”</b> → search every day</li>
           <li><b>“weekly review”</b>, <b>“open today”</b>, <b>“open my memories”</b></li>
           <li><b>“stop”</b> → stop listening</li>
           <li><b>“Hey Cairn, …”</b> from any screen (turn on “Listen for Hey Cairn”) → opens this and logs the rest</li>
@@ -326,6 +368,120 @@ function drawSheet() {
     </footer>`;
   const text = $("#log-text");
   if (text && document.activeElement === document.body) text.focus();
+  $(".log-offline")?.addEventListener("toggle", (event) => {
+    offlineOpen = event.target.open;
+  });
+}
+
+// ------------------------------------------------------------ offline voice panel
+
+let offlineOpen = false;
+let chromeStatus = null;
+
+function megabytes(bytes) {
+  return `${Math.max(1, Math.round(bytes / 1048576))} MB`;
+}
+
+function offlineVoiceHtml() {
+  const meta = lv.installed();
+  const lang = speechLang();
+  const model = lv.modelFor(lang);
+  const langName = LANGS.find(([code]) => code && code === lang)?.[1] || lang;
+  const p = prefs();
+  let badge = "Off";
+  let body = "";
+  if (offlineJob) {
+    badge = `${Math.round(offlineJob.progress * 100)}%`;
+    body = `<p class="log-offline-text" id="log-offline-progress-text">Downloading the ${esc(offlineJob.name)} model (${offlineJob.mb} MB) once…</p>
+      <progress id="log-offline-progress" max="1" value="${offlineJob.progress}" aria-label="Offline voice download"></progress>`;
+  } else if (meta) {
+    badge = "Ready";
+    body = `<p class="log-offline-text">Ready on this device: <b>${esc(meta.name)}</b> (${megabytes(meta.bytes)}). Recognition runs in this browser, so it works without a connection and audio never leaves the device.</p>
+      <div class="log-offline-actions">
+        <label class="check"><input type="checkbox" data-pref="offline" ${p.offline ? "checked" : ""}> Use it even when online</label>
+        <button type="button" class="btn ghost sm" data-log="offline-remove">Remove</button>
+      </div>`;
+  } else {
+    body = `<p class="log-offline-text">Talk without a connection. A small speech model is stored in this browser once; after that, audio never leaves the device.</p>
+      <div class="log-offline-actions">
+        ${model ? `<button type="button" class="btn sm" data-log="offline-get">Download ${esc(model.name)} model (${model.mb} MB)</button>` : `<span class="muted">No download for ${esc(langName)} yet.</span>`}
+        <label class="btn ghost sm file-btn">Use a model file<input type="file" accept=".tar.gz,.tgz,application/gzip" data-offline-file hidden></label>
+      </div>`;
+  }
+  const chromeLine = ["available", "downloadable", "downloading"].includes(chromeStatus)
+    ? `<div class="log-offline-actions"><span class="muted">This browser can also recognise ${esc(langName)} on the device.</span>
+        ${p.offline && chromeStatus === "available" ? `<span class="pill">In use</span>` : `<button type="button" class="btn ghost sm" data-log="offline-chrome">${chromeStatus === "available" ? "Use it" : "Install it"}</button>`}</div>`
+    : "";
+  return `<details class="log-offline" ${offlineOpen || offlineJob ? "open" : ""}>
+      <summary>Offline voice <span class="pill ${meta ? "ok" : ""}" id="log-offline-badge">${badge}</span></summary>
+      ${body}${chromeLine}
+    </details>`;
+}
+
+async function refreshChromeStatus() {
+  const status = await lv.chromeLocalStatus(speechLang());
+  if (status === chromeStatus) return;
+  const visible = (s) => ["available", "downloadable", "downloading"].includes(s);
+  const redraw = visible(status) || visible(chromeStatus);
+  chromeStatus = status;
+  if (redraw && $(".log-sheet")) drawSheet();
+}
+
+async function setUpOfflineVoice() {
+  const model = lv.modelFor(speechLang());
+  if (!model || offlineJob) return;
+  offlineJob = { progress: 0, name: model.name, mb: model.mb };
+  offlineOpen = true;
+  drawSheet();
+  let lastPaint = 0;
+  try {
+    await lv.downloadModel(speechLang(), (progress) => {
+      offlineJob.progress = progress;
+      if (Date.now() - lastPaint < 150 && progress < 1) return;
+      lastPaint = Date.now();
+      const bar = $("#log-offline-progress");
+      if (bar) bar.value = progress;
+      const badge = $("#log-offline-badge");
+      if (badge) badge.textContent = `${Math.round(progress * 100)}%`;
+    });
+    offlineJob = null;
+    setPref("offline", true);
+    feedback(`Offline voice is ready: ${model.name}, on this device.`);
+  } catch (error) {
+    offlineJob = null;
+    feedback(`Offline voice download failed: ${error.message}. Try again on a connection, or use a model file.`);
+  }
+  drawSheet();
+  updateVoiceUi();
+}
+
+async function useModelFile(file) {
+  try {
+    const meta = await lv.importModel(file);
+    setPref("offline", true);
+    feedback(`Offline voice is ready with ${meta.name}.`);
+  } catch (error) {
+    feedback(error.message);
+  }
+  drawSheet();
+  updateVoiceUi();
+}
+
+async function useChromeLocal() {
+  const lang = speechLang();
+  if (chromeStatus !== "available") {
+    feedback("Installing the browser's on-device speech for this language…");
+    const ok = await lv.installChromeLocal(lang);
+    chromeStatus = ok ? "available" : await lv.chromeLocalStatus(lang);
+    if (!ok) {
+      drawSheet();
+      return feedback("The browser couldn't install on-device speech right now.");
+    }
+  }
+  setPref("offline", true);
+  feedback("Using the browser's on-device speech. It works without a connection.");
+  drawSheet();
+  updateVoiceUi();
 }
 
 function entryRow(entry) {
@@ -386,12 +542,30 @@ async function onSheetClick(event) {
   }
   if (action === "remove" && row) return removeLine(Number(row.dataset.line));
   if (action === "edit" && row) return editLine(row);
+  if (action === "offline-get") return setUpOfflineVoice();
+  if (action === "offline-chrome") return useChromeLocal();
+  if (action === "offline-remove") {
+    if (listening) stopListening(true);
+    await lv.removeModel();
+    setPref("offline", false);
+    feedback("Offline voice removed from this browser.");
+    drawSheet();
+    return updateVoiceUi();
+  }
 }
 
 function onSheetChange(event) {
+  const file = event.target.closest("[data-offline-file]");
+  if (file) {
+    if (file.files?.[0]) useModelFile(file.files[0]);
+    return;
+  }
   const select = event.target.closest("[data-pref-select]");
   if (select) {
     setPref(select.dataset.prefSelect, select.value);
+    chromeStatus = null;
+    drawSheet();
+    refreshChromeStatus();
     feedback(`Speech language: ${LANGS.find(([code]) => code === select.value)?.[1] || select.value}.`);
     if (listening) {
       stopListening(true);
@@ -407,6 +581,14 @@ function onSheetChange(event) {
     syncWake();
   }
   if (pref.dataset.pref === "keepListening" && !pref.checked && listening) feedback("Will stop after the next entry.");
+  if (pref.dataset.pref === "offline") {
+    feedback(pref.checked ? "Voice now runs on this device." : "Voice uses the browser's engine when online, and this device when offline.");
+    updateVoiceUi();
+    if (listening) {
+      stopListening(true);
+      setTimeout(() => startListening(), 500);
+    }
+  }
 }
 
 async function onSheetKeydown(event) {
@@ -445,7 +627,7 @@ export async function handleUtterance(raw, { typed = false } = {}) {
     }
     return null;
   }
-  const intent = dl.voiceIntent(typed ? raw : linkPeople(raw));
+  const intent = dl.voiceIntent(typed ? raw : linkPeople(raw), today());
   switch (intent.kind) {
     case "empty":
       return intent;
@@ -467,6 +649,25 @@ export async function handleUtterance(raw, { typed = false } = {}) {
       closeLogSheet();
       setView("journal");
       return intent;
+    case "open-day":
+      closeLogSheet();
+      if (days().get(intent.date)?.entries.length || noteByPath(`journal/${intent.date}.md`)) await openDay(intent.date);
+      else toast(`Nothing logged on ${dl.prettyDay(intent.date)}.`);
+      return intent;
+    case "search": {
+      const hits = dl.searchEntries(days(), intent.query);
+      const exact = hits.filter((h) => !h.fuzzy);
+      const last = exact[0] || hits[0];
+      const said = last
+        ? `${plural(exact.length || hits.length, "entry", "entries")} ${exact.length ? "mention" : "come close to"} “${intent.query}”. The latest is ${dl.prettyDay(last.day)}: ${dl.plainText(last.entry.text)}`
+        : `Nothing in the log mentions “${intent.query}” yet.`;
+      closeLogSheet();
+      state.journalQuery = intent.query;
+      setView("journal");
+      speak(said);
+      toast(said);
+      return intent;
+    }
     case "review":
       closeLogSheet();
       await weeklyReview();
@@ -586,16 +787,14 @@ async function openDay(day, { create = false } = {}) {
 // ============================================================ speech in and out
 
 export function startListening() {
-  const Engine = Recognition();
-  if (!Engine) return feedback("Voice isn't available in this browser. Type instead.");
+  if (!speechSupported()) return feedback("Voice isn't available in this browser. Type instead, or set up offline voice below.");
   wantListening = true;
   stopWake();
   try {
-    recognizer = new Engine();
+    recognizer = makeRecognizer();
   } catch {
     return feedback("Couldn't start the microphone.");
   }
-  recognizer.lang = prefs().lang || navigator.language || "en-US";
   recognizer.interimResults = true;
   recognizer.continuous = true;
   recognizer.maxAlternatives = 1;
@@ -623,8 +822,16 @@ export function startListening() {
       "no-speech": "Didn't catch anything. Tap the mic and try again.",
       network: "Voice input needs the browser's speech service, which isn't reachable. Type instead.",
       "audio-capture": "No microphone found. Type instead.",
+      "local-model": `Offline voice couldn't start (${event.message || "unknown error"}). Type instead, or set it up again below.`,
     };
+    if (event.error === "network" && lv.installed() && !serviceDown) {
+      serviceDown = true;
+      feedback("The browser's speech service isn't reachable, so Cairn switched to offline voice on this device.");
+      setTimeout(() => wantListening && $(".log-sheet") && startListening(), 300);
+      return;
+    }
     if (event.error !== "no-speech" && event.error !== "aborted") wantListening = false;
+    if (event.error === "network" && !lv.installed()) return feedback(`${messages.network} Offline voice (below) works without it.`);
     if (messages[event.error]) feedback(messages[event.error]);
   };
   recognizer.onend = () => {
@@ -657,7 +864,8 @@ export function stopListening(user = false) {
 
 function statusText() {
   if (!speechSupported()) return "No voice in this browser: type below";
-  if (!online()) return "Offline: voice may not work, typing always does";
+  if (onDevice()) return listening ? "Listening on this device… speak naturally" : "Tap the mic and talk (on this device)";
+  if (!online()) return "Offline: set up offline voice below, or type";
   return listening ? "Listening… speak naturally" : "Tap the mic and talk";
 }
 
@@ -672,7 +880,8 @@ function updateVoiceUi() {
   }
   const status = $("#log-status");
   if (status) status.textContent = statusText();
-  $(".log-voice")?.classList.toggle("is-offline", !online());
+  $(".log-voice")?.classList.toggle("is-offline", !online() && !onDevice());
+  $(".log-voice")?.classList.toggle("is-local", onDevice());
 }
 
 export function readAloud(offset = 0) {
@@ -684,12 +893,16 @@ export function readAloud(offset = 0) {
     ? `${when}, you logged ${plural(entries.length, "thing")}. ${entries.map((e) => `${e.time ? `At ${e.time}, ` : ""}${dl.plainText(e.text).replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "mood ")}.`).join(" ")}`
     : `${when}, nothing is logged yet.`;
   feedback(text);
-  if (!canSpeak()) return text;
+  speak(text);
+  return text;
+}
+
+function speak(text) {
+  if (!canSpeak()) return;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = prefs().lang || navigator.language || "en-US";
+  utterance.lang = speechLang();
   window.speechSynthesis.speak(utterance);
-  return text;
 }
 
 // ============================================================ weekly review
@@ -742,7 +955,7 @@ export function journalView() {
     </section>
     <div class="memory-grid">
       <section class="card memory-card heat-card">
-        <div class="card-head"><h2>Every day</h2><span class="muted">${plural(18, "week")}</span></div>
+        <div class="card-head"><h2>Every day</h2><span class="muted">last 12 months</span></div>
         ${heatmapHtml(all, now)}
         <div class="heat-legend"><span>Less</span><i class="heat l0"></i><i class="heat l1"></i><i class="heat l2"></i><i class="heat l3"></i><span>More</span></div>
         <div class="card-head" style="margin-top:14px"><h2>Mood</h2><span class="seg" role="group" aria-label="Mood range">${[30, 90].map((n) => `<button type="button" class="seg-btn ${range === n ? "on" : ""}" data-jl-range="${n}" aria-pressed="${range === n}">${n}d</button>`).join("")}</span></div>
@@ -770,8 +983,10 @@ export function journalView() {
     </details>`;
 }
 
+const HEAT_WEEKS = 53;
+
 function heatmapHtml(all, now) {
-  const columns = dl.heatmap(all, now, 18);
+  const columns = dl.heatmap(all, now, HEAT_WEEKS);
   let lastMonth = "";
   const months = columns.map((col) => {
     const month = new Date(`${col[0].day}T12:00:00`).toLocaleDateString("en-US", { month: "short" });
@@ -832,7 +1047,21 @@ function searchResults(all, query) {
   if (!query.trim()) return `<p class="muted search-hint">Type to search across ${plural(all.size, "day")}.</p>`;
   const hits = dl.searchEntries(all, query);
   if (!hits.length) return `<p class="muted search-hint">Nothing matches “${esc(query)}”.</p>`;
-  return `<p class="muted search-hint">${plural(hits.length, "entry", "entries")} match</p><ul class="search-hits">${hits.map(({ day, entry }) => `<li><button class="link-btn" data-jl-day="${day}">${esc(dl.prettyDay(day, "short"))}</button><span class="entry-time">${esc(entry.time)}</span><span>${inline(entry.text)}</span></li>`).join("")}</ul>`;
+  const exact = hits.filter((h) => !h.fuzzy).length;
+  const close = hits.length - exact;
+  const summary = exact ? `${plural(exact, "entry", "entries")} match${close ? `, ${close} close` : ""}` : `No exact match. ${plural(close, "close match", "close matches")}`;
+  return `<p class="muted search-hint" role="status">${summary}</p><ul class="search-hits">${hits.map(({ day, entry, fuzzy }) => `<li${fuzzy ? ' class="is-fuzzy"' : ""}><button class="link-btn" data-jl-day="${day}">${esc(dl.prettyDay(day, "short"))}</button><span class="entry-time">${esc(entry.time)}</span><span>${inline(entry.text)}${fuzzy ? ' <span class="pill">close match</span>' : ""}</span></li>`).join("")}</ul>`;
+}
+
+// Month names wider than their week column would be cut at the scrolled edges ("pr" for Apr): hide those.
+function fitMonthLabels(heat) {
+  const box = heat.getBoundingClientRect();
+  for (const label of heat.querySelectorAll(".heat-months span")) {
+    if (!label.textContent) continue;
+    const rect = label.getBoundingClientRect();
+    const right = rect.left + label.scrollWidth;
+    label.style.visibility = rect.left >= box.left - 1 && right <= box.right + 1 ? "" : "hidden";
+  }
 }
 
 export function wireJournal() {
@@ -840,6 +1069,12 @@ export function wireJournal() {
   journalWired = new AbortController();
   const signal = journalWired.signal;
   const view = $("#view");
+  const heat = $(".heatmap");
+  if (heat) {
+    heat.scrollLeft = heat.scrollWidth; // newest weeks first; scroll left for the rest of the year
+    fitMonthLabels(heat);
+    heat.addEventListener("scroll", () => fitMonthLabels(heat), { signal, passive: true });
+  }
   const search = $("#journal-search");
   search?.addEventListener("input", () => {
     state.journalQuery = search.value;
