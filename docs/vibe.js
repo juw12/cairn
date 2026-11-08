@@ -11,6 +11,11 @@ import { renderNav, renderView } from "./app.js";
 
 const POLL_MS = 3000;
 const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped", done: "Done" };
+const DOT_LABEL = { shipped: "Shipped: changed or committed code", done: "No code change seen", unknown: "Outcome unknown: the folder is not a git repo", live: "Live" };
+// Detected sessions in a folder without git have no evidence either way, so they get their own state.
+const outcomeOf = (note) => (note.status === "done" && note.meta.git === "no" ? "unknown" : note.status);
+const SOURCES = { opencode: "OpenCode", vector: "Vector", logged: "Logged" };
+const PAGE = 40;
 const AGENT_HOOK = [
   'Before you start:  cairn vibe start "<goal>" --agent <your name>',
   'After each step:   cairn vibe log "<what you just did>"',
@@ -56,6 +61,43 @@ function duration(minutes) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return hours ? `${hours}h ${String(rest).padStart(2, "0")}m` : `${rest}m`;
+}
+
+// Where a session came from: a watcher (`source: opencode|vector`) or logged by hand / by the assistant.
+export function sessionSource(note) {
+  const source = String(note.meta.source || "").toLowerCase();
+  return source in SOURCES && source !== "logged" ? source : "logged";
+}
+
+function folderName(note) {
+  const folder = typeof note.meta.folder === "string" ? note.meta.folder.replace(/[\\/]+$/, "") : "";
+  return folder ? folder.split(/[\\/]/).pop() : "";
+}
+
+function sessionDayOf(note) {
+  const key = startedKey(note);
+  return /^\d{4}-\d{2}-\d{2}/.test(key) ? key.slice(0, 10) : "";
+}
+
+function dayLabel(day) {
+  if (!day) return "Undated";
+  if (day === today()) return "Today";
+  const date = new Date(`${day}T12:00:00`);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
+export function setVibeFilter(source) {
+  state.vibeFilter = source in SOURCES ? source : "all";
+  state.vibeLimit = PAGE;
+  renderView();
+}
+
+export function showMoreSessions(all = false) {
+  state.vibeLimit = all ? Infinity : (state.vibeLimit || PAGE) + PAGE;
+  renderView();
 }
 
 function stars(rating) {
@@ -372,16 +414,36 @@ function liveCard(live, newest = true, total = 1) {
 }
 
 function figures(stats) {
-  const figure = (value, label, title = "") => `<div class="figure"${title ? ` title="${esc(title)}"` : ""}><span class="value">${value}</span><span class="label">${label}</span></div>`;
+  const figure = (value, label, title = "", sub = "") =>
+    `<div class="figure"${title ? ` title="${esc(title)}"` : ""}><span class="value">${value}</span><span class="label">${label}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
   const dash = "–";
+  const parallel = stats.parallel && stats.parallel >= 1.1;
   return `<div class="figures vibe-figures">
-    ${figure(stats.sessions, stats.sessions === 1 ? "session" : "sessions", `${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped${stats.done ? ` · ${stats.done} done` : ""}`)}
-    ${figure(duration(stats.minutes), "time vibing", "Sum of finished sessions")}
-    ${figure(stats.ship_rate === null ? dash : `${stats.ship_rate}%`, "shipped", "Finished sessions that shipped")}
+    ${figure(stats.sessions, stats.sessions === 1 ? "session" : "sessions", `${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped${stats.done ? ` · ${stats.done} with no code change` : ""}`)}
+    ${figure(
+      duration(stats.minutes),
+      "time vibing",
+      "Clock time with at least one session working. Sessions that ran side by side count once.",
+      parallel ? `<span title="${esc(duration(stats.agent_minutes))} if every session is added up">${stats.parallel}× in parallel</span>` : "",
+    )}
+    ${shippedFigure(stats, figure, dash)}
     ${figure(stats.pass_rate === null ? dash : `${stats.pass_rate}%`, "checks green", `${stats.passed} passed · ${stats.failed} failed`)}
     ${figure(stats.feedback_open, "feedback open", `${stats.feedback} total · ${stats.feedback_addressed} addressed`)}
     ${figure(stats.rating === null ? dash : stats.rating.toFixed(1), "avg rating", "Out of 5")}
   </div>`;
+}
+
+// Detected sessions only ever end as shipped (commits or line changes seen) or done (none seen), so a
+// ship rate over "finished" sessions would always read 100%. Show the count against every ended session.
+function shippedFigure(stats, figure, dash) {
+  const ended = stats.shipped + stats.partial + stats.dropped + stats.done;
+  if (!ended) return figure(dash, "shipped", "No finished sessions yet.");
+  const share = Math.round((stats.shipped / ended) * 100);
+  const handRated = stats.partial + stats.dropped;
+  const title = handRated
+    ? `Ship rate ${stats.ship_rate}% of sessions you ended with a result (shipped, partial or dropped).`
+    : "Sessions that committed or changed code in their folder.";
+  return figure(stats.shipped, "shipped", title, stats.shipped ? `${share}% of ${ended} sessions` : "no code changes seen yet");
 }
 
 function activity(stats) {
@@ -403,7 +465,7 @@ function activity(stats) {
     .join("");
   const active = days.filter((d) => d.sessions).length;
   return `<section class="column-block vibe-activity">
-    <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> shipped</span></header>
+    <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> shipped <i class="key none"></i> no code change</span></header>
     <svg viewBox="0 0 100 62" preserveAspectRatio="none" role="img" aria-label="${byMinutes ? "Minutes" : "Sessions"} per day for the last ${days.length} days">${bars}</svg>
     <div class="axis"><span>${days[0].day.slice(5)}</span><span>today</span></div>
   </section>`;
@@ -420,26 +482,81 @@ function skillsBlock(stats) {
   </section>`;
 }
 
-function sessionRow(note) {
+function sessionRow(note, showSource = true) {
   const log = core.sessionLog(note.body);
   const passed = log.filter((e) => e.kind === "pass").length;
   const failed = log.filter((e) => e.kind === "fail").length;
   const minutes = note.status === "live" ? elapsedMinutes(note) : core.sessionMinutes(note);
   const added = Number(note.meta.added) || 0;
   const removed = Number(note.meta.removed) || 0;
+  const commits = Number(note.meta.commits) || 0;
   const skillRuns = log.filter((e) => e.kind === "skill").length;
+  const started = startedKey(note);
+  const folder = folderName(note);
   const bits = [
+    /T\d{2}:\d{2}/.test(started) ? `<span class="when">${esc(started.slice(11, 16))}</span>` : "",
+    showSource ? `<span class="src">${SOURCES[sessionSource(note)]}</span>` : "",
+    folder ? `<span class="folder" title="${esc(String(note.meta.folder))}">${icon("folder", "sm")}${esc(folder)}</span>` : "",
     duration(minutes),
+    commits ? `<span title="Commits in this folder while it ran">${icon("branch", "sm")}${commits}</span>` : "",
     skillRuns ? `<span title="${skillRuns} skill runs">${icon("terminal", "sm")}${skillRuns}</span>` : "",
     passed || failed ? `<span class="check-pass" title="${passed} checks passed">${icon("check", "sm")}${passed}</span> <span class="check-fail" title="${failed} checks failed">${icon("x", "sm")}${failed}</span>` : "",
     added || removed ? `<b class="plus">+${added}</b> <b class="minus">−${removed}</b>` : "",
   ].filter(Boolean);
   return `<button class="row-item session-row" data-open="${esc(note.path)}">
-    <span class="dot t-session"></span>
+    <span class="dot t-session s-${esc(outcomeOf(note))}" title="${esc(DOT_LABEL[outcomeOf(note)] || note.status)}"></span>
     <span class="title">${esc(note.title)}</span>
-    ${statusPill(note.status)}
+    ${note.status === "done" || note.status === "shipped" ? "" : statusPill(note.status)}
     <span class="meta">${bits.join(" · ")}</span>
   </button>`;
+}
+
+function sessionsBlock(sessions, stats) {
+  const counts = { all: sessions.length };
+  for (const note of sessions) counts[sessionSource(note)] = (counts[sessionSource(note)] || 0) + 1;
+  const present = Object.keys(SOURCES).filter((source) => counts[source]);
+  const filter = state.vibeFilter in SOURCES && counts[state.vibeFilter] ? state.vibeFilter : "all";
+  const shown = filter === "all" ? sessions : sessions.filter((note) => sessionSource(note) === filter);
+  const limit = state.vibeLimit || PAGE;
+  const days = new Map();
+  for (const note of shown) {
+    const day = sessionDayOf(note);
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(note);
+  }
+  let left = limit;
+  const groups = [];
+  for (const [day, notes] of days) {
+    if (left <= 0) break;
+    const visible = notes.slice(0, left);
+    left -= visible.length;
+    const minutes = core.unionMinutes(notes.flatMap(core.sessionSpans));
+    groups.push(`<div class="day-group">
+      <div class="day-head"><span>${esc(dayLabel(day))}</span><span class="muted small">${plural(notes.length, "session")}${minutes ? ` · ${duration(minutes)}` : ""}</span></div>
+      <div class="rows">${visible.map((note) => sessionRow(note, filter === "all" && present.length > 1)).join("")}</div>
+    </div>`);
+  }
+  const rest = shown.length - Math.min(limit, shown.length);
+  const unknown = sessions.filter((note) => outcomeOf(note) === "unknown").length;
+  const legend = `<span class="vibe-legend muted small"><i class="dot t-session s-shipped"></i> shipped <i class="dot t-session s-done"></i> no code change${unknown ? ` <i class="dot t-session s-unknown"></i> no git` : ""}</span>`;
+  const chips = present.length > 1
+    ? `<div class="vibe-filters" role="group" aria-label="Show sessions from">
+        ${["all", ...present].map((source) => `<button class="chip${source === filter ? " on" : ""}" data-action="vibe-filter" data-source="${source}" aria-pressed="${source === filter}">${source === "all" ? "All" : SOURCES[source]} <b>${counts[source]}</b></button>`).join("")}
+        ${legend}
+      </div>`
+    : present.length
+      ? `<div class="vibe-filters"><span class="chip static">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>${legend}</div>`
+      : "";
+  const results = [["shipped", stats.shipped], ["partial", stats.partial], ["dropped", stats.dropped], ["no code change", stats.done]]
+    .filter(([, n]) => n)
+    .map(([label, n]) => `${n} ${label}`)
+    .join(" · ");
+  return `<section class="column-block vibe-sessions">
+    <header><h2>Sessions</h2><span class="muted small">${results || "none yet"}</span></header>
+    ${chips}
+    ${sessions.length ? groups.join("") : `<p class="empty">No sessions yet. Each one becomes a file in brain/sessions/.</p>`}
+    ${rest > 0 ? `<div class="vibe-more-row"><button class="btn sm vibe-more" data-action="vibe-more">Show ${Math.min(PAGE, rest)} more <span class="muted">· ${rest} left</span></button>${rest > PAGE ? `<button class="btn sm ghost" data-action="vibe-more" data-all="1">Show all ${shown.length}</button>` : ""}</div>` : ""}
+  </section>`;
 }
 
 function feedbackRow(note) {
@@ -516,10 +633,7 @@ export function vibeView() {
       <div>
         ${activity(stats)}
         ${skillsBlock(stats)}
-        <section class="column-block">
-          <header><h2>Sessions</h2><span class="muted small">${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped${stats.done ? ` · ${stats.done} done` : ""}</span></header>
-          ${sessions.length ? `<div class="rows">${sessions.slice(0, 30).map(sessionRow).join("")}</div>` : `<p class="empty">No sessions yet. Each one becomes a file in brain/sessions/.</p>`}
-        </section>
+        ${sessionsBlock(sessions, stats)}
       </div>
       <section class="column-block vibe-feedback">
         <header><h2>Feedback</h2><span class="muted small">${stats.feedback_open} open · ${stats.feedback_addressed} addressed</span></header>

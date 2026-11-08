@@ -1469,6 +1469,17 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .vibe-activity .axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 4px; }
 .key { display: inline-block; width: 9px; height: 9px; border-radius: 2px; vertical-align: -1px; background: var(--session); }
 .session-row .pill { flex: none; }
+.figure .sub { display: block; margin-top: 2px; font-size: 12px; line-height: 1.35; color: var(--muted); }
+.vibe-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 0 2px; }
+.vibe-filters .chip b { font-weight: 500; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.day-group + .day-group { margin-top: 6px; }
+.day-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 14px 0 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; border-bottom: 1px solid var(--line); }
+.session-row .meta { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
+.session-row .meta .when { font-family: var(--mono); }
+.session-row .meta .src { color: var(--ink); }
+.session-row .meta .folder { display: inline-flex; align-items: center; gap: 3px; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row .meta .icon { width: 13px; height: 13px; vertical-align: -2px; }
+.vibe-more { margin-top: 12px; }
 .rating-summary { display: flex; align-items: center; gap: 18px; padding: 6px 0 14px; }
 .rating-summary .big { font-family: var(--display); font-size: 46px; line-height: 1; }
 .rating-summary .big span { font-size: 18px; color: var(--muted); }
@@ -1528,6 +1539,7 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .vibe-figures .figure .label { font-size: 13px; }
 @media (max-width: 600px) {
   :is(.vibe-log-form, .fb-form, .fb-row, .vibe-end) :is(.input, .select, .btn) { min-height: 40px; }
+}
 
 /* round 2: wake word, first-run hint, language, offline, people, mood range */
 .log-fab.wake-on::before {
@@ -1555,4 +1567,26 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .lookbacks .entry-time { font: 11px var(--mono); color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   .log-fab.wake-on::before, .log-fab-hint { animation: none; }
+}
+
+/* vibe sessions: outcome dots, single-source label, legend */
+.session-row .dot.s-done, .vibe-legend .dot.s-done { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--session) 70%, var(--muted)); }
+.session-row .dot.s-live { box-shadow: 0 0 0 3px var(--session-soft); }
+.vibe-legend { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.vibe-legend .dot { display: inline-block; margin-left: 6px; }
+.chip.static { cursor: default; }
+.log-fab-hint { animation: hint-in .4s ease-out both, hint-out .4s ease-in 6s forwards; }
+@keyframes hint-out { to { opacity: 0; visibility: hidden; } }
+.key.none { background: color-mix(in srgb, var(--session) 45%, transparent); }
+.session-row .dot.s-unknown, .vibe-legend .dot.s-unknown { background: transparent; box-shadow: none; outline: 1.5px dashed var(--muted); outline-offset: -1.5px; }
+.vibe-more-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.vibe-more-row .vibe-more { margin-top: 0; }
+/* phones: the Log button becomes a round icon over the column gap, so it hides as little as possible */
+@media (max-width: 600px) {
+  .log-fab { width: 56px; height: 56px; padding: 0; justify-content: center; }
+  .log-fab .log-fab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}
+@media (max-width: 600px) {
+  /* keep the right-hand figures clear of the round Log button that sits over the column gap */
+  .vibe-figures .figure:nth-child(even) { padding-left: 34px; }
 }
