@@ -15,6 +15,8 @@ const DOT_LABEL = { shipped: "Shipped: changed or committed code", done: "No cod
 // Detected sessions in a folder without git have no evidence either way, so they get their own state.
 const outcomeOf = (note) => (note.status === "done" && note.meta.git === "no" ? "unknown" : note.status);
 const SOURCES = { opencode: "OpenCode", vector: "Vector", logged: "Logged" };
+// Outcome chips double as the legend for the row dots; each one filters the list to that outcome.
+const OUTCOMES = { live: "live", shipped: "shipped", partial: "partial", dropped: "dropped", done: "no code change", unknown: "no git" };
 const PAGE = 40;
 const AGENT_HOOK = [
   'Before you start:  cairn vibe start "<goal>" --agent <your name>',
@@ -93,6 +95,21 @@ export function setVibeFilter(source) {
   state.vibeFilter = source in SOURCES ? source : "all";
   state.vibeLimit = PAGE;
   renderView();
+}
+
+export function setVibeOutcome(outcome) {
+  state.vibeOutcome = outcome in OUTCOMES && state.vibeOutcome !== outcome ? outcome : "all";
+  state.vibeLimit = PAGE;
+  renderView();
+}
+
+// Folded days stay folded across live updates; a folded day shows its totals and costs no rows of the page.
+export function toggleSessionDay(day) {
+  const folded = state.vibeFolded || (state.vibeFolded = new Set());
+  if (folded.has(day)) folded.delete(day);
+  else folded.add(day);
+  renderView();
+  $(`.day-head[data-day="${CSS.escape(day)}"]`)?.focus();
 }
 
 export function showMoreSessions(all = false) {
@@ -427,9 +444,13 @@ function figures(stats) {
       parallel ? `<span title="${esc(duration(stats.agent_minutes))} if every session is added up">${stats.parallel}× in parallel</span>` : "",
     )}
     ${shippedFigure(stats, figure, dash)}
-    ${figure(stats.pass_rate === null ? dash : `${stats.pass_rate}%`, "checks green", `${stats.passed} passed · ${stats.failed} failed`)}
+    ${stats.pass_rate === null
+      ? figure(dash, "checks green", "No test runs logged yet. Log one with: cairn vibe check -- <test command>", "no checks logged yet")
+      : figure(`${stats.pass_rate}%`, "checks green", `${stats.passed} passed · ${stats.failed} failed`)}
     ${figure(stats.feedback_open, "feedback open", `${stats.feedback} total · ${stats.feedback_addressed} addressed`)}
-    ${figure(stats.rating === null ? dash : stats.rating.toFixed(1), "avg rating", "Out of 5")}
+    ${stats.rating === null
+      ? figure(dash, "avg rating", "No rated feedback yet. Add feedback with a 1-5 rating below.", "no ratings yet")
+      : figure(stats.rating.toFixed(1), "avg rating", "Out of 5")}
   </div>`;
 }
 
@@ -516,8 +537,13 @@ function sessionsBlock(sessions, stats) {
   for (const note of sessions) counts[sessionSource(note)] = (counts[sessionSource(note)] || 0) + 1;
   const present = Object.keys(SOURCES).filter((source) => counts[source]);
   const filter = state.vibeFilter in SOURCES && counts[state.vibeFilter] ? state.vibeFilter : "all";
-  const shown = filter === "all" ? sessions : sessions.filter((note) => sessionSource(note) === filter);
+  const fromSource = filter === "all" ? sessions : sessions.filter((note) => sessionSource(note) === filter);
+  const outcomeCounts = {};
+  for (const note of fromSource) outcomeCounts[outcomeOf(note)] = (outcomeCounts[outcomeOf(note)] || 0) + 1;
+  const outcome = state.vibeOutcome in OUTCOMES && outcomeCounts[state.vibeOutcome] ? state.vibeOutcome : "all";
+  const shown = outcome === "all" ? fromSource : fromSource.filter((note) => outcomeOf(note) === outcome);
   const limit = state.vibeLimit || PAGE;
+  const folded = state.vibeFolded || new Set();
   const days = new Map();
   for (const note of shown) {
     const day = sessionDayOf(note);
@@ -525,35 +551,50 @@ function sessionsBlock(sessions, stats) {
     days.get(day).push(note);
   }
   let left = limit;
+  let accounted = 0;
   const groups = [];
   for (const [day, notes] of days) {
     if (left <= 0) break;
-    const visible = notes.slice(0, left);
+    const isFolded = folded.has(day);
+    const visible = isFolded ? [] : notes.slice(0, left);
     left -= visible.length;
+    accounted += isFolded ? notes.length : visible.length;
     const minutes = core.unionMinutes(notes.flatMap(core.sessionSpans));
-    groups.push(`<div class="day-group">
-      <div class="day-head"><span>${esc(dayLabel(day))}</span><span class="muted small">${plural(notes.length, "session")}${minutes ? ` · ${duration(minutes)}` : ""}</span></div>
-      <div class="rows">${visible.map((note) => sessionRow(note, filter === "all" && present.length > 1)).join("")}</div>
+    const shipped = notes.filter((note) => note.status === "shipped").length;
+    groups.push(`<div class="day-group${isFolded ? " folded" : ""}">
+      <button type="button" class="day-head" data-action="vibe-day" data-day="${esc(day)}" aria-expanded="${!isFolded}">
+        <span class="day-name">${icon("chevron", "sm")}${esc(dayLabel(day))}</span>
+        <span class="muted small">${plural(notes.length, "session")}${shipped && isFolded ? ` · ${shipped} shipped` : ""}${minutes ? ` · <span title="Clock time: sessions that overlap count once">${duration(minutes)}</span>` : ""}</span>
+      </button>
+      ${isFolded ? "" : `<div class="rows">${visible.map((note) => sessionRow(note, filter === "all" && present.length > 1)).join("")}</div>`}
     </div>`);
   }
-  const rest = shown.length - Math.min(limit, shown.length);
-  const unknown = sessions.filter((note) => outcomeOf(note) === "unknown").length;
-  const legend = `<span class="vibe-legend muted small"><i class="dot t-session s-shipped"></i> shipped <i class="dot t-session s-done"></i> no code change${unknown ? ` <i class="dot t-session s-unknown"></i> no git` : ""}</span>`;
-  const chips = present.length > 1
-    ? `<div class="vibe-filters" role="group" aria-label="Show sessions from">
+  const rest = shown.length - accounted;
+  const sourceChips = present.length > 1
+    ? `<div class="vibe-chip-group" role="group" aria-label="Show sessions from">
         ${["all", ...present].map((source) => `<button class="chip${source === filter ? " on" : ""}" data-action="vibe-filter" data-source="${source}" aria-pressed="${source === filter}">${source === "all" ? "All" : SOURCES[source]} <b>${counts[source]}</b></button>`).join("")}
-        ${legend}
       </div>`
     : present.length
-      ? `<div class="vibe-filters"><span class="chip static">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>${legend}</div>`
+      ? `<span class="chip static">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>`
       : "";
+  const outcomesHere = Object.keys(OUTCOMES).filter((key) => outcomeCounts[key]);
+  const outcomeChips = outcomesHere.length
+    ? `<div class="vibe-chip-group vibe-outcomes" role="group" aria-label="Show sessions by outcome">
+        ${outcomesHere.map((key) => `<button class="chip outcome${key === outcome ? " on" : ""}" data-action="vibe-outcome" data-outcome="${key}" aria-pressed="${key === outcome}" title="${esc(DOT_LABEL[key] || OUTCOMES[key])}"><i class="dot t-session s-${key}" aria-hidden="true"></i>${OUTCOMES[key]} <b>${outcomeCounts[key]}</b></button>`).join("")}
+      </div>`
+    : "";
+  const chips = sourceChips || outcomeChips ? `<div class="vibe-filters">${sourceChips}${outcomeChips}</div>` : "";
   const results = [["shipped", stats.shipped], ["partial", stats.partial], ["dropped", stats.dropped], ["no code change", stats.done]]
     .filter(([, n]) => n)
     .map(([label, n]) => `${n} ${label}`)
     .join(" · ");
+  const filteredOut = outcome !== "all"
+    ? `<p class="muted small vibe-filter-note">Showing ${plural(shown.length, "session")} with ${OUTCOMES[outcome]}. <a href="#" data-action="vibe-outcome" data-outcome="${outcome}">Show every outcome</a></p>`
+    : "";
   return `<section class="column-block vibe-sessions">
     <header><h2>Sessions</h2><span class="muted small">${results || "none yet"}</span></header>
     ${chips}
+    ${filteredOut}
     ${sessions.length ? groups.join("") : `<p class="empty">No sessions yet. Each one becomes a file in brain/sessions/.</p>`}
     ${rest > 0 ? `<div class="vibe-more-row"><button class="btn sm vibe-more" data-action="vibe-more">Show ${Math.min(PAGE, rest)} more <span class="muted">· ${rest} left</span></button>${rest > PAGE ? `<button class="btn sm ghost" data-action="vibe-more" data-all="1">Show all ${shown.length}</button>` : ""}</div>` : ""}
   </section>`;

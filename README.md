@@ -187,6 +187,11 @@ cairn vibe watch --everywhere    # OpenCode sessions from any folder, not just t
 cairn vibe watch --install       # start hidden at Windows sign-in (--uninstall removes it)
 ```
 
+The desktop app does this on its own while it runs (Settings → *Record AI coding sessions*), so you only need
+the command without the app. An Obsidian vault takes sessions from every folder; any other brain only its own.
+Only one watcher writes a brain at a time: if the app, a startup watcher and a terminal all run, the others
+stand by and take over within five minutes of it stopping.
+
 - **OpenCode:** each session in OpenCode's local database becomes a session note (`source: opencode`) with active
   minutes (gaps between messages, capped at 10 minutes) and when they happened (`spans`), model and cost. OpenCode
   does not record line changes, so the watcher also counts the commits made in the session's folder while it ran
@@ -200,6 +205,8 @@ cairn vibe watch --install       # start hidden at Windows sign-in (--uninstall 
   let the assistant report itself with `cairn vibe start/log/check/end`.
 - **Privacy:** the OpenCode database is opened read-only and only session metadata and message timestamps are read,
   never message text. Nothing leaves your machine. `--no-opencode` and `--no-vector` turn either source off.
+- **On the page:** sessions are grouped by day (click a day to fold it) and the outcome chips (shipped, no code
+  change, no git) double as the legend and as filters. Day totals are clock time too.
 - **Time vibing** is clock time with at least one session working: two agents running side by side for an hour count
   as one hour, so it can never exceed the length of the day. The summed agent time is shown next to it as
   "N× in parallel".

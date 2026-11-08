@@ -40,6 +40,7 @@ DAYS = 14
 EVERY_SECONDS = 60
 VECTOR_PROCESSES = ("Vector.exe", "Vector")
 STARTUP_NAME = "Cairn vibe watch.vbs"
+CLAIM_STALE_SECONDS = 5 * 60  # a watcher that has not checked in for this long has stopped
 
 
 class WatchError(RuntimeError):
@@ -427,6 +428,48 @@ def _save_state(brain: Brain, state: dict) -> None:
         pass
 
 
+def _claim_path(brain: Brain) -> Path:
+    return _state_path(brain).with_name("cairn-watch.owner")
+
+
+def claim_watch(brain: Brain, owner: str, now: float | None = None) -> bool:
+    """Only one watcher writes a brain's session notes at a time: the desktop app, the startup watcher
+    and a terminal can all be running. The holder renews its claim every pass; a claim nobody renewed
+    for CLAIM_STALE_SECONDS is free to take. Returns True when `owner` may run this pass."""
+    now = time.time() if now is None else now
+    path = _claim_path(brain)
+    try:
+        held = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        held = {}
+    holder = held.get("owner") if isinstance(held, dict) else None
+    try:
+        renewed = float(held.get("at", 0)) if holder else 0.0
+    except (TypeError, ValueError):
+        renewed = 0.0
+    if holder and holder != owner and now - renewed < CLAIM_STALE_SECONDS:
+        return False
+    try:
+        path.write_text(json.dumps({"owner": owner, "at": now}), encoding="utf-8")
+    except OSError:
+        pass  # a read-only brain still gets watched; it just cannot tell other watchers
+    return True
+
+
+def release_watch(brain: Brain, owner: str) -> None:
+    """Hand the brain back right away (on quit or when watching is switched off)."""
+    path = _claim_path(brain)
+    try:
+        if json.loads(path.read_text(encoding="utf-8")).get("owner") == owner:
+            path.unlink()
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def watch_owner(kind: str) -> str:
+    return f"{kind}:{os.getpid()}"
+
+
 def repo_fingerprint(brain: Brain) -> str:
     """Changes whenever the code changes: HEAD plus the working-tree status.
 
@@ -562,14 +605,27 @@ def needs_refresh(brain: Brain, sessions: list[dict], now_ms: int, idle_minutes:
 
 def watch(brain: Brain, every: int = EVERY_SECONDS, echo=print, **options) -> None:
     echo(f"Watching for AI coding sessions every {every}s (Ctrl+C to stop). Sessions land in brain/sessions/.")
-    while True:
-        try:
+    owner = watch_owner("cli")
+    standing_by = False
+    try:
+        while True:
             stamp = dt.datetime.now().strftime("%H:%M")
-            for message in watch_once(brain, **options):
-                echo(f"{stamp} {message}")
-        except WatchError as error:
-            echo(f"warning: {error}")
-        time.sleep(max(5, every))
+            if not claim_watch(brain, owner):
+                if not standing_by:
+                    echo(f"{stamp} Another watcher (the Cairn app or a second terminal) is updating this brain; standing by.")
+                standing_by = True
+            else:
+                if standing_by:
+                    echo(f"{stamp} Taking over: the other watcher stopped.")
+                standing_by = False
+                try:
+                    for message in watch_once(brain, **options):
+                        echo(f"{stamp} {message}")
+                except WatchError as error:
+                    echo(f"warning: {error}")
+            time.sleep(max(5, every))
+    finally:
+        release_watch(brain, owner)
 
 
 # ------------------------------------------------------------ start with Windows

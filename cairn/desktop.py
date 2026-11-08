@@ -10,6 +10,8 @@ Everything a person needs is inside the app, no terminal and no git commands:
   * Sync: one button commits your edits, pulls everyone else's and pushes (and it happens on
     its own every few minutes). GitHub sign-in is handled by Git Credential Manager's window.
   * Settings: start with Windows, sync automatically, update automatically.
+  * The Vibe page fills itself in: while Cairn runs it records OpenCode sessions (the same pass as
+    `cairn vibe watch`), so no separate watcher needs installing. Only one watcher writes at a time.
   * Updates arrive on their own: a new web app is swapped in with a page reload the moment you
     stop typing; a new Python part restarts Cairn quietly (in the tray, or when you're idle) and
     reopens it where you were. Nobody has to restart anything by hand.
@@ -33,7 +35,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import __version__
+from . import __version__, watch
 from .brain import NO_WINDOW, Brain, SyncError, clone_repo, repo_folder_name
 from .server import make_server, switch_brain
 from .winshell import AUMID, stamp_shortcut, start_menu_shortcut
@@ -44,6 +46,7 @@ SYNC_FIRST_SECONDS = 60
 SYNC_EVERY_SECONDS = 10 * 60
 UPDATE_FIRST_SECONDS = 60
 UPDATE_EVERY_SECONDS = 20 * 60
+VIBE_WATCH_FIRST_SECONDS = 20
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE = "Cairn"
 MAX_RECENT = 8
@@ -70,7 +73,7 @@ def log(message: str) -> None:
 
 
 class Config:
-    """A tiny JSON file: folder, recent folders, autostart, autoSync."""
+    """A tiny JSON file: folder, recent folders, autostart, autoSync, vibeWatch."""
 
     def __init__(self, path: Path | None = None):
         self.path = path or config_dir() / "config.json"
@@ -301,6 +304,35 @@ def valid_repo(text: str) -> str:
         raise ValueError("Use OWNER/REPO, for example juw12/brain.")
     return text
 
+# ============================================================ vibe sessions
+
+def vibe_watch_options(config: Config, root: Path) -> dict:
+    """How the app watches for AI coding sessions in the open brain.
+
+    An Obsidian vault is a whole personal brain, so sessions from every folder belong in it; a brain
+    inside one project only takes that project's sessions (the CLI default). Vector sessions are left
+    to the assistant's own reports unless turned on: process detection can only guess."""
+    everywhere = config.get("vibeWatchEverywhere")
+    if everywhere is None:
+        everywhere = (Path(root) / ".obsidian").is_dir()
+    return {
+        "opencode": True,
+        "vector": bool(config.get("vibeWatchVector", False)),
+        "everywhere": bool(everywhere),
+    }
+
+
+def vibe_watch_pass(brain: Brain, config: Config, owner: str, **overrides) -> list[str] | None:
+    """One watcher pass from the app. None when switched off or another watcher holds the brain."""
+    if not config.get("vibeWatch", True):
+        watch.release_watch(brain, owner)
+        return None
+    if not watch.claim_watch(brain, owner):
+        return None
+    options = {**vibe_watch_options(config, brain.root), **overrides}
+    return watch.watch_once(brain, **options)
+
+
 # ============================================================ what the web app can ask for
 
 class DesktopHooks:
@@ -337,6 +369,7 @@ class DesktopHooks:
             "autostart": autostart_enabled(),
             "autostartSupported": sys.platform == "win32",
             "autoSync": self.config.get("autoSync", True),
+            "vibeWatch": bool(self.config.get("vibeWatch", True)),
             "folder": str(current) if current is not None else self.config.get("folder"),
             "places": places[:MAX_RECENT],
         }
@@ -350,6 +383,7 @@ class DesktopHooks:
             "new": lambda: self.new_brain(str(payload.get("name", "")) or "My brain"),
             "autostart": lambda: self.toggle_autostart(bool(payload.get("on"))),
             "auto-sync": lambda: self.toggle_auto_sync(bool(payload.get("on"))),
+            "vibe-watch": lambda: self.toggle_vibe_watch(bool(payload.get("on"))),
             "auto-update": lambda: self.toggle_auto_update(bool(payload.get("on"))),
             "check-update": self.check_update,
             "update": self.update,
@@ -401,6 +435,10 @@ class DesktopHooks:
     def toggle_auto_sync(self, on: bool) -> dict:
         self.config.set("autoSync", on)
         return {"autoSync": on}
+
+    def toggle_vibe_watch(self, on: bool) -> dict:
+        self.config.set("vibeWatch", on)
+        return {"vibeWatch": on}
 
     def publish_settings(self, to: str, auto: bool) -> dict:
         repo = valid_repo(to) if to.strip() else ""
@@ -739,6 +777,27 @@ class DesktopApp:
             self.sync_once()
             self.publish_once()
 
+    def vibe_watch_loop(self):
+        owner = watch.watch_owner("app")
+        held = None
+        wait = VIBE_WATCH_FIRST_SECONDS
+        while not self.stopping.wait(wait):
+            wait = watch.EVERY_SECONDS
+            brain = self.server.RequestHandlerClass.brain
+            if held is not None and held.root != brain.root:
+                watch.release_watch(held, owner)  # switched brains: hand the old one back
+            held = brain
+            try:
+                messages = vibe_watch_pass(brain, self.config, owner)
+                for message in messages or []:
+                    log(f"vibe: {message}")
+            except watch.WatchError as error:
+                log(f"vibe watch skipped: {error}")
+            except Exception as error:  # never let a background pass take the app down
+                log(f"vibe watch failed: {error}")
+        if held is not None:
+            watch.release_watch(held, owner)
+
     def publish_once(self) -> None:
         try:
             result = self.hooks.maybe_publish()
@@ -852,7 +911,7 @@ class DesktopApp:
         self.window.events.shown += self.set_icon
         self.tray = self.build_tray()
         self.tray.run_detached()
-        for loop in (self.watch_show_requests, self.sync_loop, self.update_loop):
+        for loop in (self.watch_show_requests, self.sync_loop, self.update_loop, self.vibe_watch_loop):
             threading.Thread(target=loop, daemon=True).start()
         log(f"running {self.hooks.loaded_head or __version__} on {folder} ({'tray' if self.start_hidden else 'window'})")
 
