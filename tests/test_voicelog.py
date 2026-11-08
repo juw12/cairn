@@ -439,8 +439,9 @@ class VoiceLogTests(unittest.TestCase):
       };
     """
 
-    def route_offline_engine(self, page):
-        page.context.route("https://cdn.jsdelivr.net/npm/vosk-browser@*/**", lambda r: r.fulfill(body=self.FAKE_VOSK, content_type="text/javascript", headers={"access-control-allow-origin": "*"}))
+    def route_offline_engine(self, page, vosk=None):
+        body = vosk or self.FAKE_VOSK
+        page.context.route("https://cdn.jsdelivr.net/npm/vosk-browser@*/**", lambda r: r.fulfill(body=body, content_type="text/javascript", headers={"access-control-allow-origin": "*"}))
         page.context.route("https://ccoreilly.github.io/vosk-browser/models/**", lambda r: r.fulfill(body=b"\x1f\x8b" + b"m" * 20000, content_type="application/gzip", headers={"access-control-allow-origin": "*", "content-length": "20002"}))
         page.add_init_script(self.FAKE_MIC)
 
@@ -600,6 +601,239 @@ class VoiceLogTests(unittest.TestCase):
         page.keyboard.press("Shift+Tab")
         self.assertTrue(page.evaluate("!!document.activeElement.closest('.log-wrap')"))
 
+
+    # ------------------------------------------------------------------ round 4: reviews, alike days, a11y, worklet
+
+    def test_monthly_review_pending_reviews_and_alike_days(self):
+        page = self.open()
+        result = page.evaluate(
+            """async () => {
+              const dl = await import('./daylog.js');
+              const day = (d, lines) => {
+                let body = '';
+                for (const [time, text] of lines) body = dl.appendEntry(body, time, text);
+                return [d, { day: d, entries: dl.parseEntries(body) }];
+              };
+              const days = new Map([
+                day('2026-10-05', [['09:00', 'Fixed the invoice export bug in the CSV writer'], ['10:00', 'Decision: [[use-sqlite|Use SQLite]]']]),
+                day('2026-10-06', [['09:00', dl.moodLine(dl.MOODS[3])], ['11:00', 'Idea: a map of every walk']]),
+                day('2026-10-20', [['08:00', 'Walked the dog in the park before breakfast']]),
+              ]);
+              const month = dl.monthlyReview(days, [], '2026-10-15');
+              const today = dl.parseEntries(dl.appendEntry('', '18:00', 'Still fighting the invoice export, the CSV encoding is wrong'));
+              return {
+                month,
+                weekSlug: dl.weeklyReview(days, [], '2026-10-19').slug,
+                dueMonth: dl.pendingReviews(days, [], '2026-11-03'),
+                dueMonthWritten: dl.pendingReviews(days, [{ type: 'journal', slug: '2026-10' }], '2026-11-03'),
+                dueWeek: dl.pendingReviews(days, [], '2026-10-27'),
+                alike: dl.similarDays(days, today, '2026-10-28'),
+                intent: dl.voiceIntent('monthly review').kind,
+                intent2: dl.voiceIntent('review my month').kind,
+              };
+            }"""
+        )
+        month = result["month"]
+        self.assertEqual((month["title"], month["slug"]), ("October 2026", "2026-10"))
+        for line in ("Days logged: 3 of 31", "Entries: 5", "Longest run: 2 days in a row", "Average mood: 4.0/5", "## Week by week", "## Decisions and ideas", "Busiest day"):
+            self.assertIn(line, month["body"])
+        self.assertEqual([(r["kind"], r["slug"], r["entries"]) for r in result["dueMonth"]], [("month", "2026-10", 5)])
+        self.assertEqual(result["dueMonthWritten"], [])
+        # Last week (19 to 25 October) has one entry and no review: due, with the same slug the weekly review writes.
+        self.assertEqual([(r["kind"], r["slug"]) for r in result["dueWeek"]], [("week", result["weekSlug"])])
+        self.assertEqual([r["day"] for r in result["alike"]], ["2026-10-05"])
+        self.assertIn("invoice", result["alike"][0]["words"])
+        self.assertEqual((result["intent"], result["intent2"]), ("month-review", "month-review"))
+
+    def test_journal_monthly_review_mind_range_and_linked_days(self):
+        page = self.open()
+        page.click('#nav [data-go="journal"]')
+        page.wait_for_selector(".memory-stats")
+        self.assertEqual(page.get_attribute("[data-jl-mind='30']", "aria-pressed"), "true")
+        page.click("[data-jl-mind='0']")
+        page.wait_for_selector("[data-jl-mind='0'][aria-pressed='true']")
+        all_time = page.locator(".memory-card .tags .tag").count()
+        self.assertGreater(all_time, 0)
+        page.click("[data-review='month']")
+        month = page.evaluate(TODAY_JS)[:7]
+        page.wait_for_function("(p) => window.cairn.state.files.some((f) => f.path === p)", arg=f"journal/{month}.md")
+        text = page.evaluate("(p) => window.cairn.state.files.find((f) => f.path === p).text", f"journal/{month}.md")
+        self.assertIn("## Week by week", text)
+        self.assertIn("Days logged:", text)
+        self.assertEqual(self.errors, [])
+
+    def test_review_due_banner_writes_last_weeks_review(self):
+        page = self.open()
+        due = page.evaluate("""async () => {
+          const dl = await import('./daylog.js');
+          const s = window.cairn.state;
+          const d = new Date();
+          const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          return dl.pendingReviews(dl.journalDays(s.notes), s.notes, today);
+        }""")
+        page.click('#nav [data-go="journal"]')
+        page.wait_for_selector(".memory-stats")
+        week = next((r for r in due if r["kind"] == "week"), None)
+        if not week:
+            self.assertEqual(page.locator(".review-due [data-review='week']").count(), 0)
+            return
+        page.click(".review-due [data-review='week']")
+        page.wait_for_function("(p) => window.cairn.state.files.some((f) => f.path === p)", arg=f"journal/{week['slug']}.md")
+        # The new review opens in the drawer; close it and the banner is gone from the journal behind.
+        page.wait_for_selector(".scrim")
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".scrim", state="detached")
+        page.click('#nav [data-go="journal"]')
+        page.wait_for_selector(".memory-stats")
+        self.assertEqual(page.locator(".review-due [data-review='week']").count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_saves_are_announced_by_one_persistent_live_region(self):
+        page = self.open()
+        self.assertEqual(page.get_attribute("#log-announcer", "role"), "status")
+        # The hidden announcer must not add height: a 1px page scroll makes middle-click autoscroll instead of opening a tab.
+        self.assertEqual(page.evaluate("getComputedStyle(document.querySelector('#log-announcer')).position"), "fixed")
+        page.evaluate("document.querySelector('#log-announcer').dataset.mark = 'kept'")
+        self.open_sheet_listening(page)
+        self.say(page, "walked to work")
+        page.wait_for_function("() => /Saved at/.test(document.querySelector('#log-announcer').textContent)")
+        first = page.text_content("#log-announcer")
+        # The sheet redraws after a save; the announcer is the same node, and the visible line is not a second live region.
+        self.say(page, "scratch that")
+        page.wait_for_function("(t) => document.querySelector('#log-announcer').textContent !== t", arg=first)
+        for _ in range(30):
+            if "Nothing to undo" in page.text_content("#log-announcer"):
+                break
+            self.say(page, "scratch that")
+            page.wait_for_timeout(150)
+        self.assertIn("Nothing to undo", page.text_content("#log-announcer"))
+        before = page.text_content("#log-announcer")
+        self.say(page, "scratch that")
+        page.wait_for_function("(t) => document.querySelector('#log-announcer').textContent !== t", arg=before)
+        self.assertEqual(page.get_attribute("#log-announcer", "data-mark"), "kept")
+        self.assertIsNone(page.get_attribute("#log-feedback", "aria-live"))
+        self.assertEqual(page.locator("[aria-live]").filter(has_text="Nothing to undo").count(), 1)
+
+    FOCUS_CHECK = """() => {
+      const el = document.activeElement;
+      if (!el || el === document.body) return null;
+      const s = getComputedStyle(el);
+      const outline = s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2;
+      const ring = s.boxShadow && s.boxShadow !== 'none';
+      return { ok: outline || ring, what: el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ')[0] : '') + (el.id ? '#' + el.id : '') };
+    }"""
+
+    def test_keyboard_focus_is_always_visible_on_the_journal(self):
+        page = self.open()
+        page.click('#nav [data-go="journal"]')
+        page.wait_for_selector(".memory-stats")
+        page.click(".page-head h1, h1")
+        seen = []
+        for _ in range(40):
+            page.keyboard.press("Tab")
+            info = page.evaluate(self.FOCUS_CHECK)
+            if info:
+                seen.append(info)
+        self.assertGreater(len(seen), 20)
+        self.assertEqual([s["what"] for s in seen if not s["ok"]], [])
+        page.focus("#journal-search")
+        self.assertTrue(page.evaluate(self.FOCUS_CHECK)["ok"])
+
+    CONTRAST = """() => {
+      const parse = (c) => {
+        let m = /^rgba?\\(([^)]+)\\)/.exec(c);
+        if (m) {
+          const p = m[1].split(/[\\s,\\/]+/).filter(Boolean).map(Number);
+          return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1];
+        }
+        m = /^color\\(srgb ([^)]+)\\)/.exec(c);
+        if (m) {
+          const p = m[1].split(/[\\s\\/]+/).filter(Boolean).map(Number);
+          return [p[0] * 255, p[1] * 255, p[2] * 255, p.length > 3 ? p[3] : 1];
+        }
+        return null;
+      };
+      const over = (top, under) => [0, 1, 2].map((i) => top[i] * top[3] + under[i] * (1 - top[3])).concat(1);
+      const background = (el) => {
+        const layers = [];
+        for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+          const c = parse(getComputedStyle(node).backgroundColor);
+          if (c && c[3] > 0) layers.push(c);
+          if (c && c[3] >= 1) break;
+        }
+        let color = [255, 255, 255, 1];
+        for (const layer of layers.reverse()) color = over(layer, color);
+        return color;
+      };
+      const lum = (c) => {
+        const ch = c.slice(0, 3).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+      };
+      const failures = [];
+      let checked = 0;
+      for (const el of document.querySelectorAll('#view *')) {
+        if (el.closest('svg') || el.closest('[hidden]') || el.disabled) continue;
+        const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+        if (!own || !el.getClientRects().length) continue;
+        const s = getComputedStyle(el);
+        if (s.visibility === 'hidden' || parseFloat(s.opacity) === 0) continue;
+        const fg = parse(s.color);
+        if (!fg) continue;
+        const bg = background(el);
+        const text = over(fg, bg);
+        const [a, b] = [lum(text), lum(bg)].sort((x, y) => y - x);
+        const ratio = (a + 0.05) / (b + 0.05);
+        const size = parseFloat(s.fontSize);
+        const large = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
+        checked += 1;
+        if (ratio < (large ? 3 : 4.5)) failures.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} "${el.textContent.trim().slice(0, 24)}" ${ratio.toFixed(2)}`);
+      }
+      return { checked, failures: [...new Set(failures)] };
+    }"""
+
+    def journal_contrast(self, theme):
+        page = self.open()
+        page.evaluate("(t) => { localStorage.setItem('cairn.theme', t); document.documentElement.dataset.theme = t; }", theme)
+        page.click('#nav [data-go="journal"]')
+        page.wait_for_selector(".memory-stats")
+        self.assertEqual(page.evaluate("document.documentElement.dataset.theme"), theme)
+        return page.evaluate(self.CONTRAST)
+
+    def test_journal_text_meets_wcag_contrast_in_light_and_dark(self):
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                result = self.journal_contrast(theme)
+                self.assertGreater(result["checked"], 40)
+                self.assertEqual(result["failures"], [])
+
+    def test_offline_voice_captures_audio_in_a_worklet(self):
+        page = self.open()
+        # An OfflineAudioContext renders without a sound device, so the worklet path is checked exactly.
+        result = page.evaluate(
+            """async () => {
+              const lv = await import('./localvoice.js');
+              const ctx = new OfflineAudioContext(1, 4096 * 3 + 100, 16000);
+              const osc = ctx.createOscillator();
+              const chunks = [];
+              const tap = await lv.audioTap(ctx, osc, (chunk) => chunks.push(chunk));
+              osc.start();
+              await ctx.startRendering();
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              return {
+                kind: tap.kind,
+                count: chunks.length,
+                lengths: chunks.map((c) => c.length),
+                floats: chunks.every((c) => c instanceof Float32Array),
+                signal: chunks.length ? Math.max(...chunks[0].map(Math.abs)) : 0,
+              };
+            }"""
+        )
+        self.assertEqual(result["kind"], "worklet")
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(result["lengths"], [4096, 4096, 4096])
+        self.assertTrue(result["floats"])
+        self.assertGreater(result["signal"], 0.1)
+        self.assertEqual(self.errors, [])
 
 if __name__ == "__main__":
     unittest.main()

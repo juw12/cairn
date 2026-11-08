@@ -194,6 +194,65 @@ export function loadModel() {
 
 // ------------------------------------------------------------------ SpeechRecognition-shaped wrapper
 
+
+// Audio capture runs in an AudioWorklet (off the main thread); ScriptProcessor is only the fallback.
+const TAP_FRAMES = 4096;
+const TAP_SOURCE = `class CairnTap extends AudioWorkletProcessor {
+  constructor() { super(); this.buffer = new Float32Array(${TAP_FRAMES}); this.filled = 0; }
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (channel) {
+      let offset = 0;
+      while (offset < channel.length) {
+        const take = Math.min(channel.length - offset, this.buffer.length - this.filled);
+        this.buffer.set(channel.subarray(offset, offset + take), this.filled);
+        this.filled += take;
+        offset += take;
+        if (this.filled === this.buffer.length) {
+          this.port.postMessage(this.buffer, [this.buffer.buffer]);
+          this.buffer = new Float32Array(${TAP_FRAMES});
+          this.filled = 0;
+        }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("cairn-tap", CairnTap);`;
+
+const tapModules = new WeakSet();
+
+export async function audioTap(context, source, onChunk) {
+  if (context.audioWorklet && typeof AudioWorkletNode === "function") {
+    try {
+      if (!tapModules.has(context)) {
+        const url = URL.createObjectURL(new Blob([TAP_SOURCE], { type: "text/javascript" }));
+        try {
+          await context.audioWorklet.addModule(url);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+        tapModules.add(context);
+      }
+      const node = new AudioWorkletNode(context, "cairn-tap", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+      node.port.onmessage = (event) => onChunk(event.data);
+      const mute = context.createGain();
+      mute.gain.value = 0;
+      source.connect(node);
+      node.connect(mute);
+      mute.connect(context.destination);
+      return { kind: "worklet", nodes: [node, mute], stop: () => { node.port.onmessage = null; } };
+    } catch {
+      /* no worklet support here: fall back below */
+    }
+  }
+  const node = context.createScriptProcessor(TAP_FRAMES, 1, 1);
+  node.onaudioprocess = (event) => onChunk(event.inputBuffer);
+  source.connect(node);
+  node.connect(context.destination);
+  return { kind: "script", nodes: [node], stop: () => { node.onaudioprocess = null; } };
+}
+
 export class LocalRecognition {
   constructor() {
     this.lang = "";
@@ -227,6 +286,8 @@ export class LocalRecognition {
         return this.finish();
       }
       const context = new AudioContext();
+      // The microphone prompt can outlast the click's user activation; a suspended context hears nothing.
+      if (context.state === "suspended") context.resume().catch(() => {});
       const recognizer = new model.KaldiRecognizer(context.sampleRate);
       recognizer.on("partialresult", (message) => {
         const text = message?.result?.partial;
@@ -239,17 +300,27 @@ export class LocalRecognition {
         if (!this.continuous && this.running) this.stop();
       });
       const source = context.createMediaStreamSource(stream);
-      const node = context.createScriptProcessor(4096, 1, 1);
-      node.onaudioprocess = (event) => {
+      const feed = (chunk) => {
+        if (!this.running) return;
         try {
-          recognizer.acceptWaveform(event.inputBuffer);
+          if (!(chunk instanceof Float32Array)) return recognizer.acceptWaveform(chunk);
+          if (typeof recognizer.acceptWaveformFloat === "function") return recognizer.acceptWaveformFloat(chunk, context.sampleRate);
+          const buffer = context.createBuffer(1, chunk.length, context.sampleRate);
+          buffer.copyToChannel(chunk, 0);
+          recognizer.acceptWaveform(buffer);
         } catch {
           /* engine busy or stopped */
         }
       };
-      source.connect(node);
-      node.connect(context.destination);
-      this.parts = { stream, context, recognizer, source, node };
+      const tap = await audioTap(context, source, feed);
+      if (!this.running) {
+        tap.stop();
+        stream.getTracks().forEach((track) => track.stop());
+        context.close().catch(() => {});
+        return this.finish();
+      }
+      this.audioPath = tap.kind;
+      this.parts = { stream, context, recognizer, source, tap };
       this.onstart?.();
     } catch (error) {
       this.running = false;
@@ -277,10 +348,10 @@ export class LocalRecognition {
     } catch {
       /* nothing pending */
     }
-    parts.node.onaudioprocess = null;
+    parts.tap.stop();
     try {
       parts.source.disconnect();
-      parts.node.disconnect();
+      parts.tap.nodes.forEach((node) => node.disconnect());
     } catch {
       /* already disconnected */
     }

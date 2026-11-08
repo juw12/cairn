@@ -61,7 +61,7 @@
   --line-strong: #403d37;
   --ink: #efebe3;
   --ink-2: #c8c2b6;
-  --muted: #8e877b;
+  --muted: #968f83;
   --accent: #f0764d;
   --accent-ink: #ff9a76;
   --accent-soft: #3a2118;
@@ -271,6 +271,8 @@ kbd {
 .dot[class*="t-"] { background: var(--t); }
 .pill { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 4px; font-size: 12px; font-weight: 550; white-space: nowrap; background: var(--t-soft, var(--sunken)); color: var(--t-ink, var(--t, var(--ink-2))); }
 .tag { display: inline-flex; align-items: center; height: 19px; padding: 0 6px; border-radius: 4px; font-family: var(--mono); font-size: 12px; color: var(--ink-2); background: var(--sunken); border: 0; white-space: nowrap; }
+/* Counts inside a tag keep the tag's own ink: --muted on a tinted chip fell under 4.5:1. */
+.tag .muted { color: inherit; opacity: 1; font-weight: 600; }
 button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .status-todo { --t: var(--note); --t-soft: var(--note-soft); --t-ink: var(--note-ink); }
@@ -1329,7 +1331,7 @@ body.log-open .log-fab { display: none; }
 .memory-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; margin-bottom: 14px; }
 @media (max-width: 980px) { .memory-grid { grid-template-columns: minmax(0, 1fr); } }
 .memory-card { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); margin-bottom: 14px; }
-.memory-grid .memory-card { margin-bottom: 0; }
+.memory-grid .memory-card { margin-bottom: 0; align-self: start; }
 .memory-card .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .memory-card .card-head h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 22px; }
 .heatmap { overflow-x: auto; padding-bottom: 4px; }
@@ -1603,6 +1605,20 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .heatmap { max-width: none; scrollbar-width: thin; }
 .search-hits li.is-fuzzy { opacity: .82; }
 .search-hits .pill { font: 500 11px/1.5 var(--mono); padding: 0 6px; border-radius: 999px; background: var(--sunken); color: var(--muted); margin-left: 4px; }
+/* Keyboard focus stays visible on inputs that swap the default outline for a border change. */
+:is(.input, .select, .capture input, .people-search input, .explore-row input, .body-input, .cv-editor):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+:is(.title-input, .palette input):focus-visible { box-shadow: inset 0 -2px 0 var(--accent); }
+.quick-add input:focus-visible { border-bottom-color: var(--accent); box-shadow: 0 1px 0 var(--accent); }
+
+/* Reviews that are ready to write (last week, last month). */
+/* The persistent live region is fixed so its 1px box never makes the page scroll (a 1px scroll turns middle-click into autoscroll and swallows auxclick). */
+#log-announcer { position: fixed; top: 0; left: 0; }
+.review-due { display: grid; gap: 8px; margin-bottom: 14px; padding: 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius-lg); background: var(--surface); }
+.review-due-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; font-size: 14px; }
+.review-due-row .icon { vertical-align: -3px; }
 
 /* vibe sessions round 2: outcome chips (filter + legend), foldable days */
 .vibe-filters { align-items: center; justify-content: space-between; gap: 6px 16px; }

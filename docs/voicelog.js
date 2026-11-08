@@ -114,6 +114,7 @@ export function initVoiceLog() {
   }
   fab.addEventListener("click", () => openLogSheet());
   $("#app").appendChild(fab);
+  announcer();
   const redraw = () => {
     updateVoiceUi();
     syncWake();
@@ -125,6 +126,12 @@ export function initVoiceLog() {
     if (event.target.closest?.("[data-log-open]")) openLogSheet();
     const memory = event.target.closest?.(".home-log-memory[data-jl-day]");
     if (memory) openDay(memory.dataset.jlDay);
+    const review = event.target.closest?.("[data-review]");
+    if (review) {
+      const day = review.dataset.reviewDay || today();
+      if (review.dataset.review === "month") monthlyReview(day);
+      else weeklyReview(day);
+    }
   });
   syncLogFab();
 }
@@ -318,7 +325,7 @@ function drawSheet() {
       <textarea id="log-text" rows="2" placeholder="Say or type what happened… (todo:, idea:, decision:, mood: work too)">${esc(draft)}</textarea>
       <button type="submit" class="btn primary" data-log="save">Save</button>
     </form>
-    <p class="log-feedback" id="log-feedback" role="status" aria-live="polite"></p>
+    <p class="log-feedback" id="log-feedback"></p>
     <div class="log-mood-row">
       <div class="mood-chips" role="group" aria-label="How do you feel?">
         ${dl.MOODS.map((m) => `<button type="button" class="mood-chip" data-mood="${m.score}" title="${m.label}" aria-label="Mood: ${m.label}, ${m.score} out of 5">${m.label}</button>`).join("")}
@@ -359,7 +366,7 @@ function drawSheet() {
           <li><b>“undo”</b> / <b>“scratch that”</b> → remove the last entry</li>
           <li><b>“read it back”</b>, <b>“what did I do last Friday”</b>, <b>“read 3 November”</b> → read that day aloud</li>
           <li><b>“open last Monday”</b> → open that day's page; <b>“search for gpx”</b>, <b>“when did I last mention Sam”</b> → search every day</li>
-          <li><b>“weekly review”</b>, <b>“open today”</b>, <b>“open my memories”</b></li>
+          <li><b>“weekly review”</b>, <b>“monthly review”</b>, <b>“open today”</b>, <b>“open my memories”</b></li>
           <li><b>“stop”</b> → stop listening</li>
           <li><b>“Hey Cairn, …”</b> from any screen (turn on “Listen for Hey Cairn”) → opens this and logs the rest</li>
           <li>Names you have written as <b>@sam</b> before are linked when you say them</li>
@@ -501,6 +508,28 @@ function entryRow(entry) {
 function feedback(message) {
   const el = $("#log-feedback");
   if (el) el.textContent = message;
+  announce(message);
+}
+
+// The sheet is redrawn after every save, so a live region inside it would be brand new each time, and a region
+// created in the same tick as its text is often not read out. One region on <body> outlives the redraws.
+function announcer() {
+  let region = document.getElementById("log-announcer");
+  if (!region) {
+    region = document.createElement("div");
+    region.id = "log-announcer";
+    region.className = "sr-only";
+    region.setAttribute("role", "status");
+    region.setAttribute("aria-live", "polite");
+    document.body.appendChild(region);
+  }
+  return region;
+}
+
+function announce(message) {
+  const region = announcer();
+  // A live region only speaks when its text changes; nudge an identical repeat so it is read again.
+  region.textContent = region.textContent === message ? `${message}\u00a0` : message;
 }
 
 async function onSheetClick(event) {
@@ -671,6 +700,10 @@ export async function handleUtterance(raw, { typed = false } = {}) {
     case "review":
       closeLogSheet();
       await weeklyReview();
+      return intent;
+    case "month-review":
+      closeLogSheet();
+      await monthlyReview();
       return intent;
     case "task":
     case "idea":
@@ -908,8 +941,15 @@ function speak(text) {
 // ============================================================ weekly review
 
 export async function weeklyReview(anyDay = today()) {
+  return saveReview(dl.weeklyReview(days(), state.notes, anyDay));
+}
+
+export async function monthlyReview(anyDay = today()) {
+  return saveReview(dl.monthlyReview(days(), state.notes, anyDay));
+}
+
+async function saveReview(review) {
   if (!canWrite()) return toast("This brain is read-only.");
-  const review = dl.weeklyReview(days(), state.notes, anyDay);
   const path = `journal/${review.slug}.md`;
   const meta = { title: review.title, type: "journal", tags: ["review"], created: today() };
   const text = core.serializeNote(meta, review.body);
@@ -939,12 +979,14 @@ export function journalView() {
   const pages = state.notes.filter((n) => n.type === "journal").sort((a, b) => (a.slug < b.slug ? 1 : -1));
   const editable = canWrite();
   const actions = editable
-    ? `<button class="btn" data-jl="review">${icon("list")} Weekly review</button><button class="btn" data-action="journal-today">${icon("journal")} Today's page</button><button class="btn primary" data-jl="log">${MIC} Log now</button>`
+    ? `<button class="btn" data-jl="review">${icon("list")} Weekly review</button><button class="btn" data-review="month" data-review-day="${now}">${icon("list")} Monthly review</button><button class="btn" data-action="journal-today">${icon("journal")} Today's page</button><button class="btn primary" data-jl="log">${MIC} Log now</button>`
     : "";
   const recent = [...all.keys()].sort().reverse().filter((d) => all.get(d).entries.length).slice(0, 5);
   const todayInfo = all.get(now);
-  const related = todayInfo ? dl.relatedDays(all, todayInfo.entries, now, 4) : [];
-  const { tags, links, people } = dl.mentions(all, dl.addDays(now, -29), now);
+  const related = todayInfo ? linkedDays(all, todayInfo.entries, now) : [];
+  const mindRange = [30, 90, 0].includes(state.mindRange) ? state.mindRange : 30;
+  const { tags, links, people } = dl.mentions(all, mindRange ? dl.addDays(now, -(mindRange - 1)) : "0000-01-01", now);
+  const due = editable ? dl.pendingReviews(all, state.notes, now) : [];
   return `${pageHead("Journal & memories", "Your daily log, one Markdown page per day. Tap the mic button (or press L) to log by voice; everything lands in brain/journal/ as plain text.", actions)}
     <section class="memory-stats">
       <div class="stat-card"><span class="stat-num">${streak.current}</span><span class="stat-label">day streak${streak.loggedToday ? "" : editable && streak.current ? " · log today to keep it" : ""}</span></div>
@@ -953,6 +995,7 @@ export function journalView() {
       <div class="stat-card"><span class="stat-num">${weekEntries}</span><span class="stat-label">entries this week</span></div>
       <div class="stat-card"><span class="stat-num">${avg === null ? "–" : `${avg.toFixed(1)}<small>/5</small>`}</span><span class="stat-label">mood, last ${range} days</span></div>
     </section>
+    ${due.length ? reviewDueHtml(due) : ""}
     <div class="memory-grid">
       <section class="card memory-card heat-card">
         <div class="card-head"><h2>Every day</h2><span class="muted">last 12 months</span></div>
@@ -964,8 +1007,9 @@ export function journalView() {
       <section class="card memory-card">
         <div class="card-head"><h2>Look back</h2></div>
         <ul class="lookbacks">${dl.lookBacks(all, now).map(lookBackRow).join("")}</ul>
-        ${related.length ? `<div class="card-head" style="margin-top:12px"><h2>Linked to today</h2></div><ul class="related-days">${related.map((r) => `<li><button class="link-btn" data-jl-day="${r.day}">${esc(dl.prettyDay(r.day, "short"))}</button> <span class="muted">${r.shared.map(esc).join(", ")}</span></li>`).join("")}</ul>` : ""}
-        ${tags.length || links.length || people.length ? `<div class="card-head" style="margin-top:12px"><h2>On your mind</h2><span class="muted">30 days</span></div><div class="tags">${people.slice(0, 6).map(([p, n]) => `<button class="tag person" data-jl-search="@${esc(p)}">@${esc(p)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${tags.slice(0, 6).map(([t, n]) => `<button class="tag" data-jl-search="#${esc(t)}">#${esc(t)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${links.slice(0, 6).map(([l, n]) => `<button class="tag" data-jl-search="${esc(l)}">${esc(core.resolveLink(state.notes, l)?.title || l)} <span class="muted">&nbsp;${n}</span></button>`).join("")}</div>` : ""}
+        ${related.length ? `<div class="card-head" style="margin-top:12px"><h2>Linked to today</h2></div><ul class="related-days">${related.map((r) => `<li><button class="link-btn" data-jl-day="${r.day}">${esc(dl.prettyDay(r.day, "short"))}</button> <span class="muted">${r.shared.length ? r.shared.map(esc).join(", ") : `reads alike: ${r.words.map(esc).join(", ")}`}</span></li>`).join("")}</ul>` : ""}
+        <div class="card-head" style="margin-top:12px"><h2>On your mind</h2><span class="seg" role="group" aria-label="On your mind range">${[[30, "30d"], [90, "90d"], [0, "All"]].map(([n, label]) => `<button type="button" class="seg-btn ${mindRange === n ? "on" : ""}" data-jl-mind="${n}" aria-pressed="${mindRange === n}">${label}</button>`).join("")}</span></div>
+        ${tags.length || links.length || people.length ? `<div class="tags">${people.slice(0, 6).map(([p, n]) => `<button class="tag person" data-jl-search="@${esc(p)}">@${esc(p)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${tags.slice(0, 6).map(([t, n]) => `<button class="tag" data-jl-search="#${esc(t)}">#${esc(t)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${links.slice(0, 6).map(([l, n]) => `<button class="tag" data-jl-search="${esc(l)}">${esc(core.resolveLink(state.notes, l)?.title || l)} <span class="muted">&nbsp;${n}</span></button>`).join("")}</div>` : `<p class="muted">No #tags, @people or [[links]] ${mindRange ? `in the last ${mindRange} days` : "yet"}.</p>`}
       </section>
     </div>
     <section class="card memory-card">
@@ -981,6 +1025,23 @@ export function journalView() {
       <summary>All journal pages <span class="muted">(${pages.length})</span></summary>
       <div class="list">${pages.map((n) => `<button class="row-item" data-open="${esc(n.path)}">${icon("journal", "sm")}<span>${esc(n.title)}</span><span class="muted">${esc(n.path)}</span></button>`).join("")}</div>
     </details>`;
+}
+
+// Days that share #tags, @people or [[links]] with today come first; then days whose words read alike.
+function linkedDays(all, entries, now, limit = 5) {
+  const shared = dl.relatedDays(all, entries, now, limit).map((r) => ({ ...r, words: [] }));
+  const seen = new Set(shared.map((r) => r.day));
+  const alike = dl.similarDays(all, entries, now, limit).filter((r) => !seen.has(r.day)).map((r) => ({ ...r, shared: [] }));
+  return shared.concat(alike).slice(0, limit);
+}
+
+function reviewDueHtml(due) {
+  return `<section class="card review-due" aria-label="Reviews ready to write">
+    ${due.map((r) => `<div class="review-due-row">
+      <span>${icon("list")} <b>${esc(r.title)}</b> <span class="muted">has ${plural(r.entries, "entry", "entries")} and no review yet.</span></span>
+      <button class="btn sm" type="button" data-review="${r.kind}" data-review-day="${r.day}">Write the ${r.kind === "month" ? "monthly" : "weekly"} review</button>
+    </div>`).join("")}
+  </section>`;
 }
 
 const HEAT_WEEKS = 53;
@@ -1095,6 +1156,11 @@ export function wireJournal() {
       input.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
     }
+    const mindButton = event.target.closest("[data-jl-mind]");
+    if (mindButton) {
+      state.mindRange = Number(mindButton.dataset.jlMind);
+      return render();
+    }
     const rangeButton = event.target.closest("[data-jl-range]");
     if (rangeButton) {
       state.moodRange = Number(rangeButton.dataset.jlRange);
@@ -1117,6 +1183,7 @@ export function homeLogStrip() {
   const entries = all.get(now)?.entries || [];
   const memory = dl.lookBacks(all, now).filter((l) => l.label !== "Yesterday" && l.info?.entries?.length).pop();
   const last = entries.slice(-2).reverse();
+  const due = canWrite() ? dl.pendingReviews(all, state.notes, now)[0] : null;
   return `<section class="home-log" aria-label="Today's log">
     <div class="home-log-main">
       <div class="home-log-head">
@@ -1131,6 +1198,7 @@ export function homeLogStrip() {
       ? `<button class="home-log-memory" data-jl-day="${memory.day}" type="button"><span class="eyebrow">${esc(memory.label)}</span><span>${inline(memory.info.entries[0].text.replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: "))}</span></button>`
       : ""}
     <div class="home-log-actions">
+      ${due ? `<button class="btn" type="button" data-review="${due.kind}" data-review-day="${due.day}">${icon("list")} ${esc(due.title)} review</button>` : ""}
       ${canWrite() ? `<button class="btn primary" type="button" data-log-open>${MIC} Log by voice</button>` : ""}
       <button class="btn ghost" type="button" data-go="journal">Memories ${icon("arrow", "sm")}</button>
     </div>

@@ -218,6 +218,7 @@ export function voiceIntent(raw, today = dayOf()) {
   if (findMatch) return { kind: "search", query: findMatch[1].replace(/^(the word|about)\s+/, "").trim(), text: "" };
   if (/^(open|show)( me)? (my )?(memories|journal|diary|log)$/.test(lower)) return { kind: "open-journal", text: "" };
   if (/^(weekly review|review (my |the |this )?week|week in review)$/.test(lower)) return { kind: "review", text: "" };
+  if (/^(monthly review|review (my |the |this )?month|month in review)$/.test(lower)) return { kind: "month-review", text: "" };
   const routes = [
     ["task", /^(?:new\s+)?(?:todo|to do|to-do|task|remind me to|reminder to|i need to|i have to)\b[\s,:-]*(.+)$/i],
     ["idea", /^(?:new\s+)?idea\b[\s,:-]*(.+)$/i],
@@ -571,4 +572,188 @@ export function weeklyReview(days, notes, anyDayInWeek) {
   }
   lines.push("## Looking ahead", "", "- ", "");
   return { title: `Week ${week}, ${year}`, slug: `${year}-W${String(week).padStart(2, "0")}`, body: lines.join("\n") };
+}
+
+// ------------------------------------------------------------ monthly review
+
+const MONTH_TITLES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+export function monthStart(day) {
+  return `${day.slice(0, 7)}-01`;
+}
+
+export function monthlyReview(days, notes, anyDayInMonth) {
+  const start = monthStart(anyDayInMonth);
+  const end = addDays(addMonths(start, 1), -1);
+  const year = Number(start.slice(0, 4));
+  const monthName = MONTH_TITLES[Number(start.slice(5, 7)) - 1];
+  const length = Number(end.slice(8));
+  const logged = [];
+  let run = 0;
+  let bestRun = 0;
+  for (let i = 0; i < length; i++) {
+    const info = days.get(addDays(start, i));
+    if (info && info.entries.length) {
+      logged.push(info);
+      run += 1;
+      bestRun = Math.max(bestRun, run);
+    } else {
+      run = 0;
+    }
+  }
+  const entryCount = logged.reduce((n, info) => n + info.entries.length, 0);
+  const moodsOf = (infos) => infos.flatMap((info) => info.entries.filter((e) => e.mood).map((e) => e.mood.score));
+  const average = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+  const avg = average(moodsOf(logged));
+  const busiest = logged.reduce((best, info) => (!best || info.entries.length > best.entries.length ? info : best), null);
+  const created = notes.filter((n) => n.type !== "journal" && typeof n.meta?.created === "string" && n.meta.created >= start && n.meta.created <= end);
+  const done = notes.filter((n) => n.type === "task" && n.status === "done" && typeof n.meta?.done === "string" && n.meta.done >= start && n.meta.done <= end);
+  const { tags, links, people } = mentions(days, start, end);
+  const weeks = [];
+  for (let week = weekStart(start); week <= end; week = addDays(week, 7)) {
+    const inMonth = logged.filter((info) => info.day >= week && info.day <= addDays(week, 6));
+    const { week: number } = isoWeek(week);
+    weeks.push({ week, number, days: inMonth.length, entries: inMonth.reduce((n, info) => n + info.entries.length, 0), mood: average(moodsOf(inMonth)) });
+  }
+  const picked = (kind) => logged.flatMap((info) => info.entries.filter((e) => e.kind === kind).map((e) => ({ day: info.day, entry: e })));
+  const decisions = picked("decision");
+  const ideas = picked("idea");
+  const moodLabel = (score) => MOODS[Math.round(score) - 1].label;
+  const lines = [];
+  lines.push(`${monthName} ${year}: ${prettyDay(start, "short")} to ${prettyDay(end, "short")}.`, "");
+  lines.push("## Summary", "");
+  lines.push(`- Days logged: ${logged.length} of ${length}`);
+  lines.push(`- Entries: ${entryCount}`);
+  if (bestRun > 1) lines.push(`- Longest run: ${bestRun} days in a row`);
+  if (avg !== null) lines.push(`- Average mood: ${avg.toFixed(1)}/5 (${moodLabel(avg)})`);
+  if (busiest) lines.push(`- Busiest day: [[${busiest.day}|${prettyDay(busiest.day, "short")}]] (${busiest.entries.length} entries)`);
+  if (created.length) lines.push(`- Notes created: ${created.length}`);
+  if (done.length) lines.push(`- Tasks done: ${done.length}`);
+  lines.push("");
+  lines.push("## Week by week", "");
+  if (!logged.length) lines.push("Nothing logged this month.", "");
+  else {
+    for (const w of weeks) {
+      const mood = w.mood === null ? "" : `, mood ${w.mood.toFixed(1)}/5`;
+      lines.push(`- Week ${w.number} (from ${prettyDay(w.week, "short")}): ${w.days} ${w.days === 1 ? "day" : "days"}, ${w.entries} ${w.entries === 1 ? "entry" : "entries"}${mood}`);
+    }
+    lines.push("");
+  }
+  if (decisions.length || ideas.length) {
+    lines.push("## Decisions and ideas", "");
+    for (const { day, entry } of decisions) lines.push(`- [[${day}|${prettyDay(day, "short")}]] ${entry.text}`);
+    for (const { day, entry } of ideas) lines.push(`- [[${day}|${prettyDay(day, "short")}]] ${entry.text}`);
+    lines.push("");
+  }
+  if (created.length || done.length) {
+    lines.push("## Added to the brain", "");
+    for (const note of created) lines.push(`- ${note.type.charAt(0).toUpperCase() + note.type.slice(1)}: [[${note.slug}|${note.title}]]`);
+    for (const note of done) if (!created.includes(note)) lines.push(`- Done: [[${note.slug}|${note.title}]]`);
+    lines.push("");
+  }
+  if (tags.length || links.length || people.length) {
+    lines.push("## Mentioned most", "");
+    if (people.length) lines.push(`- People: ${people.slice(0, 8).map(([p, n]) => `@${p} (${n})`).join(", ")}`);
+    if (tags.length) lines.push(`- Tags: ${tags.slice(0, 8).map(([t, n]) => `#${t} (${n})`).join(", ")}`);
+    if (links.length) lines.push(`- Notes: ${links.slice(0, 8).map(([l, n]) => `[[${l}]] (${n})`).join(", ")}`);
+    lines.push("");
+  }
+  lines.push("## Looking ahead", "", "- ", "");
+  return { title: `${monthName} ${year}`, slug: start.slice(0, 7), body: lines.join("\n") };
+}
+
+// Reviews worth writing now: last week, and (in the first week of a month) last month,
+// when they have entries but no review page yet.
+export function pendingReviews(days, notes, today) {
+  const written = new Set(notes.filter((n) => n.type === "journal").map((n) => n.slug));
+  const count = (from, to) => {
+    let n = 0;
+    for (const [day, info] of days) if (day >= from && day <= to) n += info.entries.length;
+    return n;
+  };
+  const out = [];
+  const lastWeek = addDays(weekStart(today), -7);
+  const { year, week } = isoWeek(lastWeek);
+  const weekSlug = `${year}-W${String(week).padStart(2, "0")}`;
+  const weekEntries = count(lastWeek, addDays(lastWeek, 6));
+  if (weekEntries && !written.has(weekSlug)) {
+    out.push({ kind: "week", day: lastWeek, slug: weekSlug, title: `Week ${week}, ${year}`, entries: weekEntries });
+  }
+  if (Number(today.slice(8)) <= 7) {
+    const lastMonth = addMonths(monthStart(today), -1);
+    const monthSlug = lastMonth.slice(0, 7);
+    const monthEntries = count(lastMonth, addDays(monthStart(today), -1));
+    if (monthEntries && !written.has(monthSlug)) {
+      out.push({ kind: "month", day: lastMonth, slug: monthSlug, title: `${MONTH_TITLES[Number(lastMonth.slice(5, 7)) - 1]} ${lastMonth.slice(0, 4)}`, entries: monthEntries });
+    }
+  }
+  return out;
+}
+
+// ------------------------------------------------------------ days that read alike
+
+const STOP_WORDS = new Set(("a about after again all also am an and any are as at back be been before being but by can " +
+  "could day did do does doing done for from get got had has have he her him his how i im in into is it its just " +
+  "let like me more most much my no not now of off on one only or our out over really she so some still than that " +
+  "the their them then there they think this to today too up us very want was way we went were what when which " +
+  "who will with would yesterday you your task idea decision note mood log").split(" "));
+
+function stem(word) {
+  for (const suffix of ["ing", "ed", "es", "s"]) {
+    if (word.length - suffix.length >= 4 && word.endsWith(suffix)) return word.slice(0, -suffix.length);
+  }
+  return word;
+}
+
+export function contentWords(text) {
+  return plainText(text)
+    .toLowerCase()
+    .replace(/'/g, "")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length >= 3 && !STOP_WORDS.has(w) && !/^\d+$/.test(w))
+    .map(stem);
+}
+
+// Days whose words read most like `entries` (TF-IDF cosine over each day's text). Runs on the device; no model.
+export function similarDays(days, entries, exclude, limit = 4, minScore = 0.12) {
+  const docs = [];
+  for (const [day, info] of days) {
+    if (day === exclude || !info.entries.length) continue;
+    docs.push({ day, words: info.entries.flatMap((e) => contentWords(e.text)) });
+  }
+  const query = entries.flatMap((e) => contentWords(e.text));
+  if (!query.length || !docs.length) return [];
+  const df = new Map();
+  for (const doc of [...docs, { words: query }]) for (const w of new Set(doc.words)) df.set(w, (df.get(w) || 0) + 1);
+  const total = docs.length + 1;
+  const vector = (words) => {
+    const tf = new Map();
+    for (const w of words) tf.set(w, (tf.get(w) || 0) + 1);
+    const out = new Map();
+    for (const [w, n] of tf) {
+      const weight = n * Math.log(total / df.get(w));
+      if (weight > 0) out.set(w, weight);
+    }
+    return out;
+  };
+  const norm = (v) => Math.sqrt([...v.values()].reduce((s, x) => s + x * x, 0));
+  const q = vector(query);
+  const qNorm = norm(q);
+  if (!qNorm) return [];
+  const scored = [];
+  for (const doc of docs) {
+    const v = vector(doc.words);
+    const vNorm = norm(v);
+    if (!vNorm) continue;
+    const shared = [];
+    let dot = 0;
+    for (const [w, weight] of q) {
+      if (!v.has(w)) continue;
+      dot += weight * v.get(w);
+      shared.push([w, weight * v.get(w)]);
+    }
+    const score = dot / (qNorm * vNorm);
+    if (score >= minScore) scored.push({ day: doc.day, score, words: shared.sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w]) => w) });
+  }
+  return scored.sort((a, b) => b.score - a.score || (a.day < b.day ? 1 : -1)).slice(0, limit);
 }
