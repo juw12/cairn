@@ -275,7 +275,10 @@ def stats_text(brain: Brain) -> str:
         f"Sessions: {stats['sessions']} · shipped {stats['shipped']} · partial {stats['partial']} · dropped {stats['dropped']}"
         + (f" · done {stats['done']}" if stats["done"] else "")
         + (f" · ship rate {stats['ship_rate']}%" if stats["ship_rate"] is not None else ""),
-        f"Time vibing: {hours}h {minutes:02d}m · prompts {stats['prompts']}",
+        f"Time vibing: {hours}h {minutes:02d}m"
+        + (f" ({stats['agent_minutes'] // 60}h {stats['agent_minutes'] % 60:02d}m across sessions, {stats['parallel']}x parallel)"
+           if stats["parallel"] and stats["parallel"] >= 1.1 else "")
+        + f" · prompts {stats['prompts']}",
         f"Checks: {stats['passed']} passed · {stats['failed']} failed"
         + (f" · {stats['pass_rate']}% green" if stats["pass_rate"] is not None else ""),
         f"Code: {stats['commits']} commits · +{stats['added']} −{stats['removed']}",

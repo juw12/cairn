@@ -834,6 +834,45 @@ def session_minutes(note: dict) -> int:
     return end - start
 
 
+_SPAN_RE = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/(\d+)")
+
+
+def session_spans(note: dict) -> list[tuple[int, int]]:
+    """When the session was actually working, as (start, end) on the stamp_minutes clock.
+
+    A watcher writes `spans: 2026-11-08T09:12/45 2026-11-08T13:00/30` (start/minutes); a hand-logged
+    session is one span from started to ended. Parallel sessions overlap, so totals use the union."""
+    raw = note["meta"].get("spans")
+    spans = []
+    if isinstance(raw, str):
+        for stamp, length in _SPAN_RE.findall(raw):
+            start = stamp_minutes(stamp)
+            if start is not None:
+                spans.append((start, start + max(1, int(length))))
+    if spans:
+        return spans
+    start = stamp_minutes(note["meta"].get("started"))
+    end = stamp_minutes(note["meta"].get("ended"))
+    if start is None or end is None or end <= start:
+        return []
+    # A measured `minutes` without spans (older watcher notes): count that much from the start, never more.
+    return [(start, min(end, start + session_minutes(note)))]
+
+
+def union_minutes(spans) -> int:
+    """Minutes covered by at least one span (overlaps counted once)."""
+    total = 0
+    reach = None
+    for start, end in sorted(spans):
+        if reach is None or start > reach:
+            total += end - start
+            reach = end
+        elif end > reach:
+            total += end - reach
+            reach = end
+    return total
+
+
 def _count(value) -> int:
     return int(value) if isinstance(value, str) and re.fullmatch(r"[0-9]+", value.strip()) else 0
 
@@ -878,9 +917,11 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
         daily.append({
             "day": day,
             "sessions": len(on_day),
-            "minutes": sum(session_minutes(s) for s in on_day),
+            "minutes": union_minutes(span for s in on_day for span in session_spans(s)),
             "shipped": sum(1 for s in on_day if s["status"] == "shipped"),
         })
+    wall = union_minutes(span for s in ended for span in session_spans(s))
+    agent = sum(session_minutes(s) for s in ended)
     return {
         "sessions": len(sessions),
         "live": sum(1 for s in sessions if s["status"] == "live"),
@@ -889,7 +930,10 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
         "dropped": sum(1 for s in sessions if s["status"] == "dropped"),
         "done": sum(1 for s in sessions if s["status"] == "done"),
         "ship_rate": _percent(sum(1 for s in finished if s["status"] == "shipped"), len(finished)),
-        "minutes": sum(session_minutes(s) for s in ended),
+        # Wall-clock time with at least one session working; agent_minutes adds parallel sessions up.
+        "minutes": wall,
+        "agent_minutes": agent,
+        "parallel": int(10 * agent / wall + 0.5) / 10 if wall else None,
         "prompts": sum(1 for e in logs if e["kind"] == "prompt"),
         "passed": passed,
         "failed": failed,

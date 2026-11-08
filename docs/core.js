@@ -839,6 +839,42 @@ function count(value) {
   return typeof value === "string" && /^[0-9]+$/.test(value.trim()) ? Number(value.trim()) : 0;
 }
 
+// When the session was actually working, as [start, end] on the stampMinutes clock. A watcher writes
+// `spans: 2026-11-08T09:12/45 2026-11-08T13:00/30` (start/minutes); a hand-logged session is one span
+// from started to ended. Parallel sessions overlap, so totals use the union.
+export function sessionSpans(note) {
+  const raw = note.meta.spans;
+  const spans = [];
+  if (typeof raw === "string") {
+    for (const match of raw.matchAll(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})\/(\d+)/g)) {
+      const start = stampMinutes(match[1]);
+      if (start !== null) spans.push([start, start + Math.max(1, Number(match[2]))]);
+    }
+  }
+  if (spans.length) return spans;
+  const start = stampMinutes(note.meta.started);
+  const end = stampMinutes(note.meta.ended);
+  if (start === null || end === null || end <= start) return [];
+  // A measured `minutes` without spans (older watcher notes): count that much from the start, never more.
+  return [[start, Math.min(end, start + sessionMinutes(note))]];
+}
+
+// Minutes covered by at least one span (overlaps counted once).
+export function unionMinutes(spans) {
+  let total = 0;
+  let reach = null;
+  for (const [start, end] of [...spans].sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
+    if (reach === null || start > reach) {
+      total += end - start;
+      reach = end;
+    } else if (end > reach) {
+      total += end - reach;
+      reach = end;
+    }
+  }
+  return total;
+}
+
 export function feedbackRating(note) {
   const rating = count(note.meta.rating);
   return rating >= 1 && rating <= 5 ? rating : null;
@@ -881,10 +917,12 @@ export function vibeStats(notes, today, days = 14) {
     daily.push({
       day: date,
       sessions: onDay.length,
-      minutes: sum(onDay, sessionMinutes),
+      minutes: unionMinutes(onDay.flatMap(sessionSpans)),
       shipped: onDay.filter((s) => s.status === "shipped").length,
     });
   }
+  const wall = unionMinutes(ended.flatMap(sessionSpans));
+  const agent = sum(ended, sessionMinutes);
   return {
     sessions: sessions.length,
     live: sessions.filter((s) => s.status === "live").length,
@@ -893,7 +931,10 @@ export function vibeStats(notes, today, days = 14) {
     dropped: sessions.filter((s) => s.status === "dropped").length,
     done: sessions.filter((s) => s.status === "done").length,
     ship_rate: percent(finished.filter((s) => s.status === "shipped").length, finished.length),
-    minutes: sum(ended, sessionMinutes),
+    // Wall-clock time with at least one session working; agent_minutes adds parallel sessions up.
+    minutes: wall,
+    agent_minutes: agent,
+    parallel: wall ? Math.floor((10 * agent) / wall + 0.5) / 10 : null,
     prompts: logs.filter((e) => e.kind === "prompt").length,
     passed,
     failed,

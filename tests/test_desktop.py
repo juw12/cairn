@@ -588,3 +588,43 @@ class AutoUpdateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VibeWatchTests(unittest.TestCase):
+    """The desktop app records OpenCode sessions itself, so no separate watcher needs installing."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.config = desktop.Config(self.tmp / "config.json")
+        self.brain = Brain(self.tmp / "brain")
+        self.brain.root.mkdir()
+        self.brain.init()
+        self.no_db = self.tmp / "missing-opencode.db"
+
+    def test_a_vault_takes_sessions_from_every_folder_a_project_only_its_own(self):
+        self.assertFalse(desktop.vibe_watch_options(self.config, self.brain.root)["everywhere"])
+        (self.brain.root / ".obsidian").mkdir()
+        options = desktop.vibe_watch_options(self.config, self.brain.root)
+        self.assertTrue(options["everywhere"])
+        self.assertTrue(options["opencode"])
+        self.assertFalse(options["vector"], "Vector reports itself; process guessing stays opt-in")
+        self.config.set("vibeWatchEverywhere", False)
+        self.assertFalse(desktop.vibe_watch_options(self.config, self.brain.root)["everywhere"])
+
+    def test_a_pass_runs_only_when_switched_on_and_unclaimed(self):
+        self.assertEqual(desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db), [])
+        from cairn import watch
+
+        self.assertFalse(watch.claim_watch(self.brain, "cli:2"), "the app now holds the brain")
+        self.config.set("vibeWatch", False)
+        self.assertIsNone(desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db))
+        self.assertTrue(watch.claim_watch(self.brain, "cli:2"), "switching off hands the brain back")
+        self.config.set("vibeWatch", True)
+        self.assertIsNone(desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db))
+
+    def test_the_setting_is_offered_and_saved(self):
+        hooks = desktop.DesktopHooks(self.config)
+        self.assertTrue(hooks.state()["vibeWatch"], "on by default")
+        self.assertEqual(hooks.act("vibe-watch", {"on": False}), {"vibeWatch": False})
+        self.assertFalse(hooks.state()["vibeWatch"])

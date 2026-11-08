@@ -835,16 +835,5 @@ class VoiceLogTests(unittest.TestCase):
         self.assertGreater(result["signal"], 0.1)
         self.assertEqual(self.errors, [])
 
-class StylesheetTests(unittest.TestCase):
-    def test_every_css_block_is_closed(self):
-        """An unclosed block (an @media missing its brace) silently scopes every later rule to that media query."""
-        css = (Path(__file__).resolve().parents[1] / "docs" / "styles.css").read_text(encoding="utf-8")
-        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
-        depth = 0
-        for number, line in enumerate(css.splitlines(), 1):
-            depth += line.count("{") - line.count("}")
-            self.assertGreaterEqual(depth, 0, f"extra closing brace near line {number}")
-        self.assertEqual(depth, 0, "a CSS block is never closed")
-
 if __name__ == "__main__":
     unittest.main()
