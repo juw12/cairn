@@ -11,7 +11,7 @@ import { syncObsidian } from "./obsidian.js";
 import { fillTemplate, searchNotes, searchScore, templates } from "./vault.js";
 import { startTour } from "./tour.js";
 import { showShortcuts } from "./shortcuts.js";
-import { openLogSheet, readAloud, weeklyReview } from "./voicelog.js";
+import { monthlyReview, openLogSheet, readAloud, weeklyReview } from "./voicelog.js";
 import { render, setView } from "./app.js";
 
 function commands() {
@@ -28,6 +28,7 @@ function commands() {
       { label: "Open today’s journal", kind: "Create", icon: "journal", run: openToday },
       { label: "Log by voice or typing", kind: "Journal  L", icon: "journal", run: () => openLogSheet() },
       { label: "Weekly review of the journal", kind: "Journal", icon: "sparkle", run: () => weeklyReview() },
+      { label: "Monthly review of the journal", kind: "Journal", icon: "sparkle", run: () => monthlyReview() },
     );
     if (state.open) {
       list.push(
