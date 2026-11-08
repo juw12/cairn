@@ -121,6 +121,86 @@ class OpenCodeTests(unittest.TestCase):
         self.assertEqual(watch.active_minutes([0, 3 * MINUTE, 6 * MINUTE]), 6)
         self.assertEqual(watch.active_minutes([0, 2 * 60 * MINUTE]), 10)
 
+    def test_active_spans_match_active_minutes(self):
+        stamps = [0, 3 * MINUTE, 6 * MINUTE, 120 * MINUTE, 125 * MINUTE]
+        spans = watch.active_spans(stamps)
+        self.assertEqual(spans, [(0, 16), (120 * MINUTE, 5)])
+        self.assertEqual(sum(minutes for _, minutes in spans), watch.active_minutes(stamps))
+        self.assertEqual(watch.active_spans([]), [])
+        self.assertEqual(watch.active_spans([7]), [(7, 1)])
+
+    def test_parallel_sessions_count_clock_time_once(self):
+        # Two sessions working over the same 20 minutes, a third alone later.
+        make_db(self.db, [
+            self.row("ses_a", "One", 300, 280),
+            self.row("ses_b", "Two", 300, 280),
+            self.row("ses_c", "Three", 100, 90),
+        ], messages={
+            "ses_a": self.ago(300, 290, 280),
+            "ses_b": self.ago(300, 290, 280),
+            "ses_c": self.ago(100, 90),
+        })
+        self.sync()
+        stats = core.vibe_stats(self.brain.notes(), time.strftime("%Y-%m-%d"))
+        self.assertEqual(stats["agent_minutes"], 20 + 20 + 10)
+        self.assertEqual(stats["minutes"], 20 + 10)
+        self.assertEqual(stats["parallel"], round(50 / 30, 1))
+        # Gate: never more time vibing than the clock allows.
+        self.assertLessEqual(stats["minutes"], len(stats["daily"]) * 24 * 60)
+        self.assertEqual(sum(d["minutes"] for d in stats["daily"]), stats["minutes"])
+
+    def test_finished_sessions_are_not_reprocessed(self):
+        make_db(self.db, [
+            self.row("ses_old", "Finished", 300, 200),
+            self.row("ses_live", "Working", 30, 1),
+        ], messages={"ses_old": self.ago(300, 200), "ses_live": self.ago(30, 1)})
+        found = watch.read_opencode(self.db, 0, str(self.root))
+        self.assertEqual({s["id"] for s in watch.needs_refresh(self.brain, found, self.now)}, {"ses_old", "ses_live"})
+        self.sync()
+        self.assertEqual([s["id"] for s in watch.needs_refresh(self.brain, found, self.now)], ["ses_live"])
+
+    def test_folder_without_git_is_done_and_says_why(self):
+        make_db(self.db, [self.row("ses_a", "Chat", 300, 200)], messages={"ses_a": self.ago(300, 200)})
+        watch.watch_once(self.brain, vector=False, now_ms=self.now, db_path=self.db, git="definitely-not-git")
+        [note] = sessions(self.brain)
+        self.assertEqual(note["status"], "done")
+        self.assertNotIn("commits", note["meta"])
+        self.assertEqual(note["meta"]["git"], "no")
+        self.assertIn("not a git repo", self.brain.read(note["path"])["text"])
+
+    @unittest.skipUnless(HAS_GIT, "git not installed")
+    def test_commits_in_the_folder_mark_the_session_shipped(self):
+        def git(*args, when=None):
+            env = dict(os.environ)
+            if when is not None:
+                stamp = f"@{when // 1000} +0000"
+                env.update(GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp)
+            subprocess.run(["git", *args], cwd=self.root, check=True, capture_output=True, env=env)
+
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.com")
+        git("config", "user.name", "Tester")
+        (self.root / "app.py").write_text("print('hi')\n", encoding="utf-8")
+        git("add", "app.py")
+        git("commit", "-q", "-m", "inside the session", when=self.now - 250 * MINUTE)
+        (self.root / "ci.txt").write_text("built\n", encoding="utf-8")
+        git("add", "ci.txt")
+        git("commit", "-q", "-m", "bot bump", "--author", "github-actions[bot] <bot@example.com>", when=self.now - 240 * MINUTE)
+        (self.root / "app.py").write_text("print('later')\n", encoding="utf-8")
+        git("commit", "-q", "-am", "long after", when=self.now - 100 * MINUTE)
+        make_db(self.db, [
+            self.row("ses_a", "Ship it", 300, 200),
+            self.row("ses_b", "Earlier chat", 600, 500),
+        ], messages={"ses_a": self.ago(300, 250, 200), "ses_b": self.ago(600, 500)})
+        self.sync()
+        notes = {n["meta"]["external"]: n for n in sessions(self.brain)}
+        self.assertEqual(notes["ses_a"]["status"], "shipped")
+        self.assertEqual(notes["ses_a"]["meta"]["commits"], "1")
+        self.assertIn("1 commit in this folder", self.brain.read(notes["ses_a"]["path"])["text"])
+        self.assertEqual(notes["ses_b"]["status"], "done")
+        self.assertNotIn("git", notes["ses_b"]["meta"])
+        self.assertIn("no commits in its folder", self.brain.read(notes["ses_b"]["path"])["text"])
+
     def test_resync_is_idempotent_and_follows_the_session(self):
         make_db(self.db, [self.row("ses_a", "Add dark mode", 60, 2)])
         self.assertTrue(self.sync())
@@ -188,7 +268,29 @@ class OpenCodeTests(unittest.TestCase):
         self.assertEqual(stats["sessions"], 2)
         self.assertEqual((stats["shipped"], stats["done"], stats["partial"]), (1, 1, 0))
         self.assertEqual(stats["ship_rate"], 100)  # research chats do not drag the ship rate down
-        self.assertEqual(stats["minutes"], 15 + 20)  # active time, not end minus start
+        # Active time, not end minus start: 15 and 20 minutes, side by side, so 20 on the clock.
+        self.assertEqual(stats["agent_minutes"], 15 + 20)
+        self.assertEqual(stats["minutes"], 20)
+
+
+class StartupTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "the startup script is Windows-only")
+    def test_startup_script_runs_from_the_package_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            brain = Brain(Path(tmp) / "brain")
+            original = watch.startup_folder
+            watch.startup_folder = lambda: Path(tmp) / "Startup"
+            try:
+                target = watch.install_startup(brain, ["--everywhere"])
+                script = target.read_text(encoding="utf-8")
+                self.assertTrue(watch.uninstall_startup())
+            finally:
+                watch.startup_folder = original
+        package_parent = Path(watch.__file__).resolve().parent.parent
+        self.assertIn(f'shell.CurrentDirectory = "{package_parent}"', script)
+        self.assertIn('""-m"" ""cairn""', script)
+        self.assertIn("--everywhere", script)
+        self.assertLess(script.index("CurrentDirectory"), script.index("shell.Run"))
 
 
 @unittest.skipUnless(HAS_GIT, "git not installed")

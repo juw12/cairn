@@ -3,8 +3,9 @@
 Two sources, both read-only and both optional:
 
 * **OpenCode** keeps every chat in a local SQLite database. We read only the session table (title,
-  folder, start and last-activity time, lines added and removed, files changed, model, cost) and never
-  message text. Each OpenCode session becomes one session note, kept in sync on every pass.
+  folder, model, cost) and message timestamps, never message text. Each OpenCode session becomes one
+  session note, kept in sync on every pass. OpenCode does not record what a session changed, so when
+  the session's folder is a git repo, commits made there while the session ran are the evidence.
 * **Vector** (or any desktop assistant whose chats we cannot read) is detected from the outside: the
   app's process is running *and* the repo changes. That opens a live session, new commits are logged as
   they land, and the session ends when the app closes or the repo goes quiet.
@@ -23,6 +24,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -161,6 +163,7 @@ def read_opencode(db_path: Path, since_ms: int, only_inside: str = "") -> list[d
             # OpenCode touches time_updated for housekeeping too; the last message is the real last activity.
             "updated": int(stamps[-1]) if stamps else int(record["time_updated"]),
             "minutes": active_minutes(stamps) if stamps else None,
+            "spans": active_spans(stamps),
             "messages": len(stamps),
             "added": int(record.get("summary_additions") or 0),
             "removed": int(record.get("summary_deletions") or 0),
@@ -168,6 +171,7 @@ def read_opencode(db_path: Path, since_ms: int, only_inside: str = "") -> list[d
             "model": _model_name(record.get("model")),
             "cost": float(record.get("cost") or 0),
             "subagents": subagents.get(str(record["id"]), 0),
+            "commits": 0,
         })
     return sessions
 
@@ -197,6 +201,83 @@ def active_minutes(stamps: list[int], gap_minutes: int = ACTIVE_GAP_MINUTES) -> 
     return max(1, round(total / 60_000)) if len(stamps) > 1 else 1
 
 
+def active_spans(stamps: list[int], gap_minutes: int = ACTIVE_GAP_MINUTES) -> list[tuple[int, int]]:
+    """When the session was working, as (start ms, minutes): each message counts until the next one,
+    for at most `gap_minutes`, and touching stretches are merged. Same total as active_minutes."""
+    if not stamps:
+        return []
+    cap = gap_minutes * 60_000
+    pieces = [(earlier, earlier + min(later - earlier, cap)) for earlier, later in zip(stamps, stamps[1:])]
+    if not pieces:
+        pieces = [(stamps[0], stamps[0] + 60_000)]
+    merged: list[list[int]] = []
+    for start, end in sorted(pieces):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(start, max(1, round((end - start) / 60_000))) for start, end in merged]
+
+
+def _spans_text(spans: list[tuple[int, int]]) -> str:
+    return " ".join(f"{_stamp(start)}/{minutes}" for start, minutes in spans)
+
+
+def git_executable() -> str | None:
+    """git on PATH, else the usual Windows install folders (a startup task may not inherit PATH)."""
+    found = shutil.which("git")
+    if found:
+        return found
+    for base in (os.environ.get("LOCALAPPDATA", ""), os.environ.get("ProgramFiles", ""), os.environ.get("ProgramFiles(x86)", "")):
+        for relative in (("Programs", "Git", "cmd", "git.exe"), ("Git", "cmd", "git.exe")):
+            candidate = Path(base, *relative) if base else None
+            if candidate and candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def folder_commit_times(directory: str, since_ms: int, git: str | None = None) -> list[int] | None:
+    """Commit times (ms) on the local branches of the repo at `directory` since `since_ms`, leaving out
+    merges and bot commits.
+    None when the folder is not a git repo (or git is missing): then there is no evidence either way."""
+    git = git or git_executable()
+    if not git or not directory or not Path(directory).is_dir():
+        return None
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(
+            [git, "-C", directory, "log", "--branches", "--no-merges", f"--since=@{since_ms // 1000}", "--format=%ct %an"],
+            capture_output=True, text=True, timeout=20, creationflags=flags,
+            env=dict(os.environ, GIT_TERMINAL_PROMPT="0"),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    times = []
+    for line in result.stdout.splitlines():
+        stamp, _, author = line.partition(" ")
+        # Bots (CI, dependabot) commit on their own; merges only bring in work done elsewhere.
+        if stamp.isdigit() and "[bot]" not in author:
+            times.append(int(stamp) * 1000)
+    return times
+
+
+def attach_commits(sessions: list[dict], git: str | None = None) -> None:
+    """Count commits made in each session's folder while it ran (one git call per folder)."""
+    by_folder: dict[str, list[dict]] = {}
+    for session in sessions:
+        if session.get("directory"):
+            by_folder.setdefault(session["directory"], []).append(session)
+    grace = ACTIVE_GAP_MINUTES * 60_000
+    for directory, group in by_folder.items():
+        times = folder_commit_times(directory, min(s["created"] for s in group) - grace, git)
+        for session in group:
+            session["repo"] = times is not None
+            if times:
+                session["commits"] = sum(1 for t in times if session["created"] - 60_000 <= t <= session["updated"] + grace)
+
+
 def _opencode_note(session: dict, status: str) -> tuple[dict, str]:
     meta = {
         "title": session["title"],
@@ -217,9 +298,15 @@ def _opencode_note(session: dict, status: str) -> tuple[dict, str]:
         meta["ended"] = _stamp(session["updated"])
     if session.get("minutes") is not None:
         meta["minutes"] = str(session["minutes"])
+    if session.get("spans"):
+        meta["spans"] = _spans_text(session["spans"])
     meta["added"] = str(session["added"])
     meta["removed"] = str(session["removed"])
     meta["files"] = str(session["files"])
+    if session.get("commits"):
+        meta["commits"] = str(session["commits"])
+    if session.get("repo") is False:
+        meta["git"] = "no"  # no commit evidence either way: the folder is not a git repo
     if session["cost"] > 0:
         meta["cost"] = f"{session['cost']:.2f}"
     lines = [f"- {_clock(session['created'])} start: {session['title']} (OpenCode{', ' + session['model'] if session['model'] else ''})"]
@@ -229,8 +316,15 @@ def _opencode_note(session: dict, status: str) -> tuple[dict, str]:
         lines.append(f"- {_clock(session['updated'])} note: {session['subagents']} subagent task{'s' if session['subagents'] != 1 else ''}")
     if session["files"] or session["added"] or session["removed"]:
         lines.append(f"- {_clock(session['updated'])} note: {session['files']} files changed, +{session['added']} −{session['removed']}")
+    if session.get("commits"):
+        lines.append(f"- {_clock(session['updated'])} note: {session['commits']} commit{'s' if session['commits'] != 1 else ''} in this folder while it ran")
     if status != "live":
-        outcome = "code changed" if status in ("shipped", "partial") else "no code changes"
+        if status in ("shipped", "partial"):
+            outcome = "code changed"
+        elif session.get("repo"):
+            outcome = "no commits in its folder"
+        else:
+            outcome = "no commits seen (folder is not a git repo)"
         lines.append(f"- {_clock(session['updated'])} end: {status}: auto-detected, {outcome}")
     body = f"## Goal\n\n{session['title']}\n\n## Log\n\n" + "\n".join(lines) + "\n"
     return meta, body
@@ -251,7 +345,7 @@ def sync_opencode(brain: Brain, sessions: list[dict], now_ms: int, idle_minutes:
     paths = [f["path"] for f in brain.files()]
     for session in sessions:
         active = now_ms - session["updated"] < idle_minutes * 60_000
-        changed_code = session["added"] + session["removed"] + session["files"] > 0
+        changed_code = session["added"] + session["removed"] + session["files"] + session.get("commits", 0) > 0
         computed = "live" if active else ("shipped" if changed_code else "done")
         note = existing.get(session["id"])
         if note is None:
@@ -423,14 +517,17 @@ def sync_vector(brain: Brain, running: bool, now_ms: int, idle_minutes: int = ID
 
 def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, everywhere: bool = False,
                days: int = DAYS, idle_minutes: int = IDLE_MINUTES, now_ms: int | None = None,
-               vector_names=VECTOR_PROCESSES, db_path: Path | None = None, running: bool | None = None) -> list[str]:
+               vector_names=VECTOR_PROCESSES, db_path: Path | None = None, running: bool | None = None,
+               git: str | None = None) -> list[str]:
     """One pass over every source. Returns human-readable lines describing what changed."""
     now_ms = _now_ms() if now_ms is None else now_ms
     messages = []
     if opencode:
         path = db_path or opencode_db_path()
         sessions = read_opencode(path, now_ms - days * 86_400_000, "" if everywhere else str(brain.root))
-        counts = sync_opencode(brain, sessions, now_ms, idle_minutes)
+        pending = needs_refresh(brain, sessions, now_ms, idle_minutes)
+        attach_commits(pending, git)
+        counts = sync_opencode(brain, pending, now_ms, idle_minutes)
         if counts["created"] or counts["updated"]:
             messages.append(f"OpenCode: {counts['created']} new, {counts['updated']} updated session(s)")
     if vector:
@@ -441,6 +538,26 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
         elif action == "ended":
             messages.append("Vector: session ended")
     return messages
+
+
+def needs_refresh(brain: Brain, sessions: list[dict], now_ms: int, idle_minutes: int = IDLE_MINUTES) -> list[dict]:
+    """Sessions whose note is missing, still live, from an older watcher, or has new activity.
+    The rest are finished and already written, so a pass costs nothing for them (no git calls)."""
+    existing = _external_index(brain, "opencode")
+    pending = []
+    for session in sessions:
+        note = existing.get(session["id"])
+        # Notes from an older watcher get one refresh to add spans and commits (sessions with no messages have none).
+        older = "spans" not in note["meta"] and bool(session["spans"]) if note is not None else False
+        if note is None or note["meta"].get("status") == "live" or older:
+            pending.append(session)
+            continue
+        recorded_end = core.stamp_minutes(str(note["meta"].get("ended", "")))
+        if recorded_end is None or core.stamp_minutes(_stamp(session["updated"])) > recorded_end:
+            pending.append(session)
+        elif now_ms - session["updated"] < idle_minutes * 60_000:
+            pending.append(session)
+    return pending
 
 
 def watch(brain: Brain, every: int = EVERY_SECONDS, echo=print, **options) -> None:
@@ -472,7 +589,14 @@ def install_startup(brain: Brain, args: list[str]) -> Path:
     runner = windowless if windowless.exists() else python
     command = [str(runner), "-m", "cairn", "--root", str(brain.root), "vibe", "watch", *args]
     quoted = " ".join(f'""{part}""' for part in command)
-    script = f'CreateObject("WScript.Shell").Run "{quoted}", 0, False\r\n'
+    # Windows starts this from its own folder, so point the working folder at the one holding the
+    # `cairn` package; otherwise `-m cairn` only works when Cairn was pip-installed.
+    package_parent = Path(__file__).resolve().parent.parent
+    script = (
+        'Set shell = CreateObject("WScript.Shell")\r\n'
+        f'shell.CurrentDirectory = "{package_parent}"\r\n'
+        f'shell.Run "{quoted}", 0, False\r\n'
+    )
     target = startup_folder() / STARTUP_NAME
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(script, encoding="utf-8")
