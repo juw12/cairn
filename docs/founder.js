@@ -15,14 +15,81 @@ const RESULT_TYPE = "founder-studio:result";
 let stage = null;
 let latest = null;
 let savedKey = null;
+let business = "";
+let running = false;
 
 const pct = (value) => `${Math.round((Number(value) || 0) * 100)}%`;
 
 window.addEventListener("message", (event) => {
-  if (event.origin !== location.origin || event.data?.type !== RESULT_TYPE) return;
-  latest = { ...event.data, at: new Date().toISOString() };
+  if (event.origin !== location.origin) return;
+  const type = event.data?.type;
+  if (type === RESULT_TYPE) {
+    latest = { ...event.data, at: new Date().toISOString() };
+    running = false;
+  } else if (type === "founder-studio:project") {
+    business = event.data.business || event.data.project || "";
+  } else if (type === "founder-studio:run-start") {
+    running = true;
+  } else if (type === "founder-studio:run-stopped") {
+    running = false;
+  } else {
+    return;
+  }
   if (state.view === "founder") paintResult();
 });
+
+// Opens the studio's first setup step so a visitor can swap the example for their own idea.
+function editIdea() {
+  const frame = stage?.querySelector("iframe");
+  frame?.contentWindow?.postMessage({ type: "founder-studio:edit" }, location.origin);
+  frame?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function shortName(name) {
+  return String(name || "").split(/[(\-\u2013\u2014,]/)[0].trim().slice(0, 32);
+}
+
+function stepItem(number, status, title, detail) {
+  const mark = status === "done" ? icon("check", "sm") : number;
+  return `<li class="founder-step ${status}"${status === "current" ? ' aria-current="step"' : ""}>
+      <span class="founder-step-mark">${mark}</span>
+      <span class="founder-step-text"><b>${title}</b><span>${detail}</span></span>
+    </li>`;
+}
+
+// Three steps that follow the studio: idea loaded, panel run, result saved.
+function stepsHtml() {
+  const saved = Boolean(latest) && savedKey === resultKey(latest);
+  const idea = business
+    ? `${esc(shortName(business))} · <button class="founder-link" type="button" data-action="founder-edit">write your own</button>`
+    : "Loading the example idea";
+  let runStatus = business ? "current" : "todo";
+  let runDetail = "Press <b>Run panel</b> in the studio";
+  if (running) {
+    runStatus = "current";
+    runDetail = "Buyers are deciding now";
+  } else if (latest) {
+    runStatus = "done";
+    runDetail = `${latest.buys} of ${latest.n} would buy`;
+  }
+  let saveStatus = "todo";
+  let saveDetail = "Keep the result with your notes";
+  if (latest && !running) {
+    saveStatus = saved ? "done" : "current";
+    if (saved) {
+      saveDetail = "Saved as a founder-studio note";
+    } else if (readOnly()) {
+      saveDetail = "Open your own brain to save";
+    } else {
+      saveDetail = "Use <b>Save to brain</b> below";
+    }
+  }
+  return `<ol class="founder-steps" aria-label="Founder Studio steps">
+      ${stepItem(1, business ? "done" : "current", "Describe the idea", idea)}
+      ${stepItem(2, runStatus, "Run the panel", runDetail)}
+      ${stepItem(3, saveStatus, "Save to brain", saveDetail)}
+    </ol>`;
+}
 
 export function founderView() {
   return `${pageHead(
@@ -40,16 +107,18 @@ function paintResult() {
   const box = $("#founder-result");
   if (!box) return;
   if (!latest) {
-    box.innerHTML = `<p class="muted founder-hint">${icon("play", "sm")}<span>Press <b>Run panel</b> below. When the buyers are done, the result shows up here so you can save it to the brain.</span></p>`;
+    box.innerHTML = stepsHtml();
+    box.querySelector("[data-action=founder-edit]")?.addEventListener("click", editIdea);
     return;
   }
   const good = latest.rate >= latest.target;
   const saved = savedKey === resultKey(latest);
-  box.innerHTML = `<div class="founder-strip ${good ? "good" : "bad"}">
+  box.innerHTML = `${stepsHtml()}<div class="founder-strip ${good ? "good" : "bad"}">
       <div class="founder-figure"><b>${latest.buys} of ${latest.n}</b> would buy <span class="muted">(${pct(latest.rate)} vs ${pct(latest.target)} target)</span></div>
       <div class="founder-meta">${esc(latest.business)} · ${esc(latest.heading)}${latest.topReason ? ` · top reason to pass: <b>${esc(latest.topReason)}</b>` : ""}</div>
       ${readOnly() ? "" : `<button class="btn${saved ? "" : " primary"}" data-action="founder-save" ${saved ? "disabled" : ""}>${icon(saved ? "check" : "save", "sm")} ${saved ? "Saved to brain" : "Save to brain"}</button>`}
     </div>`;
+  box.querySelector("[data-action=founder-edit]")?.addEventListener("click", editIdea);
   box.querySelector("[data-action=founder-save]")?.addEventListener("click", () => {
     saveResult().catch((error) => toast(error.message, { error: true }));
   });

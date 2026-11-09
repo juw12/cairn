@@ -252,7 +252,9 @@ Moving from the standalone precedent skill or Precedent Agent app:
 The **Founder Studio** page runs [Founder Studio](https://github.com/juw12/founder-studio) inside Cairn: describe
 an offer and a price, and a simulated panel of 20 buyers walks through a 3D market square, decides buy or pass and
 tells you why, with the price ladder and an A/B pitch test underneath. It runs entirely in your browser (Python via
-Pyodide, nothing sent anywhere), so it works on the hosted site and offline alike. When a run finishes, Cairn shows
+Pyodide, nothing sent anywhere), so it works on the hosted site and offline alike. Three steps above the studio follow
+you through it (describe the idea, run the panel, save to brain), and **write your own** opens the studio's
+setup so you can swap the example for your idea. When a run finishes, Cairn shows
 the buy rate against your target and **Save to brain** files it as a note tagged `founder-studio`, so the result sits
 next to your project notes and in Obsidian.
 

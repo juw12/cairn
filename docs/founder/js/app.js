@@ -166,6 +166,7 @@ async function loadProject(name) {
     renderResults(data.answers, data.personas, data.results, "Official panel (saved)");
     renderPricing(data.answers, null);
   }
+  notifyHost("founder-studio:project", { project: name, business: state.customer.business || name });
 }
 
 function persistLocal() {
@@ -595,6 +596,7 @@ async function runPanel(letter = "A") {
   }
   state.running = true;
   document.documentElement.dataset.run = "running";
+  notifyHost("founder-studio:run-start", { project: state.project });
   state.skip = params.get("skip") === "1";
   setRunButtons(true);
   $("#skipBtn").hidden = state.skip;
@@ -605,6 +607,7 @@ async function runPanel(letter = "A") {
     spotlightBuyer();
   } catch (error) {
     document.documentElement.dataset.run = "stopped";
+    notifyHost("founder-studio:run-stopped", { project: state.project });
     toast(friendlyError(error.message), true, 8000);
     updateHud(state.current?.answers || [], state.current?.personas.length || 0, "stopped");
   } finally {
@@ -1544,6 +1547,17 @@ for (const button of document.querySelectorAll(".step-next")) {
 }
 $("#miniRoster")?.addEventListener("click", () => $(".feed").scrollIntoView({ behavior: "smooth", block: "start" }));
 $("#pitch")?.addEventListener("input", () => updatePitchSummary());
+
+// Inside Cairn: small same-origin events let the host page track progress and open setup.
+function notifyHost(type, detail = {}) {
+  if (window.parent === window) return;
+  window.parent.postMessage({ type, ...detail }, location.origin);
+}
+
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin || event.source !== window.parent) return;
+  if (event.data?.type === "founder-studio:edit") openSetupStep("productSection");
+});
 
 // Inside Cairn: hand each finished panel to the host page so it can be saved as a note in the brain.
 function shareWithHost(run, summary, heading) {

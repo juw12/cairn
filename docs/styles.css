@@ -1823,3 +1823,20 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
   .founder-stage { padding: 0 12px 24px; }
   .founder-stage iframe { height: calc(100vh - 160px); min-height: 560px; border-radius: 10px; }
 }
+
+/* Founder Studio steps: three-stage tracker above the studio. */
+.founder-result { display: grid; gap: 10px; }
+.founder-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.founder-step { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink-2); min-width: 0; }
+.founder-step-mark { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; border: 1px solid var(--line-strong, var(--line)); color: var(--ink-3, var(--ink-2)); }
+.founder-step-text { display: grid; gap: 2px; min-width: 0; font-size: 13px; line-height: 1.35; }
+.founder-step-text b { color: var(--ink); font-weight: 600; font-size: 13.5px; }
+.founder-step.current { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.founder-step.current .founder-step-mark { background: var(--accent); border-color: var(--accent); color: #fff; }
+.founder-step.done .founder-step-mark { background: color-mix(in srgb, #2f7d4f 14%, transparent); border-color: transparent; color: #2f7d4f; }
+.founder-step.todo { opacity: .72; }
+.founder-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+@media (max-width: 760px) {
+  .founder-steps { grid-template-columns: 1fr; gap: 6px; }
+  .founder-step { padding: 8px 10px; }
+}
