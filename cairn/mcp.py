@@ -272,6 +272,50 @@ def _tool_code_todos(brain: Brain, args: dict) -> str:
     return "\n".join(f"- {i['path']}:{i['line']} {i['tag']} {i['text']}" for i in items)
 
 
+def _tool_precedent_brief(brain: Brain, args: dict) -> str:
+    from . import precedent
+
+    return precedent.brief(brain, args.get("goal") or "", max(1, min(int(args.get("k") or 5), 15)))
+
+
+def _tool_queue_next(brain: Brain, args: dict) -> str:
+    from . import precedent
+
+    item = precedent.queue_next(brain, auto_only=bool(args.get("auto_only")))
+    if item is None:
+        return "The queue is empty (no open tasks tagged #queue that are not #needs-me)."
+    flags = (" #auto" if item["auto"] else "") + (" #needs-me" if item["needs_me"] else "")
+    return f"brain/{item['path']} [{item['status']}]{flags}\n\n{item['text']}"
+
+
+def _tool_queue_add(brain: Brain, args: dict) -> str:
+    from . import precedent
+
+    note = precedent.queue_add(
+        brain,
+        args.get("text") or "",
+        auto=bool(args.get("auto")),
+        needs_me=bool(args.get("needs_me")),
+    )
+    return f"Queued brain/{note['path']}"
+
+
+def _tool_precedent_log(brain: Brain, args: dict) -> str:
+    from . import precedent
+
+    goal = (args.get("goal") or "").strip()
+    delivered = (args.get("delivered") or "").strip()
+    if not goal or not delivered:
+        raise ToolError("Give the goal and what was delivered.")
+    precedent.log_lesson(goal, delivered, args.get("correction") or "")
+    done = ""
+    if args.get("queue_path"):
+        found = _find_note(brain.notes(), args["queue_path"])
+        precedent.queue_done(brain, found["path"], delivered)
+        done = f"; marked brain/{found['path']} done"
+    return "Lesson logged" + done
+
+
 _TYPE_ENUM = list(core.TYPES)
 _REF = {"type": "string", "description": "Note path (tasks/ship-v1.md), slug (ship-v1) or title"}
 
@@ -375,6 +419,59 @@ TOOLS: list[dict] = [
         "write": True,
         "handler": _tool_log,
     },
+    {
+        "name": "precedent_brief",
+        "description": "Before starting a delegated goal: a brief built from the user's own history. Draft Definition of Done, hidden asks (what they asked for next after similar goals), closest past prompts, lessons, related notes, their working profile, the queue and the work loop.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "The goal in the user's words; empty takes the top queue item"},
+                "k": {"type": "integer", "minimum": 1, "maximum": 15, "default": 5},
+            },
+        },
+        "annotations": {"readOnlyHint": True},
+        "handler": _tool_precedent_brief,
+    },
+    {
+        "name": "queue_next",
+        "description": "The next open item of the work queue (tasks tagged #queue), skipping items blocked on the user (#needs-me).",
+        "inputSchema": {"type": "object", "properties": {"auto_only": {"type": "boolean", "description": "Only items marked safe to run unattended (#auto)"}}},
+        "annotations": {"readOnlyHint": True},
+        "handler": _tool_queue_next,
+    },
+    {
+        "name": "queue_add",
+        "description": "Add a follow-up to the work queue instead of asking the user. auto: safe to run unattended; needs_me: blocked until the user acts (a login, a purchase, a decision only they can make).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "auto": {"type": "boolean"},
+                "needs_me": {"type": "boolean"},
+            },
+            "required": ["text"],
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False},
+        "write": True,
+        "handler": _tool_queue_add,
+    },
+    {
+        "name": "precedent_log",
+        "description": "When a goal is done: record what was delivered and any correction the user made, so the next brief learns from it. queue_path also marks that queue task done.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string"},
+                "delivered": {"type": "string"},
+                "correction": {"type": "string"},
+                "queue_path": _REF,
+            },
+            "required": ["goal", "delivered"],
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False},
+        "write": True,
+        "handler": _tool_precedent_log,
+    },
 ]
 
 
@@ -434,14 +531,34 @@ class Server:
         if method == "resources/read":
             return {"contents": [self.read_resource(params.get("uri", ""))]}
         if method == "prompts/list":
-            return {"prompts": [{
-                "name": "project-brief",
-                "title": "Project brief from the brain",
-                "description": "Open tasks, accepted decisions, active ideas and the recent log, as context for this chat.",
-            }]}
+            return {"prompts": [
+                {
+                    "name": "project-brief",
+                    "title": "Project brief from the brain",
+                    "description": "Open tasks, accepted decisions, active ideas and the recent log, as context for this chat.",
+                },
+                {
+                    "name": "precedent",
+                    "title": "Carry a goal end to end",
+                    "description": "Hand over a goal: the brief from your own precedents plus the loop to build, verify, publish and log it without check-ins.",
+                    "arguments": [{"name": "goal", "description": "What you want done; empty takes the top queue item", "required": False}],
+                },
+            ]}
         if method == "prompts/get":
-            if params.get("name") != "project-brief":
-                raise RpcError(-32602, f"Unknown prompt: {params.get('name')}")
+            name = params.get("name")
+            if name == "precedent":
+                from . import precedent
+
+                goal = ((params.get("arguments") or {}).get("goal") or "").strip()
+                text = precedent.brief(self.brain, goal)
+                return {
+                    "description": "Precedent brief and loop",
+                    "messages": [{"role": "user", "content": {"type": "text", "text": (
+                        f"Carry this goal end to end without asking me to continue: {goal or 'the top queue item'}\n\n" + text
+                    )}}],
+                }
+            if name != "project-brief":
+                raise RpcError(-32602, f"Unknown prompt: {name}")
             brief = core.context_pack(self.brain.notes(), self.brain.project_name, _today())
             return {
                 "description": "Project brief from the brain",

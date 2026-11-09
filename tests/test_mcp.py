@@ -99,7 +99,8 @@ class McpServerTests(unittest.TestCase):
         tools = {t["name"]: t for t in self.client.request("tools/list")["result"]["tools"]}
         self.assertEqual(
             set(tools),
-            {"search", "read_note", "list_notes", "context", "recent", "code_todos", "capture", "update_note", "log"},
+            {"search", "read_note", "list_notes", "context", "recent", "code_todos", "capture", "update_note", "log",
+         "precedent_brief", "queue_next", "queue_add", "precedent_log"},
         )
         for tool in tools.values():
             self.assertEqual(tool["inputSchema"]["type"], "object")
@@ -190,7 +191,7 @@ class McpServerTests(unittest.TestCase):
         self.assertIn("Ship v1", brief)
 
         prompts = self.client.request("prompts/list")["result"]["prompts"]
-        self.assertEqual([p["name"] for p in prompts], ["project-brief"])
+        self.assertEqual([p["name"] for p in prompts], ["project-brief", "precedent"])
         message = self.client.request("prompts/get", {"name": "project-brief"})["result"]["messages"][0]
         self.assertEqual(message["role"], "user")
         self.assertIn("Ship v1", message["content"]["text"])
@@ -222,7 +223,7 @@ class McpServerTests(unittest.TestCase):
         init = reader.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})["result"]
         self.assertIn("read-only", init["instructions"])
         names = {t["name"] for t in reader.request("tools/list")["result"]["tools"]}
-        self.assertFalse(names & {"capture", "update_note", "log"})
+        self.assertFalse(names & {"capture", "update_note", "log", "queue_add", "precedent_log"})
         self.assertIn("search", names)
         refused = reader.request("tools/call", {"name": "capture", "arguments": {"text": "idea: nope"}})
         self.assertIn("read-only", refused["error"]["message"])

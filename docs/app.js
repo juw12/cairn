@@ -23,6 +23,7 @@ import { maybeStartTour, startTour } from "./tour.js";
 import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
+import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
 
 // ============================================================ shell rendering
@@ -44,6 +45,7 @@ function counts() {
     map: "",
     code: state.todos ? state.todos.length : "",
     vibe: ((n) => (n > 1 ? `${n} live` : n ? "live" : ""))(liveSessions().length),
+    autopilot: autopilotCount() || queueItems().length || "",
     context: "",
     obsidian: "",
     canvas: canvasCount() || "",
@@ -132,7 +134,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -171,6 +173,7 @@ function afterRender() {
   const pluginView = $("[data-plugin-view]");
   if (pluginView) renderPluginView(state.view, pluginView);
   if (state.view === "vibe") wireVibe();
+  if (state.view === "autopilot") wireAutopilot();
 }
 
 // ============================================================ global events
@@ -240,7 +243,7 @@ function wireGlobal() {
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
-    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add", "vibe-start", "vibe-end", "vibe-sample"];
+    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add", "vibe-start", "vibe-end", "vibe-sample", "ap-toggle", "ap-job", "ap-flag", "ap-q-done"];
     if (readOnly() && mutating.includes(action)) {
       toast("This brain is read-only. Ask to join to contribute.");
       return;
@@ -291,6 +294,12 @@ function wireGlobal() {
       "vibe-more": () => showMoreSessions(actionEl.dataset.all === "1"),
       "vibe-outcome": () => setVibeOutcome(actionEl.dataset.outcome),
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
+      "ap-toggle": toggleEnabled,
+      "ap-job": () => jobAction(actionEl.dataset.op, actionEl.dataset.id),
+      "ap-select": () => selectJob(actionEl.dataset.id),
+      "ap-brief": () => previewBrief($("#ap-goal-form")),
+      "ap-flag": () => queueToggle(actionEl.dataset.path, actionEl.dataset.flag),
+      "ap-q-done": () => queueDone(actionEl.dataset.path),
       "copy-context": () => copyText(core.contextPack(state.notes, state.info.project, today()), "Context pack copied"),
       "save-context": saveContext,
       "copy-mcp": () => copyText(mcpSnippet(), "MCP setup copied"),
