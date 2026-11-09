@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 from . import __version__, core
 from .brain import Brain
@@ -500,17 +501,18 @@ def cmd_precedent(brain: Brain, args) -> int:
         print(f"{item['text']}\n(brain/{item['path']})")
         return 0
     if args.action == "init":
-        path, created = precedent.ensure_profile(brain)
         report = {}
+        # Import first, so a profile moved in from the old skill wins over the blank template.
         if args.import_skill or args.queue_file:
             report = precedent.import_legacy(
                 brain, Path(args.import_skill) if args.import_skill else None,
                 Path(args.queue_file) if args.queue_file else None)
+        path, created = precedent.ensure_profile(brain)
         if args.agent_app:
             from . import autopilot
 
             report["jobs"] = autopilot.import_legacy_jobs(Path(args.agent_app))
-        print(f"Profile: brain/{path}" + (" (created; fill it in)" if created and not report.get("profile") else ""))
+        print(f"Profile: brain/{path}" + (" (moved in)" if report.get("profile") else " (created; fill it in)" if created else ""))
         if report:
             print("Moved in: " + ", ".join(f"{key} {value}" for key, value in report.items()))
         return 0
