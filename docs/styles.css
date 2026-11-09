@@ -1586,10 +1586,6 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
   .log-fab { width: 56px; height: 56px; padding: 0; justify-content: center; }
   .log-fab .log-fab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 }
-@media (max-width: 600px) {
-  /* keep the right-hand figures clear of the round Log button that sits over the column gap */
-  .vibe-figures .figure:nth-child(even) { padding-left: 34px; }
-}
 /* ---- voice log round 3: offline voice, year heatmap, close matches ---- */
 .log-offline { flex-basis: 100%; border-top: 1px solid var(--line); padding-top: 10px; }
 .log-offline > summary { cursor: pointer; font-weight: 500; color: var(--accent-ink); font-size: 13px; }
@@ -1698,4 +1694,58 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 @media (max-width: 900px) {
   .ap-cols, .ap-cols-bottom { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .ap-nums { grid-template-columns: minmax(0, 1fr); }
+/* vibe round 5: one-line idle card, fold-all, chart peak, skills under feedback */
+.vibe-live.idle.compact { padding: 12px 0; }
+.vibe-live.idle.compact p { margin: 0; line-height: 1.6; }
+.vibe-live.idle.compact a { color: var(--ink); font-weight: 500; }
+.vibe-fold-row { display: flex; justify-content: flex-end; margin-top: 4px; }
+.vibe-fold-row .icon { width: 14px; height: 14px; }
+.vibe-activity .axis .peak { color: var(--ink-2, var(--ink)); }
+.vibe-cols > div + div > .vibe-skills { margin-top: 24px; }
+/* Two clear units: what ran last (link), then when it ended and how to start the next one. */
+.vibe-live.idle.compact .idle-meta { display: block; flex-basis: 100%; font-size: 12.5px; padding-left: 26px; margin-top: -4px; }
+
+/* Log button placement: in the top bar on every screen, never floating over the page */
+.log-fab.in-topbar {
+  position: relative; left: auto; bottom: auto; transform: none; margin-left: auto; flex: none;
+  height: 40px; padding: 0 16px 0 12px; font-size: 14px; gap: 6px;
+  box-shadow: none;
+}
+.log-fab.in-topbar .icon { width: 18px; height: 18px; }
+.log-fab.in-topbar:hover { transform: translateY(-1px); }
+.log-fab.in-topbar .log-fab-hint { bottom: auto; top: calc(100% + 12px); left: auto; right: 0; transform: none; }
+.log-fab.in-topbar .log-fab-hint::after { top: auto; bottom: 100%; left: auto; right: 22px; margin-left: 0; border-top-color: transparent; border-bottom-color: var(--ink); }
+.main .view { padding-bottom: 80px; }
+@media (max-width: 600px) {
+  .log-fab.in-topbar { width: 40px; height: 40px; padding: 0; justify-content: center; }
+  #search-btn kbd { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .log-fab.in-topbar { transition: none; }
+}
+@keyframes hint-in-plain { from { opacity: 0; transform: translateY(6px); } }
+.log-fab.in-topbar .log-fab-hint { animation-name: hint-in-plain, hint-out; }
+.vibe-row-key { margin: 6px 0 0; }
+.vibe-fold-row { margin-top: -22px; }
+@media (max-width: 600px) {
+  .vibe-fold-row { margin-top: 4px; }
+  /* six figures in two rows of three instead of three rows of two */
+  .vibe-figures { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .vibe-figures .figure { padding: 14px 10px 14px 0; }
+  .vibe-figures .figure + .figure { padding-left: 10px; }
+  .vibe-figures .figure:nth-child(3n + 1) { padding-left: 0; border-left: 0; }
+  .vibe-figures .figure:nth-child(odd), .vibe-figures .figure:nth-child(even) { border-top: 0; }
+  .vibe-figures .figure:nth-child(n + 4) { border-top: 1px solid var(--line); }
+  .vibe-figures .figure:nth-child(3n + 2), .vibe-figures .figure:nth-child(3n) { border-left: 1px solid var(--line); }
+  .vibe-figures .figure .value { font-size: 26px; }
+  .vibe-figures .figure .label { font-size: 12px; }
+  .vibe-figures .figure .sub { font-size: 11px; }
+}
+
+/* No-git sessions: neither shipped nor "no code change", so the chart shows them as an outline. */
+.vibe-activity .bar.nogit { fill: var(--bg, #fff); stroke: color-mix(in srgb, var(--session) 70%, transparent); stroke-width: 0.35; stroke-dasharray: 0.8 0.6; vector-effect: non-scaling-stroke; }
+.key.nogit { background: transparent; border: 1px dashed color-mix(in srgb, var(--session) 70%, transparent); box-sizing: border-box; }
+.vibe-src-note { align-self: center; margin-left: 2px; }
+@media (max-width: 600px) {
+  .vibe-activity svg { height: 120px; }
 }

@@ -112,6 +112,17 @@ export function toggleSessionDay(day) {
   $(`.day-head[data-day="${CSS.escape(day)}"]`)?.focus();
 }
 
+export function foldAllDays(dayList) {
+  const days = String(dayList || "").split(",");
+  const folded = state.vibeFolded || (state.vibeFolded = new Set());
+  const all = days.every((day) => folded.has(day));
+  for (const day of days) {
+    if (all) folded.delete(day);
+    else folded.add(day);
+  }
+  renderView();
+}
+
 export function showMoreSessions(all = false) {
   state.vibeLimit = all ? Infinity : (state.vibeLimit || PAGE) + PAGE;
   renderView();
@@ -372,14 +383,30 @@ function gitPanel(git) {
     ${commits}`;
 }
 
+// The most recently finished session, by when it ended (falls back to when it started).
+function lastSession() {
+  const key = (note) => String(note.meta.ended || note.meta.started || note.meta.created || "");
+  return state.notes
+    .filter((n) => n.type === "session" && n.status !== "live")
+    .sort((a, b) => (key(a) < key(b) ? 1 : -1))[0] || null;
+}
+
 function liveCards() {
   const live = liveSessions();
   if (!live.length) {
     const sample = !readOnly() && state.info?.canLoadSample && !state.notes.some((n) => n.type === "session")
       ? ` <button class="btn sm" data-action="vibe-sample">${icon("play", "sm")} Load a sample week</button>`
       : "";
+    const last = lastSession();
+    if (last) {
+      const ended = String(last.meta.ended || last.meta.started || "");
+      const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ended) ? `${dayLabel(ended.slice(0, 10))} ${ended.slice(11, 16)}` : "";
+      return `<section class="vibe-live idle compact">
+        <p>${icon("activity")} <strong>Nothing live.</strong> Last session: <a href="#" data-open="${esc(last.path)}">${esc(last.title)}</a><span class="idle-meta muted">${[when ? `ended ${esc(when)}` : "", readOnly() ? "" : `next: Start session above, or <code>cairn vibe start</code>`].filter(Boolean).join(" · ")}</span></p>
+      </section>`;
+    }
     return `<section class="vibe-live idle">
-      <p>${icon("activity")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here, from your terminal (<code>cairn vibe start "add dark mode"</code>), or let <code>cairn vibe watch</code> pick up OpenCode and Vector sessions on its own.`}${sample}</p>
+      <p>${icon("activity")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here or from your terminal with <code>cairn vibe start "add dark mode"</code>. <code>cairn vibe watch</code> picks up OpenCode and Vector sessions on its own.`}${sample}</p>
     </section>`;
   }
   return live.map((session, index) => liveCard(session, index === 0, live.length)).join("");
@@ -441,7 +468,7 @@ function figures(stats) {
       duration(stats.minutes),
       "time vibing",
       "Clock time with at least one session working. Sessions that ran side by side count once.",
-      parallel ? `<span title="${esc(duration(stats.agent_minutes))} if every session is added up">${stats.parallel}× in parallel</span>` : "",
+      parallel ? `<span title="Clock time with at least one session working. Added up session by session it is ${esc(duration(stats.agent_minutes))}.">${duration(stats.agent_minutes)} summed · ${stats.parallel}× parallel</span>` : "",
     )}
     ${shippedFigure(stats, figure, dash)}
     ${stats.pass_rate === null
@@ -467,8 +494,13 @@ function shippedFigure(stats, figure, dash) {
   return figure(stats.shipped, "shipped", title, stats.shipped ? `${share}% of ${ended} sessions` : "no code changes seen yet");
 }
 
-function activity(stats) {
+function activity(stats, sessions = []) {
   const days = stats.daily;
+  // Sessions with no git have no evidence either way, so the chart keeps them apart from "no code change".
+  const noGit = {};
+  for (const note of sessions) {
+    if (outcomeOf(note) === "unknown") noGit[sessionDayOf(note)] = (noGit[sessionDayOf(note)] || 0) + 1;
+  }
   const byMinutes = days.some((d) => d.minutes > 0);
   const value = (d) => (byMinutes ? d.minutes : d.sessions);
   const max = Math.max(1, ...days.map(value));
@@ -476,20 +508,33 @@ function activity(stats) {
   const bars = days
     .map((d, i) => {
       const h = Math.round((value(d) / max) * 54);
+      const unknown = noGit[d.day] || 0;
       const shippedH = d.sessions ? Math.round(h * (d.shipped / d.sessions)) : 0;
-      const tip = `${d.day}: ${plural(d.sessions, "session")}${byMinutes ? `, ${duration(d.minutes)}` : ""}${d.shipped ? `, ${d.shipped} shipped` : ""}`;
+      const unknownH = d.sessions ? Math.round(h * (unknown / d.sessions)) : 0;
+      const x = (i * width + width * 0.18).toFixed(2);
+      const w = (width * 0.64).toFixed(2);
+      const tip = `${d.day}: ${plural(d.sessions, "session")}${byMinutes ? `, ${duration(d.minutes)}` : ""}${d.shipped ? `, ${d.shipped} shipped` : ""}${unknown ? `, ${unknown} no git` : ""}`;
       return `<g><title>${tip}</title>
-        <rect x="${(i * width + width * 0.18).toFixed(2)}" y="${60 - h}" width="${(width * 0.64).toFixed(2)}" height="${Math.max(h, 1)}" class="${h ? "bar" : "bar empty"}"/>
-        ${shippedH ? `<rect x="${(i * width + width * 0.18).toFixed(2)}" y="${60 - shippedH}" width="${(width * 0.64).toFixed(2)}" height="${shippedH}" class="bar shipped"/>` : ""}
+        <rect x="${x}" y="${60 - h}" width="${w}" height="${Math.max(h, 1)}" class="${h ? "bar" : "bar empty"}"/>
+        ${shippedH ? `<rect x="${x}" y="${60 - shippedH}" width="${w}" height="${shippedH}" class="bar shipped"/>` : ""}
+        ${unknownH ? `<rect x="${x}" y="${60 - h}" width="${w}" height="${unknownH}" class="bar nogit"/>` : ""}
       </g>`;
     })
     .join("");
   const active = days.filter((d) => d.sessions).length;
   return `<section class="column-block vibe-activity">
-    <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> shipped <i class="key none"></i> no code change</span></header>
+    <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> shipped <i class="key none"></i> no code change${Object.keys(noGit).length ? ` <i class="key nogit"></i> no git` : ""}</span></header>
     <svg viewBox="0 0 100 62" preserveAspectRatio="none" role="img" aria-label="${byMinutes ? "Minutes" : "Sessions"} per day for the last ${days.length} days">${bars}</svg>
-    <div class="axis"><span>${days[0].day.slice(5)}</span><span>today</span></div>
+    <div class="axis"><span>${days[0].day.slice(5)}</span>${peakLabel(days, byMinutes, value)}<span>today</span></div>
   </section>`;
+}
+
+// Gives the bars a scale: the tallest day, by clock time (or sessions when no times are known).
+function peakLabel(days, byMinutes, value) {
+  const peak = days.reduce((best, d) => (value(d) > value(best) ? d : best), days[0]);
+  if (!value(peak)) return "";
+  const amount = byMinutes ? duration(peak.minutes) : plural(peak.sessions, "session");
+  return `<span class="peak">peak ${esc(amount)} · ${esc(dayLabel(peak.day))}</span>`;
 }
 
 function skillsBlock(stats) {
@@ -501,6 +546,14 @@ function skillsBlock(stats) {
     <header><h2>Skills</h2><span class="muted small">${plural(entries.reduce((t, [, c]) => t + c, 0), "run")}</span></header>
     ${body}
   </section>`;
+}
+
+// "–13:28" when the session ended later the same day; nothing while it is live or when it ran past midnight.
+function endClock(note, started) {
+  const ended = String(note.meta.ended || "");
+  if (note.status === "live" || !/T\d{2}:\d{2}/.test(ended) || ended.slice(0, 10) !== started.slice(0, 10)) return "";
+  const end = ended.slice(11, 16);
+  return end > started.slice(11, 16) ? `–${esc(end)}` : "";
 }
 
 function sessionRow(note, showSource = true) {
@@ -515,7 +568,7 @@ function sessionRow(note, showSource = true) {
   const started = startedKey(note);
   const folder = folderName(note);
   const bits = [
-    /T\d{2}:\d{2}/.test(started) ? `<span class="when">${esc(started.slice(11, 16))}</span>` : "",
+    /T\d{2}:\d{2}/.test(started) ? `<span class="when">${esc(started.slice(11, 16))}${endClock(note, started)}</span>` : "",
     showSource ? `<span class="src">${SOURCES[sessionSource(note)]}</span>` : "",
     folder ? `<span class="folder" title="${esc(String(note.meta.folder))}">${icon("folder", "sm")}${esc(folder)}</span>` : "",
     duration(minutes),
@@ -543,6 +596,9 @@ function sessionsBlock(sessions, stats) {
   const outcome = state.vibeOutcome in OUTCOMES && outcomeCounts[state.vibeOutcome] ? state.vibeOutcome : "all";
   const shown = outcome === "all" ? fromSource : fromSource.filter((note) => outcomeOf(note) === outcome);
   const limit = state.vibeLimit || PAGE;
+  if (!state.vibeFolded && shown.length > PAGE) {
+    state.vibeFolded = new Set([...new Set(shown.map(sessionDayOf))].slice(1));
+  }
   const folded = state.vibeFolded || new Set();
   const days = new Map();
   for (const note of shown) {
@@ -550,6 +606,7 @@ function sessionsBlock(sessions, stats) {
     if (!days.has(day)) days.set(day, []);
     days.get(day).push(note);
   }
+  const allFolded = days.size > 0 && [...days.keys()].every((day) => folded.has(day));
   let left = limit;
   let accounted = 0;
   const groups = [];
@@ -575,7 +632,7 @@ function sessionsBlock(sessions, stats) {
         ${["all", ...present].map((source) => `<button class="chip${source === filter ? " on" : ""}" data-action="vibe-filter" data-source="${source}" aria-pressed="${source === filter}">${source === "all" ? "All" : SOURCES[source]} <b>${counts[source]}</b></button>`).join("")}
       </div>`
     : present.length
-      ? `<span class="chip static">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>`
+      ? `<span class="chip static" title="${present[0] === "logged" ? "Every session was started by hand with cairn vibe start." : "Every session here was detected automatically. Sessions you start with cairn vibe start show up as Logged."}">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>${present[0] === "logged" ? "" : `<span class="muted small vibe-src-note">0 logged by hand</span>`}`
       : "";
   const outcomesHere = Object.keys(OUTCOMES).filter((key) => outcomeCounts[key]);
   const outcomeChips = outcomesHere.length
@@ -584,7 +641,8 @@ function sessionsBlock(sessions, stats) {
       </div>`
     : "";
   const chips = sourceChips || outcomeChips ? `<div class="vibe-filters">${sourceChips}${outcomeChips}</div>` : "";
-  const results = [["shipped", stats.shipped], ["partial", stats.partial], ["dropped", stats.dropped], ["no code change", stats.done]]
+  const unknown = sessions.filter((note) => outcomeOf(note) === "unknown").length;
+  const results = [["shipped", stats.shipped], ["partial", stats.partial], ["dropped", stats.dropped], ["no code change", stats.done - unknown], ["no git", unknown]]
     .filter(([, n]) => n)
     .map(([label, n]) => `${n} ${label}`)
     .join(" · ");
@@ -594,6 +652,8 @@ function sessionsBlock(sessions, stats) {
   return `<section class="column-block vibe-sessions">
     <header><h2>Sessions</h2><span class="muted small">${results || "none yet"}</span></header>
     ${chips}
+    ${shown.length ? `<p class="vibe-row-key muted small">Each row: start–end · folder · active minutes${shown.some((n) => Number(n.meta.commits)) ? " · commits" : ""}</p>` : ""}
+    ${days.size > 1 ? `<div class="vibe-fold-row"><button type="button" class="btn sm ghost" data-action="vibe-fold-all" data-days="${esc([...days.keys()].join(","))}">${icon("chevron", "sm")} ${allFolded ? "Unfold all days" : `Fold all ${days.size} days`}</button></div>` : ""}
     ${filteredOut}
     ${sessions.length ? groups.join("") : `<p class="empty">No sessions yet. Each one becomes a file in brain/sessions/.</p>`}
     ${rest > 0 ? `<div class="vibe-more-row"><button class="btn sm vibe-more" data-action="vibe-more">Show ${Math.min(PAGE, rest)} more <span class="muted">· ${rest} left</span></button>${rest > PAGE ? `<button class="btn sm ghost" data-action="vibe-more" data-all="1">Show all ${shown.length}</button>` : ""}</div>` : ""}
@@ -672,16 +732,18 @@ export function vibeView() {
     ${figures(stats)}
     <div class="vibe-cols">
       <div>
-        ${activity(stats)}
-        ${skillsBlock(stats)}
+        ${activity(stats, sessions)}
         ${sessionsBlock(sessions, stats)}
       </div>
+      <div>
       <section class="column-block vibe-feedback">
         <header><h2>Feedback</h2><span class="muted small">${stats.feedback_open} open · ${stats.feedback_addressed} addressed</span></header>
         ${ratingSummary(stats)}
         ${feedbackForm(sessions)}
         ${feedback.length ? `<div class="fb-list">${feedback.slice(0, 40).map(feedbackRow).join("")}</div>` : `<p class="empty">No feedback yet. Capture it here, with <code>feedback:</code> in the bar above, or <code>cairn feedback "…" --rating 4</code>.</p>`}
       </section>
+      ${skillsBlock(stats)}
+      </div>
     </div>
     ${readOnly() ? "" : `<section class="callout vibe-hook">${icon("terminal")}<div>
       <p><strong>Let your assistant report its own progress.</strong> Paste this into <code>AGENTS.md</code>, <code>CLAUDE.md</code> or <code>.github/copilot-instructions.md</code>; every step lands in the live session above.</p>
