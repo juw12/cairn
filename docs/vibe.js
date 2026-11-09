@@ -402,7 +402,7 @@ function liveCards() {
       const ended = String(last.meta.ended || last.meta.started || "");
       const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ended) ? `${dayLabel(ended.slice(0, 10))} ${ended.slice(11, 16)}` : "";
       return `<section class="vibe-live idle compact">
-        <p>${icon("activity")} <strong>Nothing live.</strong> Last session: <a href="#" data-open="${esc(last.path)}">${esc(last.title)}</a><span class="idle-meta muted">${[when ? `ended ${esc(when)}` : "", readOnly() ? "" : `start one here or with <code>cairn vibe start</code>`].filter(Boolean).join(" · ")}</span></p>
+        <p>${icon("activity")} <strong>Nothing live.</strong> Last session: <a href="#" data-open="${esc(last.path)}">${esc(last.title)}</a><span class="idle-meta muted">${[when ? `ended ${esc(when)}` : "", readOnly() ? "" : `next: Start session above, or <code>cairn vibe start</code>`].filter(Boolean).join(" · ")}</span></p>
       </section>`;
     }
     return `<section class="vibe-live idle">
@@ -494,8 +494,13 @@ function shippedFigure(stats, figure, dash) {
   return figure(stats.shipped, "shipped", title, stats.shipped ? `${share}% of ${ended} sessions` : "no code changes seen yet");
 }
 
-function activity(stats) {
+function activity(stats, sessions = []) {
   const days = stats.daily;
+  // Sessions with no git have no evidence either way, so the chart keeps them apart from "no code change".
+  const noGit = {};
+  for (const note of sessions) {
+    if (outcomeOf(note) === "unknown") noGit[sessionDayOf(note)] = (noGit[sessionDayOf(note)] || 0) + 1;
+  }
   const byMinutes = days.some((d) => d.minutes > 0);
   const value = (d) => (byMinutes ? d.minutes : d.sessions);
   const max = Math.max(1, ...days.map(value));
@@ -503,17 +508,22 @@ function activity(stats) {
   const bars = days
     .map((d, i) => {
       const h = Math.round((value(d) / max) * 54);
+      const unknown = noGit[d.day] || 0;
       const shippedH = d.sessions ? Math.round(h * (d.shipped / d.sessions)) : 0;
-      const tip = `${d.day}: ${plural(d.sessions, "session")}${byMinutes ? `, ${duration(d.minutes)}` : ""}${d.shipped ? `, ${d.shipped} shipped` : ""}`;
+      const unknownH = d.sessions ? Math.round(h * (unknown / d.sessions)) : 0;
+      const x = (i * width + width * 0.18).toFixed(2);
+      const w = (width * 0.64).toFixed(2);
+      const tip = `${d.day}: ${plural(d.sessions, "session")}${byMinutes ? `, ${duration(d.minutes)}` : ""}${d.shipped ? `, ${d.shipped} shipped` : ""}${unknown ? `, ${unknown} no git` : ""}`;
       return `<g><title>${tip}</title>
-        <rect x="${(i * width + width * 0.18).toFixed(2)}" y="${60 - h}" width="${(width * 0.64).toFixed(2)}" height="${Math.max(h, 1)}" class="${h ? "bar" : "bar empty"}"/>
-        ${shippedH ? `<rect x="${(i * width + width * 0.18).toFixed(2)}" y="${60 - shippedH}" width="${(width * 0.64).toFixed(2)}" height="${shippedH}" class="bar shipped"/>` : ""}
+        <rect x="${x}" y="${60 - h}" width="${w}" height="${Math.max(h, 1)}" class="${h ? "bar" : "bar empty"}"/>
+        ${shippedH ? `<rect x="${x}" y="${60 - shippedH}" width="${w}" height="${shippedH}" class="bar shipped"/>` : ""}
+        ${unknownH ? `<rect x="${x}" y="${60 - h}" width="${w}" height="${unknownH}" class="bar nogit"/>` : ""}
       </g>`;
     })
     .join("");
   const active = days.filter((d) => d.sessions).length;
   return `<section class="column-block vibe-activity">
-    <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> shipped <i class="key none"></i> no code change or no git</span></header>
+    <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> shipped <i class="key none"></i> no code change${Object.keys(noGit).length ? ` <i class="key nogit"></i> no git` : ""}</span></header>
     <svg viewBox="0 0 100 62" preserveAspectRatio="none" role="img" aria-label="${byMinutes ? "Minutes" : "Sessions"} per day for the last ${days.length} days">${bars}</svg>
     <div class="axis"><span>${days[0].day.slice(5)}</span>${peakLabel(days, byMinutes, value)}<span>today</span></div>
   </section>`;
@@ -622,7 +632,7 @@ function sessionsBlock(sessions, stats) {
         ${["all", ...present].map((source) => `<button class="chip${source === filter ? " on" : ""}" data-action="vibe-filter" data-source="${source}" aria-pressed="${source === filter}">${source === "all" ? "All" : SOURCES[source]} <b>${counts[source]}</b></button>`).join("")}
       </div>`
     : present.length
-      ? `<span class="chip static">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>`
+      ? `<span class="chip static" title="${present[0] === "logged" ? "Every session was started by hand with cairn vibe start." : "Every session here was detected automatically. Sessions you start with cairn vibe start show up as Logged."}">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>${present[0] === "logged" ? "" : `<span class="muted small vibe-src-note">0 logged by hand</span>`}`
       : "";
   const outcomesHere = Object.keys(OUTCOMES).filter((key) => outcomeCounts[key]);
   const outcomeChips = outcomesHere.length
@@ -722,7 +732,7 @@ export function vibeView() {
     ${figures(stats)}
     <div class="vibe-cols">
       <div>
-        ${activity(stats)}
+        ${activity(stats, sessions)}
         ${sessionsBlock(sessions, stats)}
       </div>
       <div>

@@ -267,6 +267,14 @@ class EndToEndTests(unittest.TestCase):
         idle = page.inner_text(".vibe-live.idle")
         self.assertIn("Last session:", idle)
         self.assertEqual(page.locator(".vibe-live.idle [data-open]").count(), 1)
+
+        # The chart keeps "no git" apart from "no code change", like the chips do.
+        has_no_git = page.locator('.vibe-outcomes [data-outcome="unknown"]').count() > 0
+        legend = page.inner_text(".vibe-activity header")
+        self.assertIn("no code change", legend)
+        self.assertNotIn("no code change or no git", legend)
+        self.assertEqual("no git" in legend, has_no_git)
+        self.assertEqual(page.locator(".vibe-activity .bar.nogit").count() > 0, has_no_git)
         self.assertEqual(self.errors, [])
 
     def test_feedback_capture_prefix(self):

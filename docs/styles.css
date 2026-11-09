@@ -1649,11 +1649,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .vibe-fold-row .icon { width: 14px; height: 14px; }
 .vibe-activity .axis .peak { color: var(--ink-2, var(--ink)); }
 .vibe-cols > div + div > .vibe-skills { margin-top: 24px; }
-.vibe-live.idle.compact .idle-meta::before { content: " · "; }
-@media (max-width: 600px) {
-  .vibe-live.idle.compact .idle-meta { display: block; }
-  .vibe-live.idle.compact .idle-meta::before { content: none; }
-}
+/* Two clear units: what ran last (link), then when it ended and how to start the next one. */
+.vibe-live.idle.compact .idle-meta { display: block; flex-basis: 100%; font-size: 12.5px; padding-left: 26px; margin-top: -4px; }
 
 /* Log button placement: in the top bar on every screen, never floating over the page */
 .log-fab.in-topbar {
@@ -1690,4 +1687,12 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
   .vibe-figures .figure .value { font-size: 26px; }
   .vibe-figures .figure .label { font-size: 12px; }
   .vibe-figures .figure .sub { font-size: 11px; }
+}
+
+/* No-git sessions: neither shipped nor "no code change", so the chart shows them as an outline. */
+.vibe-activity .bar.nogit { fill: var(--bg, #fff); stroke: color-mix(in srgb, var(--session) 70%, transparent); stroke-width: 0.35; stroke-dasharray: 0.8 0.6; vector-effect: non-scaling-stroke; }
+.key.nogit { background: transparent; border: 1px dashed color-mix(in srgb, var(--session) 70%, transparent); box-sizing: border-box; }
+.vibe-src-note { align-self: center; margin-left: 2px; }
+@media (max-width: 600px) {
+  .vibe-activity svg { height: 120px; }
 }
