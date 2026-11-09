@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en" data-backend="browser" data-pyodide="https://juw12.github.io/founder-studio/pyodide/">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Founder Studio · pre-launch simulator</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231b1a17'/%3E%3Ccircle cx='16' cy='12' r='5' fill='%23d9481f'/%3E%3Crect x='7' y='21' width='18' height='5' rx='2.5' fill='%23fffdf8'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#f4f1ea">
+  <meta name="description" content="Founder Studio: watch simulated buyers decide on your product before you launch. Local, free, honest.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="demo-banner" role="note">Online demo: the studio runs in your browser (Python via WebAssembly), with the skill's own scripts. Nothing is saved, and AI buyers need the <a href="https://github.com/juw12/founder-studio#run">local app</a>.</div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <h1 class="brand-name">Founder Studio</h1>
+        <small>See who buys before you launch</small>
+      </div>
+    </div>
+    <div class="project-picker">
+      <label for="projectSelect" class="sr-only">Project</label>
+      <select id="projectSelect"></select>
+      <button id="newProjectBtn" class="ghost" title="Start a new project">+ New</button>
+      <a href="#setupPanel" class="setup-jump ghost" title="Edit product, buyers and pitch">Setup</a>
+    </div>
+    <div class="mode" role="radiogroup" aria-label="Simulation mode">
+      <button data-mode="heuristic" class="seg active" title="Instant, offline rule model. Not AI, not evidence.">Quick sim</button>
+      <button data-mode="ai" class="seg" title="Each buyer answered by an AI model, isolated, from the skill's brief.">AI buyers</button>
+      <button data-mode="replay" class="seg" title="Replay a panel already saved in this project.">Replay</button>
+    </div>
+    <div class="run">
+      <label class="speed" title="How fast buyers walk in the arena. Does not change results.">Speed <input id="speed" type="range" min="0.5" max="4" step="0.5" value="1.5" aria-describedby="speedVal"><output id="speedVal" class="speed-val" for="speed">1.5×</output></label>
+      <button id="skipBtn" class="ghost" hidden title="Finish this run instantly and show the results">Skip<span class="long"> to results</span></button>
+      <button id="runBtn" class="primary">Run panel</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside id="setupPanel" class="setup" aria-label="Setup">
+      <details id="productSection" open>
+        <summary><span class="step">1</span> Product &amp; price <span id="productSummary" class="sum-note"></span></summary>
+        <label>Business (one line)<input id="business" placeholder="Undanu - digital wedding invitations"></label>
+        <label>Target buyer<input id="target" placeholder="Couples planning a wedding in 6 months"></label>
+        <label>Price<input id="price" type="number" min="0" step="any"></label>
+        <details class="more">
+          <summary>Market anchor &amp; notes <em>(optional)</em></summary>
+          <label>Market anchor<input id="anchor" type="number" min="0" step="any" placeholder="defaults to your price"></label>
+          <p class="hint">The price buyers compare you against. Quick sim only.</p>
+          <label>Idea notes<textarea id="idea" rows="3" placeholder="What it is, for whom, how it's sold"></textarea></label>
+        </details>
+        <button type="button" class="ghost step-next" data-next="buyersSection">Next: buyers</button>
+      </details>
+
+      <details id="buyersSection">
+        <summary><span class="step">2</span> Buyers <span id="buyersSummary" class="sum-note"></span></summary>
+        <div class="list-head"><span>Segments</span><button class="mini" data-add="segments">+ add</button></div>
+        <div class="cols-hint" aria-hidden="true"><span>share of buyers (0-1)</span><span>income from</span><span>income to</span></div>
+        <div id="segments" class="rows"></div>
+        <details class="more">
+          <summary>Behaviours, doubts &amp; habits <em>(optional)</em></summary>
+          <div class="list-head"><span>Buying behaviours <em>(need = Quick sim weight)</em></span><button class="mini" data-add="behaviours">+ add</button></div>
+          <div id="behaviours" class="rows"></div>
+          <div class="list-head"><span>Objections <em>(tap = answered by pitch)</em></span><button class="mini" data-add="objections">+ add</button></div>
+          <div id="objections" class="chips"></div>
+          <label>Habits (one per line)<textarea id="habits" rows="3"></textarea></label>
+        </details>
+        <div class="row">
+          <label>Panel size
+            <select id="panelSize"><option>10</option><option selected>20</option><option>50</option><option>100</option></select>
+          </label>
+          <label>Seed<input id="seed" type="number" placeholder="random"></label>
+        </div>
+        <button type="button" class="ghost step-next" data-next="pitchSection">Next: pitch</button>
+      </details>
+
+      <details id="pitchSection" open>
+        <summary><span class="step">3</span> Pitch (what each bot reads) <span id="pitchSummary" class="sum-note"></span></summary>
+        <textarea id="pitch" rows="8" placeholder="3-6 plain lines: product, price, where/how, opening offer"></textarea>
+        <p class="hint">Plain words, no superlatives, nothing you can't deliver.</p>
+      </details>
+
+      <details id="aiSection" hidden>
+        <summary><span class="step">AI</span> AI buyer model</summary>
+        <label>Provider
+          <select id="provider">
+            <option value="openai">OpenAI-compatible (OpenAI, Ollama, OpenRouter, LM Studio…)</option>
+            <option value="anthropic">Anthropic</option>
+          </select>
+        </label>
+        <label>Base URL<input id="baseUrl" placeholder="https://api.openai.com/v1  ·  http://localhost:11434/v1"></label>
+        <label>Model<input id="model" placeholder="gpt-4o-mini · llama3.1 · claude-sonnet-4-5"></label>
+        <label>API key<input id="apiKey" type="password" placeholder="kept in this tab only; or set OPENAI_API_KEY / ANTHROPIC_API_KEY"></label>
+        <label>Buyers in parallel<input id="concurrency" type="number" min="1" max="10" value="4"></label>
+        <p class="hint">Every bot gets its own isolated call with the skill's brief: no bot sees another's answer.</p>
+      </details>
+    </aside>
+
+    <section class="stage">
+      <div id="arena" class="arena">
+        <div class="hud">
+          <div class="hud-cell progress">
+            <svg viewBox="0 0 36 36" class="ring" aria-hidden="true"><circle cx="18" cy="18" r="15.9" class="track"/><circle id="progressArc" cx="18" cy="18" r="15.9" class="arc"/></svg>
+            <div><strong id="progressText">0/0</strong><small id="stateText">ready</small><small id="hudSource" class="hud-src"></small></div>
+          </div>
+          <div class="hud-cell counts">
+            <div><span class="dot buy"></span><span class="k">Buy</span><strong id="buyCount">0</strong></div>
+            <div><span class="dot pass"></span><span class="k">Pass</span><strong id="passCount">0</strong></div>
+          </div>
+          <div class="hud-cell rate">
+            <div class="rate-head"><small>Simulated buy rate</small><strong id="rateText">&ndash;</strong></div>
+            <div class="bar"><div id="rateFill" class="fill"></div><div id="barMark" class="mark" title="verdict bar"></div></div>
+            <small id="barLabel" class="bar-label">target 25%</small>
+          </div>
+          <div class="hud-cell hud-note">
+            <span id="modeBadge">Quick sim · rules, not AI</span>
+            <span class="warn" title="Simulated buyers give an upper bound. Real customers usually buy less.">Simulated buyers, not customers</span>
+          </div>
+        </div>
+        <div id="ticker" class="ticker" aria-live="polite" hidden></div>
+        <button id="miniRoster" class="mini-roster" type="button" hidden aria-label="Every buyer's state; open the full list"></button>
+        <div id="arenaHint" class="arena-hint" role="note">
+          <span>Press <b>Run panel</b>: each buyer leaves the queue, reads your pitch at the stall, then walks to <b style="color:var(--buy)">BUY</b> or <b style="color:var(--pass)">PASS</b>.</span>
+          <button class="hint-close" id="hintClose" aria-label="Hide this tip">Hide</button>
+        </div>
+        <div id="legend" class="legend"></div>
+        <button id="hintOpen" class="hint-open" type="button" aria-label="How the arena works" title="How the arena works">?</button>
+        <div class="view-ctl" role="group" aria-label="Camera view">
+          <button type="button" data-view="overview" class="active" title="Whole square">Overview</button>
+          <button type="button" data-view="stall" title="Close to the stall">Stall</button>
+          <button type="button" data-view="top" title="From above">Top</button>
+        </div>
+        <p class="orbit-hint" aria-hidden="true">Drag to turn · scroll to zoom · click a buyer</p>
+        <aside id="botInspector" class="inspector" hidden aria-live="polite"></aside>
+        <div id="toast" class="toast" hidden></div>
+      </div>
+
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="results">Results</button>
+        <button class="tab" data-tab="pricing">Pricing</button>
+        <button class="tab" data-tab="numbers">Numbers</button>
+        <button class="tab" data-tab="competitors">Competitors</button>
+        <button class="tab" data-tab="ab">A/B offer</button>
+        <button class="tab" data-tab="review">Review loop</button>
+        <button class="tab" data-tab="verdict">Verdict</button>
+      </nav>
+      <div class="panels">
+        <section id="tab-results" class="panel active"><div class="empty how">
+          <h3 class="how-title">How it works</h3>
+          <ol>
+            <li>Press <b>Run panel</b>. Simulated buyers walk up to your stall and read your pitch.</li>
+            <li>An amber ring means a buyer is thinking.</li>
+            <li>Each buyer walks to <b style="color:var(--buy)">BUY</b> or <b style="color:var(--pass)">PASS</b>; the reason appears in Live decisions.</li>
+            <li>Results then show who buys by segment, why the rest pass, and the next test to run.</li>
+          </ol>
+          <p class="modes-note"><b>Quick sim</b> = instant rule model, free, not AI. <b>AI buyers</b> = one isolated model call per buyer. <b>Replay</b> = re-watch a saved panel. All are simulations, not customers.</p>
+        </div></section>
+        <section id="tab-pricing" class="panel"><p class="empty">Price answers appear here as bots decide (live preview), then the skill's van_westendorp.py result.</p></section>
+        <section id="tab-numbers" class="panel"></section>
+        <section id="tab-competitors" class="panel"></section>
+        <section id="tab-ab" class="panel">
+          <div class="ab-grid">
+            <div>
+              <h3>Offer B</h3>
+              <p class="hint">Same buyers (same seed) read a different pitch. The only fair way to see if an offer change helps.</p>
+              <textarea id="pitchB" rows="7" placeholder="Rewrite the pitch to answer the top pass reasons…"></textarea>
+              <button id="runAbBtn" class="primary">Run B with the same buyers</button>
+            </div>
+            <div id="abResult"><p class="empty">Run panel A first, then B.</p></div>
+          </div>
+        </section>
+        <section id="tab-review" class="panel">
+          <div class="review-head">
+            <div>
+              <h3>Review loop</h3>
+              <p class="hint">Five reviewer bots apply the board lenses to your pitch and the last run. An editor applies their fixes, the same buyers judge the new version, and the loop keeps a version only when more of them buy. Your pitch is only replaced if you press <b>Use as my pitch</b>.</p>
+            </div>
+            <div class="review-controls">
+              <label>Rounds<input id="loopRounds" type="number" min="1" max="6" step="1" value="3"></label>
+              <button id="loopBtn" class="primary">Start review loop</button>
+              <button id="loopStopBtn" class="ghost" hidden>Stop after this step</button>
+            </div>
+          </div>
+          <div id="reviewOut">
+            <ol class="empty how">
+              <li><b>Baseline:</b> the buyers read your current pitch.</li>
+              <li><b>Review:</b> the Offers, Product and Monopoly lenses, a clarity check and the CFO lens walk up to the stall, read the pitch and the results, and post FIX, OK or YOUR CALL.</li>
+              <li><b>Fix:</b> an editor applies the FIX items. YOUR CALL items (facts, prices) stay with you.</li>
+              <li><b>Judge:</b> the same buyers (same seed) read the new version. More buyers: kept. Fewer or equal: reverted.</li>
+              <li>Repeats until your target is met, the rounds run out, or two rounds bring no gain.</li>
+            </ol>
+          </div>
+        </section>
+        <section id="tab-verdict" class="panel">
+          <div class="verdict-controls">
+            <label>Verdict bar (min buy rate)<input id="minBuyRate" type="number" min="0.05" max="0.9" step="0.05" value="0.25"></label>
+            <button id="verdictBtn" class="primary">Compute verdict with compile.py</button>
+          </div>
+          <div id="verdictOut"><p class="empty">The verdict only comes from the skill's script: every unit earns money, year 1 profits, break-even fits capacity, enough of the panel buys.</p></div>
+        </section>
+      </div>
+    </section>
+
+    <aside class="feed" aria-label="Live feed">
+      <div class="roster-head"><h2>Buyers</h2><span id="rosterSummary" class="roster-sum">waiting in the queue</span></div>
+      <div id="roster" class="roster" aria-label="Every buyer and their state"></div>
+      <div class="roster-key" aria-hidden="true"><span class="k wait"></span>waiting <span class="k think"></span>thinking <span class="k buy"></span>buy <span class="k pass"></span>pass</div>
+      <div class="feed-head"><h2>Live decisions</h2><span id="feedCount" class="pill">0</span></div>
+      <ol id="feedList" class="feed-list"></ol>
+      <p class="empty feed-empty">Each buyer's decision and reason appears here as they choose. Hover one to find that buyer in the arena.</p>
+      <div id="botCard" class="bot-card" hidden></div>
+    </aside>
+  </main>
+
+  <script type="module" src="js/browser-backend.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

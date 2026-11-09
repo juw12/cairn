@@ -24,6 +24,7 @@ import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
+import { founderView, syncFounderStage, wireFounder } from "./founder.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
 
 // ============================================================ shell rendering
@@ -46,6 +47,7 @@ function counts() {
     code: state.todos ? state.todos.length : "",
     vibe: ((n) => (n > 1 ? `${n} live` : n ? "live" : ""))(liveSessions().length),
     autopilot: autopilotCount() || queueItems().length || "",
+    founder: "",
     context: "",
     obsidian: "",
     canvas: canvasCount() || "",
@@ -134,7 +136,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, founder: founderView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -174,6 +176,8 @@ function afterRender() {
   if (pluginView) renderPluginView(state.view, pluginView);
   if (state.view === "vibe") wireVibe();
   if (state.view === "autopilot") wireAutopilot();
+  if (state.view === "founder") wireFounder();
+  else syncFounderStage();
 }
 
 // ============================================================ global events
