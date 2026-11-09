@@ -1694,6 +1694,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 @media (max-width: 900px) {
   .ap-cols, .ap-cols-bottom { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .ap-nums { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* vibe round 5: one-line idle card, fold-all, chart peak, skills under feedback */
 .vibe-live.idle.compact { padding: 12px 0; }
 .vibe-live.idle.compact p { margin: 0; line-height: 1.6; }
