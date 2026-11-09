@@ -10,6 +10,8 @@ import { openNote } from "./drawer.js";
 import { renderView } from "./app.js";
 import { createView3D, reset3D } from "./map3d.js";
 
+const LAYOUT_BUDGET_MS = 350;
+
 // ------------------------------------------------------------ settings and session
 
 const SETTINGS_KEY = "cairn.map";
@@ -136,6 +138,13 @@ function buildModel() {
 
 function layout(m) {
   const signature = `${m.nodes.map((n) => n.id).join("|")}#${m.edges.map((e) => `${e.source}>${e.target}`).join("|")}`;
+  const neighbours = new Map();
+  for (const e of m.edges) {
+    if (!neighbours.has(e.source)) neighbours.set(e.source, []);
+    if (!neighbours.has(e.target)) neighbours.set(e.target, []);
+    neighbours.get(e.source).push(e.target);
+    neighbours.get(e.target).push(e.source);
+  }
   for (const node of m.nodes) {
     const known = positions.get(node.id);
     if (known) {
@@ -144,10 +153,7 @@ function layout(m) {
       continue;
     }
     // New dots start next to a linked neighbour that already has a place.
-    const anchor = m.edges
-      .filter((e) => e.source === node.id || e.target === node.id)
-      .map((e) => positions.get(e.source === node.id ? e.target : e.source))
-      .find(Boolean);
+    const anchor = (neighbours.get(node.id) || []).map((id) => positions.get(id)).find(Boolean);
     if (anchor) {
       node.x = anchor.x + 18;
       node.y = anchor.y + 12;
@@ -158,7 +164,9 @@ function layout(m) {
   if (signature !== lastSignature || known !== m.nodes.length) {
     if (m.sim.alpha === 0) m.sim.alpha = 0.3;
     const start = performance.now();
-    m.ticks = m.sim.run(1500);
+    // A short blocking pass places small vaults outright; big ones finish settling on screen
+    // (mapView starts animate() while the simulation isn't settled), so the view never freezes.
+    m.ticks = m.sim.run(LAYOUT_BUDGET_MS);
     m.layoutMs = performance.now() - start;
   }
   lastSignature = signature;

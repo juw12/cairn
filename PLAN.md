@@ -114,7 +114,7 @@ Conflict safety: every save sends the file's last-seen `mtime`; if the file chan
 **Non-goals (on purpose):**
 - Real-time multi-user editing (git is the collaboration layer).
 - A free-form whiteboard canvas (the Ideas wall + Map cover brainstorming at a fraction of the cost).
-- Built-in AI calls (the Context pack feeds whatever assistant you already use, with no API keys).
+- Built-in AI calls (the Context pack and `cairn mcp` feed whatever assistant you already use; Cairn itself never calls a model and needs no API keys).
 - Push/pull/merge UI (use your normal git tool; Cairn only commits).
 - Plugins.
 
