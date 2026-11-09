@@ -390,9 +390,11 @@ export function wireVibe() {
     toggleWhy(tile.dataset.why);
   });
   // Empty side blocks fold on phones; remember when someone opens one so live updates keep it open.
+  // Recorded on click (which also fires for Enter/Space on the summary), not on "toggle": toggle fires a task
+  // later, and a live re-render in between would close the block again.
   for (const fold of $$("details.vibe-fold")) {
-    fold.addEventListener("toggle", () => {
-      state.vibeOpenBlocks = { ...(state.vibeOpenBlocks || {}), [fold.dataset.block]: fold.open };
+    fold.querySelector("summary")?.addEventListener("click", () => {
+      state.vibeOpenBlocks = { ...(state.vibeOpenBlocks || {}), [fold.dataset.block]: !fold.open };
     });
   }
   const feedbackForm = $("#fb-form");
