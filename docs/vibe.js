@@ -491,15 +491,20 @@ function shippedFigure(stats, figure, dash) {
   const title = handRated
     ? `Ship rate ${stats.ship_rate}% of sessions you ended with a result (shipped, partial or dropped).`
     : "Sessions that committed or changed code in their folder.";
-  return figure(stats.shipped, "shipped", title, stats.shipped ? `${share}% of ${ended} sessions` : "no code changes seen yet");
+  return figure(stats.shipped, "shipped", title, stats.shipped ? `${share}% of ${ended} · code changed` : "no code changes seen yet");
 }
 
 function activity(stats, sessions = []) {
   const days = stats.daily;
   // Sessions with no git have no evidence either way, so the chart keeps them apart from "no code change".
   const noGit = {};
+  const byDay = {};
   for (const note of sessions) {
-    if (outcomeOf(note) === "unknown") noGit[sessionDayOf(note)] = (noGit[sessionDayOf(note)] || 0) + 1;
+    const day = sessionDayOf(note);
+    const outcome = outcomeOf(note);
+    if (outcome === "unknown") noGit[day] = (noGit[day] || 0) + 1;
+    byDay[day] = byDay[day] || {};
+    byDay[day][outcome] = (byDay[day][outcome] || 0) + 1;
   }
   const byMinutes = days.some((d) => d.minutes > 0);
   const value = (d) => (byMinutes ? d.minutes : d.sessions);
@@ -513,7 +518,11 @@ function activity(stats, sessions = []) {
       const unknownH = d.sessions ? Math.round(h * (unknown / d.sessions)) : 0;
       const x = (i * width + width * 0.18).toFixed(2);
       const w = (width * 0.64).toFixed(2);
-      const tip = `${d.day}: ${plural(d.sessions, "session")}${byMinutes ? `, ${duration(d.minutes)}` : ""}${d.shipped ? `, ${d.shipped} shipped` : ""}${unknown ? `, ${unknown} no git` : ""}`;
+      const split = Object.keys(OUTCOMES)
+        .filter((key) => byDay[d.day] && byDay[d.day][key])
+        .map((key) => `${byDay[d.day][key]} ${OUTCOMES[key]}`)
+        .join(", ");
+      const tip = `${dayLabel(d.day)}: ${plural(d.sessions, "session")}${byMinutes ? ` · ${duration(d.minutes)} clock time` : ""}${split ? ` · ${split}` : ""}`;
       return `<g><title>${tip}</title>
         <rect x="${x}" y="${60 - h}" width="${w}" height="${Math.max(h, 1)}" class="${h ? "bar" : "bar empty"}"/>
         ${shippedH ? `<rect x="${x}" y="${60 - shippedH}" width="${w}" height="${shippedH}" class="bar shipped"/>` : ""}
@@ -525,7 +534,7 @@ function activity(stats, sessions = []) {
   return `<section class="column-block vibe-activity">
     <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> shipped <i class="key none"></i> no code change${Object.keys(noGit).length ? ` <i class="key nogit"></i> no git` : ""}</span></header>
     <svg viewBox="0 0 100 62" preserveAspectRatio="none" role="img" aria-label="${byMinutes ? "Minutes" : "Sessions"} per day for the last ${days.length} days">${bars}</svg>
-    <div class="axis"><span>${days[0].day.slice(5)}</span>${peakLabel(days, byMinutes, value)}<span>today</span></div>
+    <div class="axis"><span>${esc(new Date(`${days[0].day}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" }))}</span>${peakLabel(days, byMinutes, value)}<span>today</span></div>
   </section>`;
 }
 
@@ -534,7 +543,10 @@ function peakLabel(days, byMinutes, value) {
   const peak = days.reduce((best, d) => (value(d) > value(best) ? d : best), days[0]);
   if (!value(peak)) return "";
   const amount = byMinutes ? duration(peak.minutes) : plural(peak.sessions, "session");
-  return `<span class="peak">peak ${esc(amount)} · ${esc(dayLabel(peak.day))}</span>`;
+  const date = new Date(`${peak.day}T12:00:00`);
+  const weekday = date.toLocaleDateString(undefined, { weekday: "short" });
+  const dayMonth = date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `<span class="peak">peak ${esc(amount)} · <span class="peak-wd">${esc(weekday)}, </span>${esc(dayMonth)}</span>`;
 }
 
 function skillsBlock(stats) {
@@ -632,7 +644,7 @@ function sessionsBlock(sessions, stats) {
         ${["all", ...present].map((source) => `<button class="chip${source === filter ? " on" : ""}" data-action="vibe-filter" data-source="${source}" aria-pressed="${source === filter}">${source === "all" ? "All" : SOURCES[source]} <b>${counts[source]}</b></button>`).join("")}
       </div>`
     : present.length
-      ? `<span class="chip static" title="${present[0] === "logged" ? "Every session was started by hand with cairn vibe start." : "Every session here was detected automatically. Sessions you start with cairn vibe start show up as Logged."}">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>${present[0] === "logged" ? "" : `<span class="muted small vibe-src-note">0 logged by hand</span>`}`
+      ? `<span class="chip static" title="${present[0] === "logged" ? "Every session was started by hand with cairn vibe start." : "Every session here was detected automatically. Sessions you start with cairn vibe start show up as Logged."}">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>${present[0] === "logged" ? "" : `<span class="chip static empty" title="Sessions you start with cairn vibe start or the Start session button land here.">Logged by hand <b>0</b></span>`}`
       : "";
   const outcomesHere = Object.keys(OUTCOMES).filter((key) => outcomeCounts[key]);
   const outcomeChips = outcomesHere.length

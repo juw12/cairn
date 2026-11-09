@@ -1751,3 +1751,12 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 @media (max-width: 600px) {
   .vibe-activity svg { height: 120px; }
 }
+
+/* Vibe round 6: an empty source chip, long lists that stay cheap, a phone-sized chart axis */
+.chip.static.empty { opacity: 0.6; }
+.vibe-filters > .vibe-chip-group:first-child, .vibe-filters > .chip.static + .chip.static { margin-right: auto; }
+.vibe-sessions .day-group { content-visibility: auto; contain-intrinsic-size: auto 48px; }
+@media (max-width: 600px) {
+  .vibe-activity .axis .peak-wd { display: none; }
+  .vibe-activity .axis { font-size: 11px; }
+}

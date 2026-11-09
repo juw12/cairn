@@ -275,6 +275,11 @@ class EndToEndTests(unittest.TestCase):
         self.assertNotIn("no code change or no git", legend)
         self.assertEqual("no git" in legend, has_no_git)
         self.assertEqual(page.locator(".vibe-activity .bar.nogit").count() > 0, has_no_git)
+        # Each bar's tooltip names the day and splits it by outcome, like the chips.
+        tips = page.eval_on_selector_all(".vibe-activity svg g title", "nodes => nodes.map((n) => n.textContent)")
+        busy = [tip for tip in tips if " 0 sessions" not in tip and "session" in tip and "·" in tip]
+        self.assertTrue(busy, tips)
+        self.assertTrue(any(word in busy[0] for word in ("shipped", "no code change", "no git", "live", "partial", "dropped")), busy[0])
         self.assertEqual(self.errors, [])
 
     def test_feedback_capture_prefix(self):
