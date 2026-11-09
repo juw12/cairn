@@ -280,16 +280,38 @@ class VoiceLogTests(unittest.TestCase):
         page.wait_for_selector(".log-sheet")
         self.assertEqual(self.errors, [])
 
-    def test_phone_log_button_sits_in_the_top_bar_clear_of_the_page(self):
+    def test_phone_log_button_is_in_thumb_reach_and_tucks_away_while_reading(self):
         page = self.open(viewport=(390, 844))
         fab = page.locator("#log-fab")
         self.assertTrue(fab.is_visible())
-        self.assertEqual(page.evaluate("document.querySelector('#log-fab').parentElement.className"), "topbar")
+        self.assertTrue(page.evaluate("document.querySelector('#log-fab').classList.contains('thumb')"))
         box = fab.bounding_box()
-        view = page.locator("#view").bounding_box()
-        self.assertLessEqual(box["y"] + box["height"], view["y"] + 1, "nothing on the page is ever under it")
-        self.assertGreaterEqual(box["width"], 40, "a comfortable touch target")
+        self.assertGreaterEqual(box["width"], 48, "a comfortable touch target")
+        self.assertGreater(box["x"], 390 / 2, "on the right, where a right thumb rests")
+        self.assertGreater(box["y"], 844 * 0.8, "in the bottom fifth of the screen")
         self.assertFalse(page.evaluate("() => document.documentElement.scrollWidth > innerWidth + 1"))
+        # Make the page long enough to scroll, then scroll down: the button tucks away; scroll up: it is back.
+        page.evaluate("document.querySelector('#view').style.minHeight = '3000px'")
+        page.mouse.wheel(0, 600)
+        page.wait_for_function("() => document.querySelector('#log-fab').classList.contains('tucked')")
+        page.mouse.wheel(0, -200)
+        page.wait_for_function("() => !document.querySelector('#log-fab').classList.contains('tucked')")
+        # At the very end of the page it is back too, and the last content clears it (bottom padding).
+        page.evaluate("scrollTo(0, document.documentElement.scrollHeight)")
+        page.wait_for_function("() => !document.querySelector('#log-fab').classList.contains('tucked')")
+        pad = page.evaluate("parseFloat(getComputedStyle(document.querySelector('#view')).paddingBottom)")
+        self.assertGreaterEqual(pad, box["height"] + 16)
+        fab.click()
+        page.wait_for_selector(".log-sheet")
+        self.assertEqual(self.errors, [])
+
+    def test_log_button_moves_between_top_bar_and_thumb_when_the_window_resizes(self):
+        page = self.open(viewport=(1200, 800))
+        self.assertEqual(page.evaluate("document.querySelector('#log-fab').parentElement.className"), "topbar")
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_function("() => document.querySelector('#log-fab').classList.contains('thumb')")
+        page.set_viewport_size({"width": 1200, "height": 800})
+        page.wait_for_function("() => document.querySelector('#log-fab').parentElement.className === 'topbar'")
         self.assertEqual(self.errors, [])
 
     def test_phone_layout_has_no_overflow(self):
