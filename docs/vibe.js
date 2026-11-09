@@ -112,6 +112,35 @@ export function toggleSessionDay(day) {
   $(`.day-head[data-day="${CSS.escape(day)}"]`)?.focus();
 }
 
+// From the chart: open one day, make sure no filter or page limit hides it, and bring it into view.
+export function jumpToDay(day) {
+  const folded = state.vibeFolded || (state.vibeFolded = new Set());
+  folded.delete(day);
+  const onDay = state.notes.filter((note) => note.type === "session" && sessionDayOf(note) === day);
+  const passes = (note) =>
+    (!(state.vibeFilter in SOURCES) || state.vibeFilter === "all" || sessionSource(note) === state.vibeFilter) &&
+    (!(state.vibeOutcome in OUTCOMES) || outcomeOf(note) === state.vibeOutcome);
+  if (!onDay.some(passes)) {
+    state.vibeFilter = "all";
+    state.vibeOutcome = "all";
+  }
+  renderView();
+  const headFor = () => $(`.day-head[data-day="${CSS.escape(day)}"]`);
+  if (!headFor()) {
+    state.vibeLimit = Infinity;
+    renderView();
+  }
+  const head = headFor();
+  if (!head) return;
+  const group = head.closest(".day-group");
+  group.scrollIntoView({ block: "start" });
+  // Days above may have been skipped by content-visibility; settle once they have real sizes.
+  requestAnimationFrame(() => group.scrollIntoView({ block: "start" }));
+  head.focus({ preventScroll: true });
+  group.classList.add("flash");
+  setTimeout(() => group.classList.remove("flash"), 1600);
+}
+
 export function foldAllDays(dayList) {
   const days = String(dayList || "").split(",");
   const folded = state.vibeFolded || (state.vibeFolded = new Set());
@@ -329,6 +358,14 @@ export function wireVibe() {
       logStep(logForm.elements.kind.value, logForm.elements.text.value, logForm.dataset.session).catch((error) => toast(error.message, { error: true }));
     });
   }
+  const bar = $(".topbar");
+  if (bar) document.documentElement.style.setProperty("--topbar-h", `${bar.offsetHeight}px`);
+  $(".vibe-activity svg")?.addEventListener("keydown", (event) => {
+    const day = event.target.closest?.("[data-action=vibe-jump]");
+    if (!day || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    jumpToDay(day.dataset.day);
+  });
   const feedbackForm = $("#fb-form");
   if (feedbackForm) {
     // Keep what's typed if a live update re-renders the view mid-sentence.
@@ -474,7 +511,9 @@ function figures(stats) {
     ${stats.pass_rate === null
       ? figure(dash, "checks green", "No test runs logged yet. Log one with: cairn vibe check -- <test command>", "no checks logged yet")
       : figure(`${stats.pass_rate}%`, "checks green", `${stats.passed} passed · ${stats.failed} failed`)}
-    ${figure(stats.feedback_open, "feedback open", `${stats.feedback} total · ${stats.feedback_addressed} addressed`)}
+    ${stats.feedback
+      ? figure(stats.feedback_open, "feedback open", `${stats.feedback} total · ${stats.feedback_addressed} addressed`)
+      : figure(dash, "feedback open", "No feedback yet. Add some with the form below, or feedback: in the capture bar.", "no feedback yet")}
     ${stats.rating === null
       ? figure(dash, "avg rating", "No rated feedback yet. Add feedback with a 1-5 rating below.", "no ratings yet")
       : figure(stats.rating.toFixed(1), "avg rating", "Out of 5")}
@@ -523,7 +562,10 @@ function activity(stats, sessions = []) {
         .map((key) => `${byDay[d.day][key]} ${OUTCOMES[key]}`)
         .join(", ");
       const tip = `${dayLabel(d.day)}: ${plural(d.sessions, "session")}${byMinutes ? ` · ${duration(d.minutes)} clock time` : ""}${split ? ` · ${split}` : ""}`;
-      return `<g><title>${tip}</title>
+      // A day with sessions is a button: it unfolds that day in the list below and scrolls to it.
+      const open = d.sessions ? ` class="bar-day" data-action="vibe-jump" data-day="${esc(d.day)}" role="button" tabindex="0" aria-label="${esc(tip)}. Show this day's sessions."` : "";
+      return `<g${open}><title>${tip}${d.sessions ? " · click to show these sessions" : ""}</title>
+        ${d.sessions ? `<rect x="${(i * width).toFixed(2)}" y="0" width="${width.toFixed(2)}" height="62" class="hit"/>` : ""}
         <rect x="${x}" y="${60 - h}" width="${w}" height="${Math.max(h, 1)}" class="${h ? "bar" : "bar empty"}"/>
         ${shippedH ? `<rect x="${x}" y="${60 - shippedH}" width="${w}" height="${shippedH}" class="bar shipped"/>` : ""}
         ${unknownH ? `<rect x="${x}" y="${60 - h}" width="${w}" height="${unknownH}" class="bar nogit"/>` : ""}

@@ -229,6 +229,7 @@ class EndToEndTests(unittest.TestCase):
         figures = page.inner_text(".vibe-figures")
         self.assertIn("no checks logged yet", figures)  # a dash always says why
         self.assertIn("no ratings yet", figures)
+        self.assertIn("no feedback yet", figures)
         page.click('[data-action="vibe-sample"]')
         page.wait_for_function("() => window.cairn.state.notes.filter((n) => n.type === 'session').length === 4")
         rows = page.locator(".session-row").count()
@@ -260,6 +261,20 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_function("() => document.querySelectorAll('.session-row').length === 0")
         self.assertEqual(page.locator('.day-head[aria-expanded="true"]').count(), 0)
         self.assertIn("Unfold all days", page.inner_text(".vibe-sessions"))
+        page.click('[data-action="vibe-fold-all"]')
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
+
+        # A bar in the chart opens just that day, even when every day is folded.
+        page.click('[data-action="vibe-fold-all"]')
+        page.wait_for_function("() => document.querySelectorAll('.session-row').length === 0")
+        bar = page.locator('.vibe-activity [data-action="vibe-jump"]').last
+        day = bar.get_attribute("data-day")
+        bar.click()
+        page.wait_for_function("(d) => document.querySelector(`.day-head[data-day='${d}']`)?.getAttribute('aria-expanded') === 'true'", arg=day)
+        self.assertEqual(page.locator('.day-head[aria-expanded="true"]').count(), 1)
+        self.assertGreater(page.locator(".session-row").count(), 0)
+        self.assertEqual(page.evaluate("document.activeElement.dataset.day"), day)
+        page.click('[data-action="vibe-fold-all"]')  # back to every day open for the checks below
         page.click('[data-action="vibe-fold-all"]')
         page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
 
