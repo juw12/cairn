@@ -100,6 +100,14 @@ function days() {
 
 // ============================================================ the centre button
 
+// The Log button lives in the top bar on every screen size, next to search: always one tap away and
+// never on top of what you're reading (a floating button always covers something). L opens it too.
+function placeFab(fab) {
+  const home = $(".topbar") || $("#app");
+  home.appendChild(fab);
+  fab.classList.toggle("in-topbar", home.classList.contains("topbar"));
+}
+
 export function initVoiceLog() {
   if ($("#log-fab")) return;
   const fab = document.createElement("button");
@@ -113,7 +121,7 @@ export function initVoiceLog() {
     fab.insertAdjacentHTML("beforeend", `<span class="log-fab-hint" aria-hidden="true">Tap or press <kbd>L</kbd>, then just talk</span>`);
   }
   fab.addEventListener("click", () => openLogSheet());
-  $("#app").appendChild(fab);
+  placeFab(fab);
   announcer();
   const redraw = () => {
     updateVoiceUi();

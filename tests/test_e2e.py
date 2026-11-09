@@ -254,6 +254,19 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(page.evaluate("document.activeElement.classList.contains('day-head')"), True)
         page.keyboard.press("Enter")  # a folded day opens again from the keyboard
         page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
+
+        # Fold every day at once, then unfold them all again.
+        page.click('[data-action="vibe-fold-all"]')
+        page.wait_for_function("() => document.querySelectorAll('.session-row').length === 0")
+        self.assertEqual(page.locator('.day-head[aria-expanded="true"]').count(), 0)
+        self.assertIn("Unfold all days", page.inner_text(".vibe-sessions"))
+        page.click('[data-action="vibe-fold-all"]')
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
+
+        # With history, the idle card is one line that points at the last session.
+        idle = page.inner_text(".vibe-live.idle")
+        self.assertIn("Last session:", idle)
+        self.assertEqual(page.locator(".vibe-live.idle [data-open]").count(), 1)
         self.assertEqual(self.errors, [])
 
     def test_feedback_capture_prefix(self):
