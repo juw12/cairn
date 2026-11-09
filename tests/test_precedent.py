@@ -363,5 +363,23 @@ class CliTests(HomeTestCase):
         self.assertEqual(autopilot.settings()["round_timeout_min"], 7)
 
 
+    def test_init_moves_everything_in(self):
+        skill = self.tmp / "skill"
+        (skill / "data").mkdir(parents=True)
+        (skill / "profile.md").write_text("# Profile\n\n## Who\n\nShips things.\n", encoding="utf-8")
+        (skill / "data" / "learned.jsonl").write_text(json.dumps({"date": "2026-09-02", "goal": "g", "delivered": "d", "correction": ""}) + "\n", encoding="utf-8")
+        queue = self.tmp / "Queue.md"
+        queue.write_text("- [ ] Add dark mode #auto\n", encoding="utf-8")
+        app = self.tmp / "agent"
+        (app / "state").mkdir(parents=True)
+        (app / "state" / "jobs.json").write_text(json.dumps([{"id": "j1", "goal": "old goal", "status": "done", "workdir": "x"}]), encoding="utf-8")
+        out = self.cairn("precedent", "init", "--import-skill", str(skill), "--queue-file", str(queue), "--agent-app", str(app))
+        self.assertIn("1", out)
+        self.assertEqual([i["title"] for i in precedent.queue_items(self.brain)], ["Add dark mode"])
+        self.assertIn("Ships things.", precedent.profile_text(self.brain))
+        self.assertEqual(autopilot.get_job("j1")["goal"], "old goal")
+        self.cairn("precedent", "init", "--import-skill", str(skill), "--queue-file", str(queue), "--agent-app", str(app))
+        self.assertEqual(len(precedent.queue_items(self.brain)), 1, "init is safe to re-run")
+
 if __name__ == "__main__":
     unittest.main()
