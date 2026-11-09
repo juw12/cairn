@@ -1723,6 +1723,24 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
   .log-fab.in-topbar { width: 40px; height: 40px; padding: 0; justify-content: center; }
   #search-btn kbd { display: none; }
 }
+/* Phones: thumb-reach Log button, bottom-right; tucks away while scrolling down */
+.log-fab.thumb {
+  left: auto; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); transform: none;
+  width: 56px; height: 56px; padding: 0; justify-content: center;
+  transition: transform .2s ease, opacity .2s ease;
+}
+.log-fab.thumb:hover { transform: none; }
+.log-fab.thumb.tucked { transform: translateY(calc(100% + 28px)); opacity: 0; pointer-events: none; }
+.log-fab.thumb .log-fab-hint { left: auto; right: 0; transform: none; }
+.log-fab.thumb .log-fab-hint::after { left: auto; right: 22px; margin-left: 0; }
+.log-fab.thumb .log-fab-hint { animation-name: hint-in-plain, hint-out; }
+@media (max-width: 600px) {
+  .main .view { padding-bottom: 104px; }
+  .toasts { right: 16px; left: 16px; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 68px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .log-fab.thumb { transition: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .log-fab.in-topbar { transition: none; }
 }

@@ -100,12 +100,41 @@ function days() {
 
 // ============================================================ the centre button
 
-// The Log button lives in the top bar on every screen size, next to search: always one tap away and
-// never on top of what you're reading (a floating button always covers something). L opens it too.
+// Wide screens: the Log button sits in the top bar next to search. Phones: it floats bottom-right, where
+// the thumb already is, and tucks away while you scroll down so it doesn't sit on what you're reading;
+// scrolling back up (or reaching the end of the page) brings it back. L opens it on any screen.
+const PHONE = "(max-width: 600px)";
+
 function placeFab(fab) {
-  const home = $(".topbar") || $("#app");
-  home.appendChild(fab);
-  fab.classList.toggle("in-topbar", home.classList.contains("topbar"));
+  const bar = $(".topbar");
+  const thumb = !bar || matchMedia(PHONE).matches;
+  const home = thumb ? $("#app") || document.body : bar;
+  if (fab.parentElement !== home) home.appendChild(fab);
+  fab.classList.toggle("in-topbar", !thumb);
+  fab.classList.toggle("thumb", thumb);
+  if (!thumb) fab.classList.remove("tucked");
+}
+
+function tuckOnScroll(fab) {
+  let lastY = scrollY;
+  addEventListener(
+    "scroll",
+    () => {
+      const y = scrollY;
+      if (!fab.classList.contains("thumb")) {
+        lastY = y;
+        return;
+      }
+      const atEnd = innerHeight + y >= document.documentElement.scrollHeight - 4;
+      if (y > lastY + 6 && y > 120 && !atEnd) {
+        fab.classList.add("tucked");
+        fab.querySelector(".log-fab-hint")?.remove(); // they've started reading; the hint has done its job
+      } else if (y < lastY - 6 || atEnd || y <= 120) fab.classList.remove("tucked");
+      lastY = y;
+    },
+    { passive: true },
+  );
+  fab.addEventListener("focus", () => fab.classList.remove("tucked"));
 }
 
 export function initVoiceLog() {
@@ -122,6 +151,8 @@ export function initVoiceLog() {
   }
   fab.addEventListener("click", () => openLogSheet());
   placeFab(fab);
+  matchMedia(PHONE).addEventListener?.("change", () => placeFab(fab));
+  tuckOnScroll(fab);
   announcer();
   const redraw = () => {
     updateVoiceUi();
