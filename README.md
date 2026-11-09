@@ -69,7 +69,7 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | Screen | What it does |
 |---|---|
 | **Quick capture** | One bar on every screen. `todo: ship v1 #release`, `decision: use SQLite`, `log: fixed the bug` or just text (an idea). It shows where the note will go before you press Enter. |
-| **Voice log** | One mic button in the middle of every screen (or <kbd>L</kbd>). Talk and it writes a timestamped line into today's `journal/YYYY-MM-DD.md`; say *todo …*, *idea …*, *decision …* or *mood good* and it creates the linked note or mood too. *Undo*, *read today*, *what did I do last Friday*, *search for …*, *stop*. Uses the browser's speech engine, or an **offline voice model** that runs on your device; no API key, and typing works everywhere. [More below](#keep-a-daily-log-by-voice). |
+| **Voice log** | One **Log** button on every screen: in the top bar on a computer, bottom-right in thumb reach on a phone (or <kbd>L</kbd>). Talk and it writes a timestamped line into today's `journal/YYYY-MM-DD.md`; say *todo …*, *idea …*, *decision …* or *mood good* and it creates the linked note or mood too. *Undo*, *read today*, *what did I do last Friday*, *search for …*, *stop*. Uses the browser's speech engine, or an **offline voice model** that runs on your device; no API key, and typing works everywhere. [More below](#keep-a-daily-log-by-voice). |
 | **Ideas wall** | Raw → Exploring → Ready → Parked. Drag ideas right as they firm up. **Spark** drops a thinking prompt into an idea; **Promote to task** creates a linked task. |
 | **Board** | To do → Doing → Done with drag and drop, checklists and progress bars. |
 | **Decisions** | Lightweight decision records (context, options, decision, consequences), numbered and reviewed in PRs like code. |
@@ -249,7 +249,7 @@ Moving from the standalone precedent skill or Precedent Agent app:
 
 ### Keep a daily log by voice
 
-Press the round **Log** button at the bottom of any screen, or <kbd>L</kbd>. The microphone starts (you can turn that off), you talk, and every sentence lands in today's page as a plain Markdown bullet:
+Press the **Log** button, or <kbd>L</kbd>. On a computer it sits in the top bar next to search; on a phone it floats bottom-right where your thumb is, and slides out of the way while you scroll down to read. The microphone starts (you can turn that off), you talk, and every sentence lands in today's page as a plain Markdown bullet:
 
 ```markdown
 ## Log
