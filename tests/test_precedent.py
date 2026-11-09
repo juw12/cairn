@@ -4,6 +4,7 @@ no real agent and no files outside a temp folder (CAIRN_HOME points there)."""
 import http.client
 import json
 import os
+import time
 import shutil
 import sqlite3
 import subprocess
@@ -249,6 +250,48 @@ class AutopilotTests(HomeTestCase):
         self.assertEqual(second.status()["worker"], "elsewhere")
         first.release()
         self.assertTrue(second.claim())
+
+    def test_heartbeat_keeps_the_claim_through_a_long_round(self):
+        first, _ = self.worker([])
+        second, _ = self.worker([])
+        self.assertTrue(first.claim())
+        lock = first._lock_path()
+        aged = json.loads(lock.read_text(encoding="utf-8"))
+        aged["at"] = time.time() - autopilot.STALE_SECONDS - 5
+        lock.write_text(json.dumps(aged), encoding="utf-8")
+        old_interval = autopilot.HEARTBEAT_SECONDS
+        autopilot.HEARTBEAT_SECONDS = 0.05
+        beating = threading.Thread(target=first._heartbeat)
+        try:
+            beating.start()
+            time.sleep(0.4)
+        finally:
+            first._stop.set()
+            beating.join(2)
+            autopilot.HEARTBEAT_SECONDS = old_interval
+        self.assertFalse(second.claim(), "a round in progress keeps its worker's claim fresh")
+        second.beat()
+        self.assertEqual(json.loads(lock.read_text(encoding="utf-8"))["owner"], first.owner, "beat never steals a claim")
+
+    def test_a_second_worker_leaves_the_running_job_alone(self):
+        first, _ = self.worker([])
+        second, _ = self.worker([])
+        self.assertTrue(first.claim())
+        job = autopilot.create_job("Long goal", str(self.tmp / "work"))
+        autopilot.update_job(job["id"], status="running")
+        second.start()
+        try:
+            self.assertEqual(autopilot.get_job(job["id"])["status"], "running")
+            self.assertEqual(second.status()["worker"], "elsewhere")
+        finally:
+            second.shutdown()
+        first.release()
+        third, _ = self.worker([])
+        third.start()
+        try:
+            self.assertEqual(autopilot.get_job(job["id"])["status"], "queued", "a crashed run's job is taken over")
+        finally:
+            third.shutdown()
 
     def test_custom_command_places_the_prompt(self):
         engine = autopilot.Engine()
