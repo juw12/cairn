@@ -143,12 +143,15 @@ class VoiceLogTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ hands-free capture
 
-    def test_centre_button_logs_spoken_line_to_todays_markdown(self):
+    def test_log_button_logs_spoken_line_to_todays_markdown(self):
         page = self.open()
         fab = page.locator("#log-fab")
         self.assertTrue(fab.is_visible())
+        # On a wide screen the button lives in the top bar, so it never sits on top of the page.
+        self.assertEqual(page.evaluate("document.querySelector('#log-fab').parentElement.className"), "topbar")
         box = fab.bounding_box()
-        self.assertAlmostEqual(box["x"] + box["width"] / 2, 640, delta=4, msg="the log button sits in the middle")
+        view = page.locator("#view").bounding_box()
+        self.assertLessEqual(box["y"] + box["height"], view["y"] + 1, "the log button sits above the page content")
         self.open_sheet_listening(page)
         self.assertEqual(page.get_attribute(".log-mic", "aria-pressed"), "true")
         self.say(page, "finished the GPX export and it feels great")
@@ -275,6 +278,18 @@ class VoiceLogTests(unittest.TestCase):
         self.assertIn("Today's log", page.inner_text(".home-log"))
         page.click(".home-log [data-log-open]")
         page.wait_for_selector(".log-sheet")
+        self.assertEqual(self.errors, [])
+
+    def test_phone_log_button_sits_in_the_top_bar_clear_of_the_page(self):
+        page = self.open(viewport=(390, 844))
+        fab = page.locator("#log-fab")
+        self.assertTrue(fab.is_visible())
+        self.assertEqual(page.evaluate("document.querySelector('#log-fab').parentElement.className"), "topbar")
+        box = fab.bounding_box()
+        view = page.locator("#view").bounding_box()
+        self.assertLessEqual(box["y"] + box["height"], view["y"] + 1, "nothing on the page is ever under it")
+        self.assertGreaterEqual(box["width"], 40, "a comfortable touch target")
+        self.assertFalse(page.evaluate("() => document.documentElement.scrollWidth > innerWidth + 1"))
         self.assertEqual(self.errors, [])
 
     def test_phone_layout_has_no_overflow(self):
