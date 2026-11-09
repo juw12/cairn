@@ -1632,7 +1632,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .day-group.folded .day-head .day-name .icon { transform: rotate(-90deg); }
 .day-head .muted { font-weight: 400; }
 @media (max-width: 600px) {
-  .day-head { min-height: 40px; }
+  .day-head { min-height: 44px; }
+  .day-bar .day-back { min-height: 36px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .day-head .day-name .icon { transition: none; }
