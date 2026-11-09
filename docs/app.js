@@ -12,7 +12,7 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
-import { copyAgentHook, endSession, liveSessions, loadSampleSessions, setVibeFilter, setVibeOutcome, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, vibeView, wireVibe } from "./vibe.js";
+import { copyAgentHook, endSession, liveSessions, loadSampleSessions, setVibeFilter, setVibeOutcome, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -302,6 +302,8 @@ function wireGlobal() {
       "ap-q-done": () => queueDone(actionEl.dataset.path),
       "vibe-fold-all": () => foldAllDays(actionEl.dataset.days),
       "vibe-jump": () => jumpToDay(actionEl.dataset.day),
+      "vibe-to-chart": () => backToChart(actionEl.dataset.day),
+      "vibe-why": () => toggleWhy(actionEl.dataset.why),
       "copy-context": () => copyText(core.contextPack(state.notes, state.info.project, today()), "Context pack copied"),
       "save-context": saveContext,
       "copy-mcp": () => copyText(mcpSnippet(), "MCP setup copied"),
