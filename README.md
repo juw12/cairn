@@ -247,6 +247,18 @@ until you turn it on, and its state and logs live in `~/.cairn/autopilot` (`CAIR
 Moving from the standalone precedent skill or Precedent Agent app:
 `cairn precedent init --import-skill <skill folder> --queue-file <Queue.md> --agent-app <app folder>` (safe to re-run).
 
+### Test a business idea: Founder Studio
+
+The **Founder Studio** page runs [Founder Studio](https://github.com/juw12/founder-studio) inside Cairn: describe
+an offer and a price, and a simulated panel of 20 buyers walks through a 3D market square, decides buy or pass and
+tells you why, with the price ladder and an A/B pitch test underneath. It runs entirely in your browser (Python via
+Pyodide, nothing sent anywhere), so it works on the hosted site and offline alike. When a run finishes, Cairn shows
+the buy rate against your target and **Save to brain** files it as a note tagged `founder-studio`, so the result sits
+next to your project notes and in Obsidian.
+
+The studio lives in `docs/founder/` and is developed there from now on; `docs/founder.js` is the small bridge that
+embeds it and receives each finished run.
+
 ### Keep a daily log by voice
 
 Press the **Log** button, or <kbd>L</kbd>. On a computer it sits in the top bar next to search; on a phone it floats bottom-right where your thumb is, and slides out of the way while you scroll down to read. The microphone starts (you can turn that off), you talk, and every sentence lands in today's page as a plain Markdown bullet:

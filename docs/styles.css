@@ -1806,3 +1806,20 @@ details.vibe-fold[open] > summary { margin-bottom: 12px; }
 details.vibe-fold > summary::after { content: "Show"; margin-left: 12px; font-size: 12px; color: var(--accent-ink, var(--ink)); }
 details.vibe-fold[open] > summary::after { content: "Hide"; }
 details.vibe-fold > summary .muted { margin-left: auto; }
+
+/* ------------------------------------------------------------ founder studio */
+body.founder-open .view { padding-bottom: 16px; }
+body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; }
+.founder-stage { padding: 0 40px 40px; max-width: 1240px; width: 100%; }
+.founder-stage iframe { display: block; width: 100%; height: max(640px, calc(100vh - 230px)); border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
+.founder-hint { display: flex; align-items: flex-start; gap: 8px; margin: 0; }
+.founder-hint .icon { flex: none; margin-top: 3px; }
+.founder-strip { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--ink-3, var(--line-strong)); border-radius: 10px; }
+.founder-strip.good { border-left-color: #2f7d4f; }
+.founder-strip.bad { border-left-color: #b4452f; }
+.founder-figure { font-size: 15px; }
+.founder-meta { flex: 1 1 260px; color: var(--ink-2); font-size: 13px; }
+@media (max-width: 760px) {
+  .founder-stage { padding: 0 12px 24px; }
+  .founder-stage iframe { height: calc(100vh - 160px); min-height: 560px; border-radius: 10px; }
+}
