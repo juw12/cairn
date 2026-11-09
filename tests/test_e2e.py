@@ -229,6 +229,7 @@ class EndToEndTests(unittest.TestCase):
         figures = page.inner_text(".vibe-figures")
         self.assertIn("no checks logged yet", figures)  # a dash always says why
         self.assertIn("no ratings yet", figures)
+        self.assertIn("no feedback yet", figures)
         page.click('[data-action="vibe-sample"]')
         page.wait_for_function("() => window.cairn.state.notes.filter((n) => n.type === 'session').length === 4")
         rows = page.locator(".session-row").count()
@@ -263,6 +264,20 @@ class EndToEndTests(unittest.TestCase):
         page.click('[data-action="vibe-fold-all"]')
         page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
 
+        # A bar in the chart opens just that day, even when every day is folded.
+        page.click('[data-action="vibe-fold-all"]')
+        page.wait_for_function("() => document.querySelectorAll('.session-row').length === 0")
+        bar = page.locator('.vibe-activity [data-action="vibe-jump"]').last
+        day = bar.get_attribute("data-day")
+        bar.click()
+        page.wait_for_function("(d) => document.querySelector(`.day-head[data-day='${d}']`)?.getAttribute('aria-expanded') === 'true'", arg=day)
+        self.assertEqual(page.locator('.day-head[aria-expanded="true"]').count(), 1)
+        self.assertGreater(page.locator(".session-row").count(), 0)
+        self.assertEqual(page.evaluate("document.activeElement.dataset.day"), day)
+        page.click('[data-action="vibe-fold-all"]')  # back to every day open for the checks below
+        page.click('[data-action="vibe-fold-all"]')
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
+
         # With history, the idle card is one line that points at the last session.
         idle = page.inner_text(".vibe-live.idle")
         self.assertIn("Last session:", idle)
@@ -275,6 +290,11 @@ class EndToEndTests(unittest.TestCase):
         self.assertNotIn("no code change or no git", legend)
         self.assertEqual("no git" in legend, has_no_git)
         self.assertEqual(page.locator(".vibe-activity .bar.nogit").count() > 0, has_no_git)
+        # Each bar's tooltip names the day and splits it by outcome, like the chips.
+        tips = page.eval_on_selector_all(".vibe-activity svg g title", "nodes => nodes.map((n) => n.textContent)")
+        busy = [tip for tip in tips if " 0 sessions" not in tip and "session" in tip and "·" in tip]
+        self.assertTrue(busy, tips)
+        self.assertTrue(any(word in busy[0] for word in ("shipped", "no code change", "no git", "live", "partial", "dropped")), busy[0])
         self.assertEqual(self.errors, [])
 
     def test_feedback_capture_prefix(self):

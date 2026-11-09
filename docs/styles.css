@@ -1751,3 +1751,23 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 @media (max-width: 600px) {
   .vibe-activity svg { height: 120px; }
 }
+
+/* Vibe round 6: an empty source chip, long lists that stay cheap, a phone-sized chart axis */
+.chip.static.empty { opacity: 0.6; }
+.vibe-filters > .vibe-chip-group:first-child, .vibe-filters > .chip.static + .chip.static { margin-right: auto; }
+.vibe-sessions .day-group { content-visibility: auto; contain-intrinsic-size: auto 48px; }
+@media (max-width: 600px) {
+  .vibe-activity .axis .peak-wd { display: none; }
+  .vibe-activity .axis { font-size: 11px; }
+}
+
+/* Vibe round 6b: bars open their day; an open day keeps its header in view while you scroll its rows */
+.vibe-activity .bar-day { cursor: pointer; outline: none; }
+.vibe-activity .bar-day .hit { fill: transparent; }
+.vibe-activity .bar-day:hover .hit, .vibe-activity .bar-day:focus-visible .hit { fill: color-mix(in srgb, var(--session) 10%, transparent); }
+.vibe-sessions .day-group { scroll-margin-top: calc(var(--topbar-h, 0px) + 8px); }
+.vibe-sessions .day-group:not(.folded) > .day-head { position: sticky; top: var(--topbar-h, 0px); z-index: 2; background: var(--bg); }
+.vibe-sessions .day-group.flash > .day-head { background: color-mix(in srgb, var(--session) 14%, var(--bg)); transition: background .6s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .vibe-sessions .day-group.flash > .day-head { transition: none; }
+}
