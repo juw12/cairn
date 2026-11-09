@@ -230,6 +230,12 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("no checks logged yet", figures)  # a dash always says why
         self.assertIn("no ratings yet", figures)
         self.assertIn("no feedback yet", figures)
+        tile = page.locator('.vibe-figures [data-action="vibe-why"]').first
+        tile.click()  # a tap shows the same explanation the hover tooltip gives
+        page.wait_for_selector(".vibe-figures .figure.open .why")
+        self.assertEqual(page.locator(".vibe-figures .figure.open .why").inner_text(), tile.get_attribute("title"))
+        page.keyboard.press("Enter")  # and the keyboard closes it again
+        page.wait_for_function("() => !document.querySelector('.vibe-figures .why')")
         page.click('[data-action="vibe-sample"]')
         page.wait_for_function("() => window.cairn.state.notes.filter((n) => n.type === 'session').length === 4")
         rows = page.locator(".session-row").count()
@@ -274,6 +280,11 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(page.locator('.day-head[aria-expanded="true"]').count(), 1)
         self.assertGreater(page.locator(".session-row").count(), 0)
         self.assertEqual(page.evaluate("document.activeElement.dataset.day"), day)
+        # The jumped-to day offers a way back up, which lands on the bar it came from.
+        page.click(f'.day-back[data-day="{day}"]')
+        page.wait_for_function("() => !document.querySelector('.day-back')")
+        self.assertEqual(page.evaluate("document.activeElement.dataset.action"), "vibe-jump")
+        self.assertEqual(page.evaluate("document.activeElement.dataset.day"), day)
         page.click('[data-action="vibe-fold-all"]')  # back to every day open for the checks below
         page.click('[data-action="vibe-fold-all"]')
         page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
@@ -312,6 +323,13 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector(".vibe-figures")
         overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
         self.assertLessEqual(overflow, 0)
+        fold = page.locator("details.vibe-feedback")
+        self.assertEqual(fold.count(), 1, "empty feedback folds to one line on a phone")
+        self.assertFalse(page.is_visible("#fb-text"))
+        page.click("details.vibe-feedback > summary")
+        page.wait_for_selector("#fb-text", state="visible")
+        page.evaluate("window.cairn.rerender()")
+        self.assertTrue(page.is_visible("#fb-text"), "an opened block stays open when the view re-renders")
         self.assertEqual(self.errors, [])
 
     def test_capture_routes_to_task_with_tags(self):

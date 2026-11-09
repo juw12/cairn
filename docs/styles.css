@@ -1632,7 +1632,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .day-group.folded .day-head .day-name .icon { transform: rotate(-90deg); }
 .day-head .muted { font-weight: 400; }
 @media (max-width: 600px) {
-  .day-head { min-height: 40px; }
+  .day-head { min-height: 44px; }
+  .day-bar .day-back { min-height: 36px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .day-head .day-name .icon { transition: none; }
@@ -1766,8 +1767,24 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .vibe-activity .bar-day .hit { fill: transparent; }
 .vibe-activity .bar-day:hover .hit, .vibe-activity .bar-day:focus-visible .hit { fill: color-mix(in srgb, var(--session) 10%, transparent); }
 .vibe-sessions .day-group { scroll-margin-top: calc(var(--topbar-h, 0px) + 8px); }
-.vibe-sessions .day-group:not(.folded) > .day-head { position: sticky; top: var(--topbar-h, 0px); z-index: 2; background: var(--bg); }
-.vibe-sessions .day-group.flash > .day-head { background: color-mix(in srgb, var(--session) 14%, var(--bg)); transition: background .6s ease; }
+.vibe-sessions .day-group:not(.folded) > .day-bar { position: sticky; top: var(--topbar-h, 0px); z-index: 2; background: var(--bg); }
+.vibe-sessions .day-group.flash > .day-bar { background: color-mix(in srgb, var(--session) 14%, var(--bg)); transition: background .6s ease; }
 @media (prefers-reduced-motion: reduce) {
-  .vibe-sessions .day-group.flash > .day-head { transition: none; }
+  .vibe-sessions .day-group.flash > .day-bar { transition: none; }
 }
+
+/* Vibe round 7: the way back to the chart, tap-to-explain figures, empty side blocks fold on phones */
+.day-bar { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+.day-bar > .day-head { flex: 1 1 auto; min-width: 0; border-bottom-width: 0; }
+.day-bar .day-back { flex: none; }
+.day-bar .day-back .icon { transform: rotate(180deg); }
+.vibe-figures .figure.explain { cursor: pointer; }
+.vibe-figures .figure.explain:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.vibe-figures .figure .why { display: block; margin-top: 6px; font-size: 12px; line-height: 1.35; color: var(--ink-2, var(--ink)); }
+details.vibe-fold > summary { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; cursor: pointer; list-style: none; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+details.vibe-fold > summary::-webkit-details-marker { display: none; }
+details.vibe-fold > summary h2 { margin: 0; }
+details.vibe-fold[open] > summary { margin-bottom: 12px; }
+details.vibe-fold > summary::after { content: "Show"; margin-left: 12px; font-size: 12px; color: var(--accent-ink, var(--ink)); }
+details.vibe-fold[open] > summary::after { content: "Hide"; }
+details.vibe-fold > summary .muted { margin-left: auto; }

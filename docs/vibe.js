@@ -124,6 +124,7 @@ export function jumpToDay(day) {
     state.vibeFilter = "all";
     state.vibeOutcome = "all";
   }
+  state.vibeJumped = day;
   renderView();
   const headFor = () => $(`.day-head[data-day="${CSS.escape(day)}"]`);
   if (!headFor()) {
@@ -139,6 +140,22 @@ export function jumpToDay(day) {
   head.focus({ preventScroll: true });
   group.classList.add("flash");
   setTimeout(() => group.classList.remove("flash"), 1600);
+}
+
+// The way back from a deep jump: scroll up to the chart and put focus on the bar you came from.
+export function backToChart(day) {
+  state.vibeJumped = null;
+  renderView();
+  const chart = $(".vibe-activity");
+  if (!chart) return;
+  chart.scrollIntoView({ block: "start" });
+  $(`.vibe-activity [data-action=vibe-jump][data-day="${CSS.escape(day || "")}"]`)?.focus({ preventScroll: true });
+}
+
+export function toggleWhy(label) {
+  state.vibeWhy = state.vibeWhy === label ? null : label;
+  renderView();
+  $(`.vibe-figures [data-why="${CSS.escape(label)}"]`)?.focus({ preventScroll: true });
 }
 
 export function foldAllDays(dayList) {
@@ -366,6 +383,20 @@ export function wireVibe() {
     event.preventDefault();
     jumpToDay(day.dataset.day);
   });
+  $(".vibe-figures")?.addEventListener("keydown", (event) => {
+    const tile = event.target.closest?.("[data-action=vibe-why]");
+    if (!tile || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    toggleWhy(tile.dataset.why);
+  });
+  // Empty side blocks fold on phones; remember when someone opens one so live updates keep it open.
+  // Recorded on click (which also fires for Enter/Space on the summary), not on "toggle": toggle fires a task
+  // later, and a live re-render in between would close the block again.
+  for (const fold of $$("details.vibe-fold")) {
+    fold.querySelector("summary")?.addEventListener("click", () => {
+      state.vibeOpenBlocks = { ...(state.vibeOpenBlocks || {}), [fold.dataset.block]: !fold.open };
+    });
+  }
   const feedbackForm = $("#fb-form");
   if (feedbackForm) {
     // Keep what's typed if a live update re-renders the view mid-sentence.
@@ -495,8 +526,12 @@ function liveCard(live, newest = true, total = 1) {
 }
 
 function figures(stats) {
-  const figure = (value, label, title = "", sub = "") =>
-    `<div class="figure"${title ? ` title="${esc(title)}"` : ""}><span class="value">${value}</span><span class="label">${label}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+  // Title tooltips never show on touch screens, so a tap (or Enter) opens the same text under the figure.
+  const figure = (value, label, title = "", sub = "") => {
+    if (!title) return `<div class="figure"><span class="value">${value}</span><span class="label">${label}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+    const open = state.vibeWhy === label;
+    return `<div class="figure explain${open ? " open" : ""}" title="${esc(title)}" role="button" tabindex="0" aria-expanded="${open}" data-action="vibe-why" data-why="${esc(label)}"><span class="value">${value}</span><span class="label">${label}</span>${sub ? `<span class="sub">${sub}</span>` : ""}${open ? `<span class="why">${esc(title)}</span>` : ""}</div>`;
+  };
   const dash = "–";
   const parallel = stats.parallel && stats.parallel >= 1.1;
   return `<div class="figures vibe-figures">
@@ -596,10 +631,22 @@ function skillsBlock(stats) {
   const body = entries.length
     ? `<div class="skill-chips">${entries.map(([name, count]) => `<span class="skill-chip"><code>${esc(name)}</code><b>${count}</b></span>`).join("")}</div>`
     : `<p class="empty">No skill runs yet. Log one with <code>cairn vibe skill /refine "6.5 -> 8.7"</code> or type <code>/council …</code> in a session's log.</p>`;
-  return `<section class="column-block vibe-skills">
-    <header><h2>Skills</h2><span class="muted small">${plural(entries.reduce((t, [, c]) => t + c, 0), "run")}</span></header>
+  const runs = plural(entries.reduce((t, [, c]) => t + c, 0), "run");
+  return sideBlock("vibe-skills", "Skills", runs, body, !entries.length);
+}
+
+// On a phone an empty block is one tappable line, so the page doesn't scroll through empty forms and hints
+// before the agent instructions. Desktop always shows the full block.
+function sideBlock(cls, title, meta, body, empty) {
+  const narrow = typeof matchMedia === "function" && matchMedia("(max-width: 600px)").matches;
+  if (!(empty && narrow)) {
+    return `<section class="column-block ${cls}"><header><h2>${title}</h2><span class="muted small">${meta}</span></header>${body}</section>`;
+  }
+  const open = Boolean((state.vibeOpenBlocks || {})[cls]);
+  return `<details class="column-block ${cls} vibe-fold" data-block="${cls}"${open ? " open" : ""}>
+    <summary><h2>${title}</h2><span class="muted small">${meta}</span></summary>
     ${body}
-  </section>`;
+  </details>`;
 }
 
 // "–13:28" when the session ended later the same day; nothing while it is live or when it ran past midnight.
@@ -673,10 +720,13 @@ function sessionsBlock(sessions, stats) {
     const minutes = core.unionMinutes(notes.flatMap(core.sessionSpans));
     const shipped = notes.filter((note) => note.status === "shipped").length;
     groups.push(`<div class="day-group${isFolded ? " folded" : ""}">
-      <button type="button" class="day-head" data-action="vibe-day" data-day="${esc(day)}" aria-expanded="${!isFolded}">
-        <span class="day-name">${icon("chevron", "sm")}${esc(dayLabel(day))}</span>
-        <span class="muted small">${plural(notes.length, "session")}${shipped && isFolded ? ` · ${shipped} ${OUTCOMES.shipped}` : ""}${minutes ? ` · <span title="Clock time: sessions that overlap count once">${duration(minutes)}</span>` : ""}</span>
-      </button>
+      <div class="day-bar">
+        <button type="button" class="day-head" data-action="vibe-day" data-day="${esc(day)}" aria-expanded="${!isFolded}">
+          <span class="day-name">${icon("chevron", "sm")}${esc(dayLabel(day))}</span>
+          <span class="muted small">${plural(notes.length, "session")}${shipped && isFolded ? ` · ${shipped} ${OUTCOMES.shipped}` : ""}${minutes ? ` · <span title="Clock time: sessions that overlap count once">${duration(minutes)}</span>` : ""}</span>
+        </button>
+        ${state.vibeJumped === day && !isFolded ? `<button type="button" class="btn sm ghost day-back" data-action="vibe-to-chart" data-day="${esc(day)}" title="Back to the chart">${icon("chevron", "sm")} Chart</button>` : ""}
+      </div>
       ${isFolded ? "" : `<div class="rows">${visible.map((note) => sessionRow(note, filter === "all" && present.length > 1)).join("")}</div>`}
     </div>`);
   }
@@ -794,12 +844,15 @@ export function vibeView() {
         ${sessionsBlock(sessions, stats)}
       </div>
       <div>
-      <section class="column-block vibe-feedback">
-        <header><h2>Feedback</h2><span class="muted small">${stats.feedback_open} open · ${stats.feedback_addressed} addressed</span></header>
-        ${ratingSummary(stats)}
+      ${sideBlock(
+        "vibe-feedback",
+        "Feedback",
+        feedback.length ? `${stats.feedback_open} open · ${stats.feedback_addressed} addressed` : "none yet",
+        `${ratingSummary(stats)}
         ${feedbackForm(sessions)}
-        ${feedback.length ? `<div class="fb-list">${feedback.slice(0, 40).map(feedbackRow).join("")}</div>` : `<p class="empty">No feedback yet. Capture it here, with <code>feedback:</code> in the bar above, or <code>cairn feedback "…" --rating 4</code>.</p>`}
-      </section>
+        ${feedback.length ? `<div class="fb-list">${feedback.slice(0, 40).map(feedbackRow).join("")}</div>` : `<p class="empty">No feedback yet. Capture it here, with <code>feedback:</code> in the bar above, or <code>cairn feedback "…" --rating 4</code>.</p>`}`,
+        !feedback.length,
+      )}
       ${skillsBlock(stats)}
       </div>
     </div>
