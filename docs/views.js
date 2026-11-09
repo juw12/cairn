@@ -202,6 +202,12 @@ export function notesView() {
     .filter((n) => !state.notesTag || n.tags.includes(state.notesTag));
   const items = (query ? searchNotes(filtered, query) : filtered).sort(starred && !query ? (a, b) => starred.indexOf(a.path) - starred.indexOf(b.path) : byRecent);
   const layout = state.notesLayout === "folders" ? "folders" : "list";
+  const pageKey = [state.notesFilter, state.notesTag, query, layout].join("\u0000");
+  if (state.notesMore?.key !== pageKey) state.notesMore = { key: pageKey, limit: NOTES_PAGE };
+  const shown = state.notesMore.limit;
+  const more = layout === "list" && items.length > shown
+    ? `<div class="list-more"><button class="btn" data-action="notes-more">Show ${Math.min(NOTES_PAGE, items.length - shown)} more</button><span class="muted">${shown} of ${items.length}</span></div>`
+    : "";
   const empty = starred && !query
     ? emptyState("star", "No bookmarks yet", "Open a note and press the star to keep it one click away.")
     : emptyState("search", "Nothing matches", "Try another word, or clear the filters. Search understands tag:, path:, file:, type:, status:, \"exact phrase\" and -exclude.");
@@ -219,7 +225,14 @@ export function notesView() {
     ${query ? `<p class="muted search-summary">${plural(items.length, "note")} match <code>${esc(query)}</code></p>` : ""}
     ${layout === "folders"
       ? `<div class="card tree" id="notes-tree">${items.length ? folderHtml(folderTree(items)) : empty}</div>`
-      : `<div class="card list" id="notes-list">${items.length ? items.map(listRow).join("") : empty}</div>`}`;
+      : `<div class="card list" id="notes-list">${items.length ? items.slice(0, shown).map(listRow).join("") : empty}</div>${more}`}`;
+}
+
+// Big vaults: render the list a page at a time (a new filter or search starts again at one page).
+const NOTES_PAGE = 300;
+
+export function showMoreNotes() {
+  state.notesMore = { key: state.notesMore?.key, limit: (state.notesMore?.limit || NOTES_PAGE) + NOTES_PAGE };
 }
 
 export function journal() {
@@ -282,7 +295,55 @@ export function contextView() {
     `<button class="btn" data-action="copy-context">${icon("copy")} Copy</button><button class="btn primary" data-action="save-context">${icon("save")} Save to brain/CONTEXT.md</button>`)}
     <div class="callout" style="margin-bottom:16px">${icon("terminal")}<div>Tell your assistant: <strong>“Read brain/CONTEXT.md before you start.”</strong> Or add that line to <code>AGENTS.md</code>, <code>CLAUDE.md</code> or <code>.github/copilot-instructions.md</code> so it happens every time. Regenerate after big changes; <code>cairn context</code> does the same from the terminal.</div></div>
     <div class="toolbar"><div class="segmented" role="tablist" aria-label="View"><button class="${state.contextMode === "preview" ? "on" : ""}" data-context-mode="preview">Preview</button><button class="${state.contextMode === "raw" ? "on" : ""}" data-context-mode="raw">Markdown</button></div><span class="muted" style="margin-left:auto;font-size:12.5px">${saved} · ${pack.split("\n").length} lines</span></div>
-    <section class="card">${body}</section>`;
+    <section class="card">${body}</section>
+    ${mcpCard()}`;
+}
+
+// ------------------------------------------------------------ MCP: let an assistant query the brain directly
+
+export const MCP_CLIENTS = [
+  ["claude", "Claude Desktop / Cursor"],
+  ["vscode", "VS Code / Copilot"],
+  ["opencode", "OpenCode"],
+  ["claude-code", "Claude Code"],
+];
+
+const MCP_FILES = {
+  claude: "<code>claude_desktop_config.json</code> or the repo’s <code>.cursor/mcp.json</code>",
+  vscode: "<code>.vscode/mcp.json</code>",
+  opencode: "<code>opencode.json</code>",
+  "claude-code": "a terminal (once per machine)",
+};
+
+/** The text to paste into an MCP client, built from the running server's entry (null outside server mode). */
+export function mcpSnippet(client = state.mcpClient || "claude", entry = state.info.mcp) {
+  if (!entry) return "cairn mcp --print-config";
+  const { name, command, args, env } = entry;
+  if (client === "vscode") return JSON.stringify({ servers: { [name]: { type: "stdio", command, args, env } } }, null, 2);
+  if (client === "opencode") return JSON.stringify({ mcp: { [name]: { type: "local", command: [command, ...args], environment: env, enabled: true } } }, null, 2);
+  if (client === "claude-code") {
+    const quote = (value) => (/[\s"]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value);
+    const envFlags = Object.entries(env || {}).map(([key, value]) => `--env ${key}=${quote(value)}`).join(" ");
+    return `claude mcp add ${name} ${envFlags} -- ${[command, ...args].map(quote).join(" ")}`.replace(/\s+--\s/, " -- ");
+  }
+  return JSON.stringify({ mcpServers: { [name]: { command, args, env } } }, null, 2);
+}
+
+function mcpCard() {
+  const client = state.mcpClient || "claude";
+  const entry = state.info.mode === "server" ? state.info.mcp : null;
+  const tabs = MCP_CLIENTS.map(([id, label]) => `<button class="${id === client ? "on" : ""}" data-mcp-client="${id}" aria-pressed="${id === client}">${label}</button>`).join("");
+  const how = entry
+    ? `Paste this into ${MCP_FILES[client]}, then restart the assistant. It can then search, read and update this brain itself.`
+    : `Run <code>cairn mcp --print-config</code> in the project folder: it prints this snippet filled in for your machine. (This page can’t see local paths outside <code>cairn serve</code>.)`;
+  return `<section class="card mcp-card" style="margin-top:16px;padding:18px 22px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h2 style="margin:0;font-size:16px">Connect your assistant (MCP)</h2>
+        <button class="btn" style="margin-left:auto" data-action="copy-mcp">${icon("copy")} Copy</button></div>
+      <p class="muted" style="margin:0 0 12px">Better than a file: with <code>cairn mcp</code> running, Claude, Cursor, Copilot or OpenCode can search notes, read backlinks, capture ideas and log decisions as you work. Local, no API keys; add <code>--read-only</code> to keep it look-only.</p>
+      ${entry ? `<div class="segmented" role="group" aria-label="Assistant" style="margin-bottom:10px">${tabs}</div>` : ""}
+      <p style="margin:0 0 8px;font-size:13px">${how}</p>
+      <pre class="pre-box">${esc(mcpSnippet(client, entry))}</pre>
+    </section>`;
 }
 
 // ------------------------------------------------------------ the cairn: one stone per finished task

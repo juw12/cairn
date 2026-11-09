@@ -39,7 +39,7 @@
     </td>
     <td width="33%" valign="top">
       <b>Made for AI assistants too</b><br>
-      One click writes <code>brain/CONTEXT.md</code>, a project brief Copilot, Claude, Cursor or ChatGPT can read. No API keys.
+      <code>cairn mcp</code> lets Claude, Cursor, Copilot or OpenCode search and update the brain; <code>brain/CONTEXT.md</code> is a one-page brief for the rest. No API keys.
     </td>
   </tr>
 </table>
@@ -386,6 +386,7 @@ cairn log                               # show today's log (--day yesterday, --d
 cairn list --type task --status doing
 cairn todos                              # TODO/FIXME/HACK comments in the code
 cairn context                            # write brain/CONTEXT.md
+cairn mcp                                # MCP server for Claude, Cursor, Copilot, OpenCode (--print-config, --read-only)
 cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ and sync both ways
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
@@ -431,6 +432,26 @@ Read brain/CONTEXT.md before starting. Decisions in brain/decisions/ marked "acc
 ```
 
 `CONTEXT.md` also has a short **Lately** section with the last three days of the journal, so the assistant knows what you were just doing.
+
+### Connect your AI assistant (MCP)
+
+`cairn mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so the assistant can query the brain
+itself instead of reading one file. Standard library only, local, no API keys.
+
+```bash
+cairn mcp --print-config     # ready-to-paste config for Claude Desktop, Cursor, VS Code, OpenCode and Claude Code
+```
+
+The **Context** page shows the same snippet, filled in for your machine, when you run `cairn serve`.
+
+| Tool | What the assistant can do |
+|---|---|
+| `search`, `read_note`, `list_notes` | Find notes by text, type, status or tag; read one with its backlinks |
+| `context`, `recent`, `code_todos` | The project brief, what changed lately, `TODO`/`FIXME` comments in the code |
+| `capture`, `log`, `update_note` | Add an idea/task/decision, write to today's journal, change status or tags (refuses to overwrite newer edits) |
+
+Every note is also a resource (`cairn://brain/<path>`), and the `project-brief` prompt starts a session from the context pack.
+Add `--read-only` to hide the three write tools.
 
 ## Why
 

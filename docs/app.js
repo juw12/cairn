@@ -7,7 +7,7 @@ import * as gh from "./github.js";
 import * as auth from "./auth.js";
 import { $, LOGO, SPARKS, TYPE_META, ask, icon, plural, toast, today } from "./ui.js";
 import { GUIDE_KEY, LAST_BRAIN_KEY, REPO_URL, VIEWS, createNote, deleteNote, guide, loadAll, markGuide, noteByPath, readOnly, refreshGit, refreshTodos, state } from "./state.js";
-import { board, codeView, contextView, decisions, home, ideas, moveNote, notesView, wireBoard } from "./views.js";
+import { board, codeView, contextView, decisions, home, ideas, mcpSnippet, moveNote, notesView, showMoreNotes, wireBoard } from "./views.js";
 import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
@@ -231,6 +231,11 @@ function wireGlobal() {
       state.contextMode = contextMode.dataset.contextMode;
       return renderView();
     }
+    const mcpClient = target.closest("[data-mcp-client]");
+    if (mcpClient) {
+      state.mcpClient = mcpClient.dataset.mcpClient;
+      return renderView();
+    }
     if (state.view === "plugins" && (await handlePluginClick(target))) return;
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
@@ -288,6 +293,11 @@ function wireGlobal() {
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
       "copy-context": () => copyText(core.contextPack(state.notes, state.info.project, today()), "Context pack copied"),
       "save-context": saveContext,
+      "copy-mcp": () => copyText(mcpSnippet(), "MCP setup copied"),
+      "notes-more": () => {
+        showMoreNotes();
+        renderView();
+      },
       commit: commitBrain,
       sync: syncBrain,
       settings: openSettings,

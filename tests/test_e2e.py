@@ -1,5 +1,6 @@
 """Gates B2 and B5: the real web app in a headless browser (demo mode, GitHub Pages runtime)."""
 
+import json
 import os
 import sys
 import unittest
@@ -58,6 +59,60 @@ class EndToEndTests(unittest.TestCase):
     def go(self, page, view):
         page.click(f'#nav [data-go="{view}"]')
         page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
+
+    def test_notes_list_pages_big_vaults(self):
+        page = self.open()
+        page.evaluate("""() => {
+            const s = window.cairn.state;
+            const extra = Array.from({ length: 650 }, (_, i) => ({
+                ...s.notes[0], path: `notes/bulk-${i}.md`, slug: `bulk-${i}`, title: `Bulk ${i}`, tags: [], mtime: i,
+            }));
+            s.notes = s.notes.concat(extra);
+        }""")
+        self.go(page, "notes")
+        total = page.evaluate("() => window.cairn.state.notes.length")
+        self.assertEqual(page.locator("#notes-list .row, #notes-list > *").count(), 300)
+        self.assertIn(f"300 of {total}", page.inner_text(".list-more"))
+        page.click('[data-action="notes-more"]')
+        self.assertEqual(page.locator("#notes-list > *").count(), 600)
+        page.click('[data-action="notes-more"]')
+        self.assertEqual(page.locator("#notes-list > *").count(), total)
+        self.assertEqual(page.locator(".list-more").count(), 0)
+        # A search starts again from one page.
+        page.fill("#notes-search", "bulk")
+        page.wait_for_function("() => document.querySelectorAll('#notes-list > *').length === 300")
+        self.assertEqual(self.errors, [])
+
+    def test_context_view_offers_mcp_setup_for_each_assistant(self):
+        page = self.open()
+        self.go(page, "context")
+        # Outside `cairn serve` the page can't know local paths, so it points at the CLI instead.
+        self.assertIn("cairn mcp --print-config", page.inner_text(".mcp-card pre"))
+        self.assertEqual(page.locator("[data-mcp-client]").count(), 0)
+        # In server mode /api/info carries the launch entry; every client gets a ready-to-paste snippet.
+        entry = {
+            "name": "cairn-demo",
+            "command": "C:\\Program Files\\Python313\\python.exe",
+            "args": ["-m", "cairn", "--root", "C:\\work\\my app", "mcp"],
+            "env": {"PYTHONPATH": "C:\\tools\\cairn"},
+        }
+        page.evaluate("(e) => { Object.assign(window.cairn.state.info, { mode: 'server', mcp: e }); window.cairn.rerender(); }", entry)
+        snippet = json.loads(page.inner_text(".mcp-card pre"))
+        self.assertEqual(snippet["mcpServers"]["cairn-demo"]["args"], entry["args"])
+        page.click('[data-mcp-client="vscode"]')
+        snippet = json.loads(page.inner_text(".mcp-card pre"))
+        self.assertEqual(snippet["servers"]["cairn-demo"]["type"], "stdio")
+        self.assertIn(".vscode/mcp.json", page.inner_text(".mcp-card"))
+        page.click('[data-mcp-client="opencode"]')
+        snippet = json.loads(page.inner_text(".mcp-card pre"))
+        self.assertEqual(snippet["mcp"]["cairn-demo"]["command"][0], entry["command"])
+        self.assertEqual(snippet["mcp"]["cairn-demo"]["environment"], entry["env"])
+        page.click('[data-mcp-client="claude-code"]')
+        line = page.inner_text(".mcp-card pre")
+        self.assertTrue(line.startswith("claude mcp add cairn-demo --env PYTHONPATH="), line)
+        self.assertIn(' -- "C:\\Program Files\\Python313\\python.exe" -m cairn --root "C:\\work\\my app" mcp', line)
+        self.assertEqual(page.get_attribute('[data-mcp-client="claude-code"]', "aria-pressed"), "true")
+        self.assertEqual(self.errors, [])
 
     def test_demo_brain_is_the_same_whatever_the_date(self):
         import datetime

@@ -415,12 +415,28 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--vector-process", action="append", help="watch: process name(s) that mean Vector is open (default Vector.exe)")
     vibe_parser.add_argument("--install", action="store_true", help="watch: start the watcher when you sign in to Windows")
     vibe_parser.add_argument("--uninstall", action="store_true", help="watch: stop starting it at sign-in")
+    mcp_parser = sub.add_parser(
+        "mcp",
+        help="let AI assistants (Claude, Cursor, Copilot, OpenCode) read and write the brain over MCP",
+        description="Model Context Protocol server on stdio. Point your assistant at it with the snippet from --print-config.",
+    )
+    mcp_parser.add_argument("--read-only", action="store_true", help="leave out the tools that write")
+    mcp_parser.add_argument("--print-config", action="store_true", help="print the config to paste into MCP clients, then exit")
     feedback_parser = sub.add_parser("feedback", help='record feedback: cairn feedback "toggle is hard to find" --rating 3')
     feedback_parser.add_argument("text", nargs="+")
     feedback_parser.add_argument("--rating", type=int, choices=range(1, 6), metavar="1-5")
     feedback_parser.add_argument("--from", dest="source", help="who said it")
     feedback_parser.add_argument("--about", help="session or note it is about (default: the latest session)")
     return parser
+
+
+def cmd_mcp(brain: Brain, args) -> int:
+    from . import mcp
+
+    if args.print_config:
+        print(mcp.client_config(brain, args.read_only))
+        return 0
+    return mcp.serve(brain, args.read_only)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -440,6 +456,7 @@ def main(argv: list[str] | None = None) -> int:
         "publish": cmd_publish,
         "vibe": cmd_vibe,
         "feedback": cmd_feedback,
+        "mcp": cmd_mcp,
         "serve": cmd_serve,
         "desktop": cmd_desktop,
         None: cmd_serve,

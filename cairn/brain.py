@@ -198,6 +198,10 @@ class Brain:
         if not self.dir.exists():
             return []
         out = []
+        # Re-reading every file on each call is what makes a big vault slow (the MCP server and the
+        # local API call this per request), so unchanged files come from a cache keyed on mtime + size.
+        previous = getattr(self, "_text_cache", {})
+        cache = {}
         for current, dirs, names in os.walk(self.dir):
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
             for name in sorted(names):
@@ -205,10 +209,15 @@ class Brain:
                     continue
                 path = Path(current) / name
                 try:
-                    text = _read_text(path)
+                    stat = path.stat()
+                    stamp = (stat.st_mtime_ns, stat.st_size)
+                    hit = previous.get(str(path))
+                    text = hit[1] if hit and hit[0] == stamp else _read_text(path)
                 except (OSError, UnicodeDecodeError):
                     continue
-                out.append({"path": self.relative(path), "text": text, "mtime": _mtime_ms(path)})
+                cache[str(path)] = (stamp, text)
+                out.append({"path": self.relative(path), "text": text, "mtime": stamp[0] // 1_000_000})
+        self._text_cache = cache
         return sorted(out, key=lambda item: item["path"])
 
     def notes(self) -> list[dict]:

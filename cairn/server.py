@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, vibe
+from . import __version__, mcp, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -141,6 +141,7 @@ class Handler(BaseHTTPRequestHandler):
                     "git": brain.git_available(),
                     "desktop": self.desktop is not None,
                     "path": str(brain.root) if self.desktop is not None else None,
+                    "mcp": mcp.server_entry(brain),
                 })
             elif route == "/api/files":
                 self._send_json({"files": brain.files()})

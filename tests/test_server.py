@@ -139,5 +139,53 @@ class VaultFolderTests(unittest.TestCase):
         self.assertEqual((self.tmp / "Projects" / "Alpha.md").read_bytes(), updated.encode("utf-8"))
 
 
+class BrainCacheTests(unittest.TestCase):
+    """files() caches text by mtime + size; edits made outside Cairn must still show up."""
+
+    def test_external_edits_deletes_and_new_files_are_seen(self):
+        import os
+        import tempfile
+
+        from cairn.brain import Brain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            brain = Brain(tmp)
+            brain.init()
+            note = brain.dir / "ideas" / "alpha.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_bytes(b"---\ntitle: Alpha\ntype: idea\n---\nfirst\n")
+            texts = {f["path"]: f["text"] for f in brain.files()}
+            self.assertIn("first", texts["ideas/alpha.md"])
+            # Same size, different bytes, newer mtime: an editor saving over the file.
+            note.write_bytes(b"---\ntitle: Alpha\ntype: idea\n---\nsecnd\n")
+            stat = note.stat()
+            os.utime(note, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+            texts = {f["path"]: f["text"] for f in brain.files()}
+            self.assertIn("secnd", texts["ideas/alpha.md"])
+            (brain.dir / "ideas" / "beta.md").write_bytes(b"---\ntitle: Beta\ntype: idea\n---\n")
+            note.unlink()
+            paths = [f["path"] for f in brain.files()]
+            self.assertIn("ideas/beta.md", paths)
+            self.assertNotIn("ideas/alpha.md", paths)
+
+    def test_unchanged_files_are_not_read_again(self):
+        import tempfile
+        from unittest import mock
+
+        from cairn import brain as brain_module
+        from cairn.brain import Brain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            brain = Brain(tmp)
+            brain.init()
+            for index in range(5):
+                brain.create("idea", f"Idea {index}", [], "", "2026-11-09")
+            first = brain.files()
+            with mock.patch.object(brain_module, "_read_text", wraps=brain_module._read_text) as reads:
+                second = brain.files()
+            self.assertEqual(reads.call_count, 0)
+            self.assertEqual(first, second)
+
+
 if __name__ == "__main__":
     unittest.main()
