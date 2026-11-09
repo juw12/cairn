@@ -463,7 +463,7 @@ function figures(stats) {
   const dash = "–";
   const parallel = stats.parallel && stats.parallel >= 1.1;
   return `<div class="figures vibe-figures">
-    ${figure(stats.sessions, stats.sessions === 1 ? "session" : "sessions", `${stats.shipped} shipped · ${stats.partial} partial · ${stats.dropped} dropped${stats.done ? ` · ${stats.done} with no code change` : ""}`)}
+    ${figure(stats.sessions, stats.sessions === 1 ? "session" : "sessions", `${stats.shipped} ${OUTCOMES.shipped} · ${stats.partial} partial · ${stats.dropped} dropped${stats.done ? ` · ${stats.done} with no code change` : ""}`)}
     ${figure(
       duration(stats.minutes),
       "time vibing",
@@ -485,13 +485,13 @@ function figures(stats) {
 // ship rate over "finished" sessions would always read 100%. Show the count against every ended session.
 function shippedFigure(stats, figure, dash) {
   const ended = stats.shipped + stats.partial + stats.dropped + stats.done;
-  if (!ended) return figure(dash, "shipped", "No finished sessions yet.");
+  if (!ended) return figure(dash, OUTCOMES.shipped, "No finished sessions yet.");
   const share = Math.round((stats.shipped / ended) * 100);
   const handRated = stats.partial + stats.dropped;
   const title = handRated
     ? `Ship rate ${stats.ship_rate}% of sessions you ended with a result (shipped, partial or dropped).`
     : "Sessions that committed or changed code in their folder.";
-  return figure(stats.shipped, "shipped", title, stats.shipped ? `${share}% of ${ended} · code changed` : "no code changes seen yet");
+  return figure(stats.shipped, OUTCOMES.shipped, title, stats.shipped ? `${share}% of ${ended}${OUTCOMES.shipped === "shipped" ? " · code changed" : " · commits or edits seen"}` : "no code changes seen yet");
 }
 
 function activity(stats, sessions = []) {
@@ -532,7 +532,7 @@ function activity(stats, sessions = []) {
     .join("");
   const active = days.filter((d) => d.sessions).length;
   return `<section class="column-block vibe-activity">
-    <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> shipped <i class="key none"></i> no code change${Object.keys(noGit).length ? ` <i class="key nogit"></i> no git` : ""}</span></header>
+    <header><h2>Last ${days.length} days</h2><span class="muted small">${plural(active, "day")} with sessions · <i class="key shipped"></i> ${OUTCOMES.shipped} <i class="key none"></i> no code change${Object.keys(noGit).length ? ` <i class="key nogit"></i> no git` : ""}</span></header>
     <svg viewBox="0 0 100 62" preserveAspectRatio="none" role="img" aria-label="${byMinutes ? "Minutes" : "Sessions"} per day for the last ${days.length} days">${bars}</svg>
     <div class="axis"><span>${esc(new Date(`${days[0].day}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" }))}</span>${peakLabel(days, byMinutes, value)}<span>today</span></div>
   </section>`;
@@ -633,7 +633,7 @@ function sessionsBlock(sessions, stats) {
     groups.push(`<div class="day-group${isFolded ? " folded" : ""}">
       <button type="button" class="day-head" data-action="vibe-day" data-day="${esc(day)}" aria-expanded="${!isFolded}">
         <span class="day-name">${icon("chevron", "sm")}${esc(dayLabel(day))}</span>
-        <span class="muted small">${plural(notes.length, "session")}${shipped && isFolded ? ` · ${shipped} shipped` : ""}${minutes ? ` · <span title="Clock time: sessions that overlap count once">${duration(minutes)}</span>` : ""}</span>
+        <span class="muted small">${plural(notes.length, "session")}${shipped && isFolded ? ` · ${shipped} ${OUTCOMES.shipped}` : ""}${minutes ? ` · <span title="Clock time: sessions that overlap count once">${duration(minutes)}</span>` : ""}</span>
       </button>
       ${isFolded ? "" : `<div class="rows">${visible.map((note) => sessionRow(note, filter === "all" && present.length > 1)).join("")}</div>`}
     </div>`);
@@ -654,7 +654,7 @@ function sessionsBlock(sessions, stats) {
     : "";
   const chips = sourceChips || outcomeChips ? `<div class="vibe-filters">${sourceChips}${outcomeChips}</div>` : "";
   const unknown = sessions.filter((note) => outcomeOf(note) === "unknown").length;
-  const results = [["shipped", stats.shipped], ["partial", stats.partial], ["dropped", stats.dropped], ["no code change", stats.done - unknown], ["no git", unknown]]
+  const results = [[OUTCOMES.shipped, stats.shipped], ["partial", stats.partial], ["dropped", stats.dropped], ["no code change", stats.done - unknown], ["no git", unknown]]
     .filter(([, n]) => n)
     .map(([label, n]) => `${n} ${label}`)
     .join(" · ");
@@ -730,6 +730,10 @@ function feedbackForm(sessions) {
 export function vibeView() {
   const stats = core.vibeStats(state.notes, today());
   const sessions = state.notes.filter((n) => n.type === "session").sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
+  // Detected sessions only "ship" in the sense that code changed; call it that unless a person ended one as shipped.
+  const handShipped = sessions.some((note) => sessionSource(note) === "logged" && note.status === "shipped");
+  OUTCOMES.shipped = handShipped ? "shipped" : "code changed";
+  DOT_LABEL.shipped = handShipped ? "Shipped: changed or committed code" : "Code changed: commits or line changes seen in the session's folder";
   const order = { new: 0, planned: 1, addressed: 2, wontfix: 3 };
   const feedback = state.notes
     .filter((n) => n.type === "feedback")
