@@ -414,12 +414,21 @@ def profile_text(brain: Brain) -> str:
 
 
 def ensure_profile(brain: Brain, body: str = "") -> tuple[str, bool]:
-    """Create notes/precedent-profile.md from `body` (or the template). Never overwrites."""
+    """Create notes/precedent-profile.md from `body` (or the template).
+
+    Never overwrites a profile someone wrote; a profile that is still the untouched template is
+    replaced when real content arrives (e.g. moved in from the old skill).
+    """
+    mtime = None
     if brain.resolve(PROFILE_PATH).exists():
-        return PROFILE_PATH, False
+        current = brain.read(PROFILE_PATH)
+        untouched = core.parse_note(current["text"])["body"].strip() == PROFILE_TEMPLATE.strip()
+        if not (body.strip() and untouched):
+            return PROFILE_PATH, False
+        mtime = current["mtime"]
     meta = {"title": "Precedent profile", "type": "note", "tags": ["precedent"], "created": dt.date.today().isoformat()}
     text = core.serialize_note(meta, (body.strip() or PROFILE_TEMPLATE).rstrip() + "\n")
-    brain.write(PROFILE_PATH, text, None)
+    brain.write(PROFILE_PATH, text, mtime)
     return PROFILE_PATH, True
 
 

@@ -169,6 +169,15 @@ class PrecedentTests(HomeTestCase):
         self.assertIn("Likes it shipped.", precedent.profile_text(self.brain))
 
 
+    def test_template_profile_is_replaced_but_a_written_one_is_kept(self):
+        precedent.ensure_profile(self.brain)
+        _, replaced = precedent.ensure_profile(self.brain, "## Who\n\nReal profile.\n")
+        self.assertTrue(replaced)
+        self.assertIn("Real profile.", precedent.profile_text(self.brain))
+        _, again = precedent.ensure_profile(self.brain, "## Who\n\nSomething else.\n")
+        self.assertFalse(again)
+        self.assertIn("Real profile.", precedent.profile_text(self.brain))
+
 class FakeEngine:
     def __init__(self, replies):
         self.replies = list(replies)
