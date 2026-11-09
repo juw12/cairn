@@ -434,6 +434,7 @@ class Autopilot:
         self.current: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._beat_thread: threading.Thread | None = None
         self.owner = f"{os.getpid()}-{uuid.uuid4().hex[:6]}"
 
     # -- single worker per machine
@@ -453,18 +454,35 @@ class Autopilot:
         if _load(self._lock_path(), {}).get("owner") == self.owner:
             self._lock_path().unlink(missing_ok=True)
 
+    def beat(self) -> None:
+        """Refresh the claim if it is ours, so a long round never looks abandoned."""
+        if _load(self._lock_path(), {}).get("owner") == self.owner:
+            _save(self._lock_path(), {"owner": self.owner, "pid": os.getpid(), "at": time.time()})
+
+    def _heartbeat(self) -> None:
+        while not self._stop.wait(HEARTBEAT_SECONDS):
+            try:
+                self.beat()
+            except OSError:
+                pass
+
     # -- lifecycle
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        with LOCK:
-            job_list = jobs()
-            for job in job_list:
-                if job["status"] == "running":
-                    job["status"] = "queued"
-            _save_jobs(job_list)
+        if self.claim():
+            # Only the worker that holds the claim may take over jobs a crashed run left as running;
+            # a second Cairn must not touch the job another worker is busy with.
+            with LOCK:
+                job_list = jobs()
+                for job in job_list:
+                    if job["status"] == "running":
+                        job["status"] = "queued"
+                _save_jobs(job_list)
         self._thread = threading.Thread(target=self._loop, name="cairn-autopilot", daemon=True)
         self._thread.start()
+        self._beat_thread = threading.Thread(target=self._heartbeat, name="cairn-autopilot-heartbeat", daemon=True)
+        self._beat_thread.start()
 
     def shutdown(self) -> None:
         self._stop.set()
