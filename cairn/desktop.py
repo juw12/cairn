@@ -37,7 +37,7 @@ from pathlib import Path
 
 from . import __version__, watch
 from .brain import NO_WINDOW, Brain, SyncError, clone_repo, repo_folder_name
-from .server import make_server, switch_brain
+from .server import attach_autopilot, make_server, switch_brain
 from .winshell import AUMID, stamp_shortcut, start_menu_shortcut
 
 APP_ROOT = Path(__file__).resolve().parent.parent  # the git checkout the installer made
@@ -897,6 +897,7 @@ class DesktopApp:
 
         port = PORT if wait_for_port(PORT, 15) else 0
         self.server = make_server(brain, port=port, desktop=self.hooks)
+        self.autopilot = attach_autopilot(self.server, brain)
         self.hooks.server = self.server
         self.hooks.pick_folder = self.pick_folder
         self.hooks.request_restart = self.restart
@@ -922,6 +923,7 @@ class DesktopApp:
             self.tray.stop()
         except Exception:
             pass
+        self.autopilot.shutdown()
         self.server.shutdown()
         self.server.server_close()
         log("restarting" if self.restart_requested else "quit")

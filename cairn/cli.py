@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import sys
 import time
@@ -422,6 +423,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mcp_parser.add_argument("--read-only", action="store_true", help="leave out the tools that write")
     mcp_parser.add_argument("--print-config", action="store_true", help="print the config to paste into MCP clients, then exit")
+    precedent_parser = sub.add_parser(
+        "precedent",
+        help="give a goal once; get what you also asked for after similar goals (your own history)",
+        description="brief GOAL | learn | log GOAL DELIVERED [CORRECTION] | queue TEXT [--auto] | next | init | install",
+    )
+    precedent_parser.add_argument("action", choices=["brief", "learn", "log", "queue", "next", "init", "install"])
+    precedent_parser.add_argument("text", nargs="*", help="the goal / the queue item / for log: goal, delivered, correction")
+    precedent_parser.add_argument("--auto", action="store_true", help="queue: safe to run unattended")
+    precedent_parser.add_argument("--needs-me", action="store_true", help="queue: waiting on you (credential, payment, sending)")
+    precedent_parser.add_argument("--k", type=int, default=5, help="brief: how many precedents")
+    precedent_parser.add_argument("--import-skill", default="", help="init: a standalone precedent skill folder to move in")
+    precedent_parser.add_argument("--queue-file", default="", help="init: an old Queue.md whose open items become #queue tasks")
+    precedent_parser.add_argument("--agent-app", default="", help="init: the old Precedent Agent app folder (job history)")
+    autopilot_parser = sub.add_parser(
+        "autopilot",
+        help="run your coding agent round after round on a goal, then on #queue #auto tasks",
+        description="status | on | off | add GOAL | run | set KEY=VALUE ...",
+    )
+    autopilot_parser.add_argument("action", nargs="?", default="status", choices=["status", "on", "off", "add", "run", "set"])
+    autopilot_parser.add_argument("text", nargs="*")
+    autopilot_parser.add_argument("--workdir", default="", help="add: where the agent works (default: a new folder per goal)")
     feedback_parser = sub.add_parser("feedback", help='record feedback: cairn feedback "toggle is hard to find" --rating 3')
     feedback_parser.add_argument("text", nargs="+")
     feedback_parser.add_argument("--rating", type=int, choices=range(1, 6), metavar="1-5")
@@ -437,6 +459,120 @@ def cmd_mcp(brain: Brain, args) -> int:
         print(mcp.client_config(brain, args.read_only))
         return 0
     return mcp.serve(brain, args.read_only)
+
+
+def cmd_precedent(brain: Brain, args) -> int:
+    from . import precedent
+
+    text = " ".join(args.text).strip()
+    if args.action == "brief":
+        if precedent.library_age_days() is None:
+            print("(No precedent library yet: `cairn precedent learn` builds it from your history.)\n")
+        print(precedent.brief(brain, text, args.k))
+        return 0
+    if args.action == "learn":
+        report = precedent.learn(brain)
+        print(f"Learned {report['precedents']} past goals from {report['prompts']} prompts, "
+              f"{report['updates']} shipped notes, {report['lessons']} lessons -> {report['folder']}")
+        return 0
+    if args.action == "log":
+        if not args.text:
+            print('Usage: cairn precedent log "goal" "what you delivered" ["correction"]', file=sys.stderr)
+            return 2
+        parts = list(args.text) + ["", ""]
+        precedent.log_lesson(parts[0], parts[1], parts[2])
+        print("Logged.")
+        return 0
+    if args.action == "queue":
+        if not text:
+            for item in precedent.queue_items(brain):
+                flags = (" #auto" if item["auto"] else "") + (" #needs-me" if item["needs_me"] else "")
+                print(f"[{item['status']}] {item['title']}{flags}  (brain/{item['path']})")
+            return 0
+        note = precedent.queue_add(brain, text, auto=args.auto, needs_me=args.needs_me)
+        print(f"Queued: brain/{note['path']}")
+        return 0
+    if args.action == "next":
+        item = precedent.queue_next(brain, auto_only=args.auto)
+        if not item:
+            print("The queue is empty.")
+            return 0
+        print(f"{item['text']}\n(brain/{item['path']})")
+        return 0
+    if args.action == "init":
+        path, created = precedent.ensure_profile(brain)
+        report = {}
+        if args.import_skill or args.queue_file:
+            report = precedent.import_legacy(
+                brain, Path(args.import_skill) if args.import_skill else None,
+                Path(args.queue_file) if args.queue_file else None)
+        if args.agent_app:
+            from . import autopilot
+
+            report["jobs"] = autopilot.import_legacy_jobs(Path(args.agent_app))
+        print(f"Profile: brain/{path}" + (" (created; fill it in)" if created and not report.get("profile") else ""))
+        if report:
+            print("Moved in: " + ", ".join(f"{key} {value}" for key, value in report.items()))
+        return 0
+    if args.action == "install":
+        written = precedent.install_commands(brain)
+        print("\n".join(f"Wrote {path}" for path in written) or "No agent command folders found (Claude Code, OpenCode, Codex).")
+        return 0
+    return 2
+
+
+def cmd_autopilot(brain: Brain, args) -> int:
+    from . import autopilot
+
+    text = " ".join(args.text).strip()
+    if args.action == "on":
+        autopilot.update_settings({"enabled": True})
+        print("Autopilot on. It runs inside `cairn serve` / the desktop app, or here with `cairn autopilot run`.")
+        return 0
+    if args.action == "off":
+        autopilot.update_settings({"enabled": False})
+        print("Autopilot off. A round already running finishes first.")
+        return 0
+    if args.action == "add":
+        if not text:
+            print('Usage: cairn autopilot add "goal"', file=sys.stderr)
+            return 2
+        job = autopilot.create_job(text, args.workdir)
+        print(f"Queued job {job['id']}: {job['goal']}\nWorking folder: {job['workdir']}")
+        return 0
+    if args.action == "set":
+        changes = dict(pair.split("=", 1) for pair in args.text if "=" in pair)
+        for key, value in list(changes.items()):
+            if value.lower() in ("true", "false", "on", "off"):
+                changes[key] = value.lower() in ("true", "on")
+        print(json.dumps(autopilot.update_settings(changes), indent=2))
+        return 0
+    if args.action == "run":
+        autopilot.update_settings({"enabled": True})
+        worker = autopilot.Autopilot(brain)
+        worker.start()
+        print("Autopilot running (Ctrl+C to stop).")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            worker.shutdown()
+        return 0
+    state = autopilot.state()
+    config = state["settings"]
+    print(f"Autopilot: {'on' if config['enabled'] else 'off'}, engine {config['engine']}"
+          + ("" if state["engine_found"] else " (not found on PATH)"))
+    for job in state["jobs"][:10]:
+        print(f"  [{job['status']}] {job['goal'][:90]}  ({job['rounds']} rounds)")
+    queued = precedent_queue_count(brain)
+    print(f"Queue: {queued} #auto task(s) waiting." if queued else "Queue: no #auto tasks waiting.")
+    return 0
+
+
+def precedent_queue_count(brain: Brain) -> int:
+    from . import precedent
+
+    return sum(1 for item in precedent.queue_items(brain) if item["auto"] and not item["needs_me"])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -457,6 +593,8 @@ def main(argv: list[str] | None = None) -> int:
         "vibe": cmd_vibe,
         "feedback": cmd_feedback,
         "mcp": cmd_mcp,
+        "precedent": cmd_precedent,
+        "autopilot": cmd_autopilot,
         "serve": cmd_serve,
         "desktop": cmd_desktop,
         None: cmd_serve,

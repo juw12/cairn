@@ -1641,6 +1641,61 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 /* Notes list: "Show more" row under a long list */
 .list-more { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 14px 0 4px; }
 
+/* ---------------------------------------------------------------- autopilot */
+.ap-goal-form { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 18px; border-bottom: 1px solid var(--line); }
+.ap-goal-form textarea { height: auto; min-height: 58px; padding: 9px 10px; resize: vertical; font: inherit; line-height: 1.5; }
+.ap-goal-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ap-goal-row .input { flex: 1 1 260px; min-width: 0; }
+.ap-brief { margin-top: 14px; }
+.ap-brief summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.ap-figures .value.warn { color: var(--danger); }
+.ap-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 32px; }
+.ap-jobs { display: flex; flex-direction: column; max-height: 420px; overflow: auto; }
+.ap-job { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; row-gap: 2px; align-items: baseline; width: 100%; padding: 10px 8px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ap-job .pill { grid-row: span 2; align-self: start; margin-top: 1px; }
+.ap-job .ap-goal { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.ap-job:hover { background: var(--surface); }
+.ap-job.selected { background: var(--surface); box-shadow: inset 2px 0 0 var(--accent); }
+.ap-st { background: var(--surface-2); color: var(--ink-2); }
+.ap-st-running { background: var(--session-soft); color: var(--session); }
+.ap-st-done { background: var(--task-soft); color: var(--task); }
+.ap-st-blocked, .ap-st-error { background: var(--danger-soft); color: var(--danger); }
+.ap-detail { display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
+.ap-detail p { margin: 0; }
+.ap-detail-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.ap-detail-head h3 { margin: 0 0 2px; font-size: 15px; font-weight: 600; line-height: 1.35; }
+.ap-detail-head .mono { font-family: var(--mono); overflow-wrap: anywhere; margin: 0; }
+.ap-buttons { display: flex; gap: 6px; flex: none; }
+.ap-blocked { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-left: 2px solid var(--danger); background: var(--danger-soft); }
+.ap-log { min-height: 160px; max-height: 420px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--sunken); }
+.ap-queue-form { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; }
+.ap-queue-opts { display: flex; gap: 14px; align-items: center; }
+.ap-queue-opts .btn { margin-left: auto; }
+.ap-check { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); white-space: nowrap; cursor: pointer; }
+.ap-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--ink); }
+.ap-queue-list { list-style: none; margin: 0; padding: 0; }
+.ap-q { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.ap-q-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; text-decoration: none; }
+.ap-q-title:hover { text-decoration: underline; }
+.ap-q.needs-me .ap-q-title { color: var(--muted); }
+.ap-q-flags { display: flex; gap: 6px; align-items: center; flex: none; }
+.ap-q-flags .chip { height: 22px; font-size: 12px; }
+.ap-settings summary { cursor: pointer; list-style: none; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.ap-settings summary::-webkit-details-marker { display: none; }
+.ap-settings summary { display: flex; align-items: baseline; gap: 10px; }
+.ap-settings summary h2 { display: inline; }
+.ap-settings summary::after { content: "›"; margin-left: auto; font-size: 16px; color: var(--muted); transition: transform .15s; }
+.ap-settings[open] summary::after { transform: rotate(90deg); }
+.ap-settings form { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
+.ap-settings form > div:last-child { margin-top: 10px; }
+.ap-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ap-log-block { margin-top: 4px; }
+.ap-cols-bottom { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+@media (max-width: 900px) {
+  .ap-cols, .ap-cols-bottom { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .ap-nums { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* vibe round 5: one-line idle card, fold-all, chart peak, skills under feedback */
 .vibe-live.idle.compact { padding: 12px 0; }
 .vibe-live.idle.compact p { margin: 0; line-height: 1.6; }

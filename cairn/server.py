@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, mcp, vibe
+from . import __version__, autopilot, mcp, precedent, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -154,6 +154,19 @@ class Handler(BaseHTTPRequestHandler):
                 since = query.get("since", [""])[0]
                 base = query.get("base", [""])[0]
                 self._send_json({"files": vibe.vibe_files(brain), "git": vibe.git_activity(brain, since, base)})
+            elif route == "/api/autopilot":
+                self._send_json(autopilot.state(self.autopilot))
+            elif route == "/api/autopilot/log":
+                query = parse_qs(urlparse(self.path).query)
+                self._send_json(autopilot.read_log(query.get("id", [""])[0], int(query.get("since", ["0"])[0] or 0)))
+            elif route == "/api/precedent/brief":
+                query = parse_qs(urlparse(self.path).query)
+                goal = query.get("goal", [""])[0]
+                self._send_json({
+                    "brief": precedent.brief(brain, goal),
+                    "queue": precedent.queue_items(brain),
+                    "libraryAgeDays": precedent.library_age_days(),
+                })
             elif route == "/api/obsidian":
                 self._send_json(self.obsidian.status())
             elif route == "/api/desktop" and self.desktop is not None:
@@ -198,6 +211,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"created": self.brain.init()})
         if route.startswith("/api/obsidian/"):
             return self._obsidian(route.rsplit("/", 1)[-1])
+        if route.startswith("/api/autopilot/"):
+            return self._autopilot(route.rsplit("/", 1)[-1])
         if route == "/api/git/commit":
             try:
                 body = self._body()
@@ -218,6 +233,36 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(HTTPStatus.BAD_REQUEST, str(error))
         self._drain()
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+
+    def _autopilot(self, action: str):
+        """Goals, comments, stop/resume/delete and settings for the autopilot (state lives in ~/.cairn)."""
+        try:
+            body = self._body()
+            job_id = str(body.get("id", ""))
+            if action == "goal":
+                return self._send_json(autopilot.create_job(str(body.get("goal", "")), str(body.get("workdir", ""))))
+            if action == "comment":
+                job = autopilot.add_comment(job_id, str(body.get("text", "")))
+                return self._send_json(job) if job else self._error(HTTPStatus.NOT_FOUND, "no such job")
+            if action == "stop":
+                if self.autopilot:
+                    self.autopilot.stop_job(job_id)
+                else:
+                    autopilot.update_job(job_id, status="stopped")
+                return self._send_json({"ok": True})
+            if action == "resume":
+                return self._send_json(autopilot.update_job(job_id, status="queued", blocked_reason="") or {})
+            if action == "delete":
+                autopilot.delete_job(job_id)
+                return self._send_json({"ok": True})
+            if action == "settings":
+                return self._send_json(autopilot.update_settings(body))
+            if action == "queue":
+                note = precedent.queue_add(self.brain, str(body.get("text", "")), bool(body.get("auto")), bool(body.get("needsMe")))
+                return self._send_json(note)
+            return self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+        except (ValueError, TypeError, OSError) as error:
+            return self._error(HTTPStatus.BAD_REQUEST, str(error))
 
     def _obsidian(self, action: str):
         sync = self.obsidian
@@ -270,6 +315,7 @@ def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop
     handler.obsidian = ObsidianSync(brain)
     handler.sync_lock = threading.Lock()
     handler.desktop = desktop
+    handler.autopilot = None
     handler.web_dir = find_web_dir().resolve()
     server = ThreadingHTTPServer((host, port), handler)
     actual_port = server.server_address[1]
@@ -277,14 +323,25 @@ def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop
     return server
 
 
+def attach_autopilot(server: ThreadingHTTPServer, brain: Brain) -> "autopilot.Autopilot":
+    """Run the autopilot worker in this process (`cairn serve`, the desktop app). It idles while off."""
+    worker = autopilot.Autopilot(brain)
+    server.RequestHandlerClass.autopilot = worker
+    worker.start()
+    return worker
+
+
 def switch_brain(server: ThreadingHTTPServer, brain: Brain) -> None:
     """Serve a different folder from now on (the desktop app's "Open a brain")."""
     server.RequestHandlerClass.brain = brain
     server.RequestHandlerClass.obsidian = ObsidianSync(brain)
+    if server.RequestHandlerClass.autopilot is not None:
+        server.RequestHandlerClass.autopilot.brain = brain
 
 
 def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:
     server = make_server(brain, port)
+    worker = attach_autopilot(server, brain)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"Cairn {__version__} · {brain.project_name} · brain: {brain.dir}")
     print(f"Open {url}  (Ctrl+C to stop)")
@@ -295,4 +352,5 @@ def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
+        worker.shutdown()
         server.server_close()

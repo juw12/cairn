@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
         raise
     sync_playwright = None
 
-VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "context", "plugins", "people", "proof"]
+VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "autopilot", "context", "plugins", "people", "proof"]
 
 
 # The demo brain has 27 notes: the original 18 plus 9 dated journal pages (docs/store.js DEMO_DAYS),
@@ -378,6 +378,23 @@ class EndToEndTests(unittest.TestCase):
         page.press("#capture-input", "Enter")
         page.wait_for_selector(".guide-step.done")
         self.assertEqual(page.locator(".guide-step.done").count(), 1)
+
+    def test_autopilot_queue_in_demo(self):
+        page = self.open()
+        self.go(page, "autopilot")
+        self.assertIn("needs Cairn on this computer", page.inner_text("#view"))
+        page.fill("#ap-queue-text", "Add CSV export to the report page #auto")
+        page.press("#ap-queue-text", "Enter")
+        page.wait_for_selector(".ap-q")
+        task = page.evaluate("() => window.cairn.state.notes.find((n) => n.tags.includes('queue'))")
+        self.assertEqual(task["title"], "Add CSV export to the report page")
+        self.assertEqual(task["tags"], ["queue", "auto"])
+        self.assertEqual(page.inner_text('#nav [data-go="autopilot"] .count'), "1")
+        page.click('.ap-q [data-flag="needs-me"]')
+        page.wait_for_selector(".ap-q.needs-me")
+        page.click('.ap-q [data-action="ap-q-done"]')
+        page.wait_for_selector(".ap-queue .empty")
+        self.assertEqual(self.errors, [])
 
     def test_mobile_and_dark_have_no_horizontal_scroll(self):
         for theme, width in (("light", 390), ("dark", 390), ("light", 320)):

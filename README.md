@@ -211,6 +211,42 @@ stand by and take over within five minutes of it stopping.
   as one hour, so it can never exceed the length of the day. The summed agent time is shown next to it as
   "N× in parallel".
 
+### Hand over a goal: precedent and autopilot
+
+Say what you want once and get what you would have asked for next. `cairn precedent` learns from your own
+history (past prompts in Claude transcripts and OpenCode's local database, your `Update Log`, lessons you logged)
+and writes a brief for any goal: a draft Definition of Done, the *hidden asks* (what you asked for after similar
+goals before), the closest past prompts, your working profile (`brain/notes/precedent-profile.md`), the queue and
+the loop to follow. Any assistant can read it through MCP (`precedent_brief`, the `precedent` prompt) or the
+`/precedent` command that `cairn precedent install` writes for Claude Code, OpenCode and Codex.
+
+```bash
+cairn precedent learn                       # build the library in ~/.cairn/precedent (redacts tokens and passwords)
+cairn precedent brief "landing page for the new app"
+cairn precedent queue "add CSV export" --auto   # a #queue task; --auto = safe unattended, --needs-me = waiting on you
+cairn precedent next                        # the next open queue item
+cairn precedent log "goal" "what shipped" "what you corrected"
+cairn precedent install                     # /precedent for Claude Code, OpenCode and Codex
+```
+
+The **Autopilot** page (and `cairn autopilot`) goes one step further: hand over a goal and Cairn runs *your* coding
+agent round after round (OpenCode by default, or any command such as `claude -p`) until it reports `STATUS: DONE`,
+gives it a couple of polish rounds, marks the queue task done, logs the lesson and takes the next `#auto` item.
+You watch the live log, steer with a comment, and get a Windows notification when it needs you.
+
+```bash
+cairn autopilot add "add dark mode to settings, tests passing" --workdir ~/code/app
+cairn autopilot on                          # the desktop app or `cairn serve` runs the worker (one per machine)
+cairn autopilot status
+cairn autopilot set engine=command command="claude -p"
+```
+
+The queue is plain tasks tagged `#queue` in `brain/tasks/`, so it shows on the Board and in Obsidian too. Cairn
+itself still never calls a model: it starts the agent CLI you already use, with your own login. The worker is off
+until you turn it on, and its state and logs live in `~/.cairn/autopilot` (`CAIRN_HOME` moves both).
+Moving from the standalone precedent skill or Precedent Agent app:
+`cairn precedent init --import-skill <skill folder> --queue-file <Queue.md> --agent-app <app folder>` (safe to re-run).
+
 ### Keep a daily log by voice
 
 Press the round **Log** button at the bottom of any screen, or <kbd>L</kbd>. The microphone starts (you can turn that off), you talk, and every sentence lands in today's page as a plain Markdown bullet:
@@ -390,6 +426,8 @@ cairn mcp                                # MCP server for Claude, Cursor, Copilo
 cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ and sync both ways
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
+cairn precedent brief "goal"             # a brief from your own history (learn, queue, next, log, install)
+cairn autopilot add "goal"               # your agent carries it to done (on, off, status, set)
 cairn serve --port 4777                  # the app (default command)
 ```
 
@@ -449,9 +487,11 @@ The **Context** page shows the same snippet, filled in for your machine, when yo
 | `search`, `read_note`, `list_notes` | Find notes by text, type, status or tag; read one with its backlinks |
 | `context`, `recent`, `code_todos` | The project brief, what changed lately, `TODO`/`FIXME` comments in the code |
 | `capture`, `log`, `update_note` | Add an idea/task/decision, write to today's journal, change status or tags (refuses to overwrite newer edits) |
+| `precedent_brief`, `queue_next` | The brief for a goal from your own history; the next open `#queue` item |
+| `queue_add`, `precedent_log` | Queue a follow-up instead of asking; record what shipped and what you corrected |
 
-Every note is also a resource (`cairn://brain/<path>`), and the `project-brief` prompt starts a session from the context pack.
-Add `--read-only` to hide the three write tools.
+Every note is also a resource (`cairn://brain/<path>`); the `project-brief` prompt starts a session from the context pack
+and the `precedent` prompt hands over a goal. Add `--read-only` to hide the write tools.
 
 ## Why
 

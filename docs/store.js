@@ -114,6 +114,23 @@ export class ServerStore {
     return [`api/raw?path=${encodeURIComponent(target)}&from=${encodeURIComponent(from)}`];
   }
 
+  // The autopilot worker runs inside the local server; only this store can drive it.
+  async autopilot() {
+    return this.request("GET", "api/autopilot");
+  }
+
+  async autopilotLog(id, since = 0) {
+    return this.request("GET", `api/autopilot/log?id=${encodeURIComponent(id)}&since=${since}`);
+  }
+
+  async autopilotAction(action, body = {}) {
+    return this.request("POST", `api/autopilot/${action}`, body);
+  }
+
+  async precedentBrief(goal = "") {
+    return this.request("GET", `api/precedent/brief?goal=${encodeURIComponent(goal)}`);
+  }
+
   async desktopAction(action, payload = {}) {
     return this.request("POST", "api/desktop", { ...payload, action });
   }
