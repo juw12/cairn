@@ -29,6 +29,15 @@ const AGENT_HOOK = [
 ].join("\n");
 
 let pollTimer = null;
+// The overview band: its one-second clock, and what it showed last so that only real changes move.
+let clockTimer = null;
+let ovSeen = null;
+// When the band last started drawing itself in, and how long that takes (the ov-reveal animation in styles.css).
+let ovEnterAt = -Infinity;
+const ENTER_MS = 700;
+const LANES = 6;
+const TRACK = 30;
+const PEEK = 5;
 
 // ============================================================ helpers
 
@@ -91,6 +100,23 @@ function dayLabel(day) {
   return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 }
 
+function sessionNotes() {
+  return state.notes.filter((n) => n.type === "session").sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
+}
+
+// The source and outcome filters as the list applies them: one that matches nothing falls back to "all".
+function vibeFilters(sessions) {
+  const counts = { all: sessions.length };
+  for (const note of sessions) counts[sessionSource(note)] = (counts[sessionSource(note)] || 0) + 1;
+  const present = Object.keys(SOURCES).filter((source) => counts[source]);
+  const filter = state.vibeFilter in SOURCES && counts[state.vibeFilter] ? state.vibeFilter : "all";
+  const fromSource = filter === "all" ? sessions : sessions.filter((note) => sessionSource(note) === filter);
+  const outcomeCounts = {};
+  for (const note of fromSource) outcomeCounts[outcomeOf(note)] = (outcomeCounts[outcomeOf(note)] || 0) + 1;
+  const outcome = state.vibeOutcome in OUTCOMES && outcomeCounts[state.vibeOutcome] ? state.vibeOutcome : "all";
+  return { counts, present, filter, fromSource, outcomeCounts, outcome };
+}
+
 export function setVibeFilter(source) {
   state.vibeFilter = source in SOURCES ? source : "all";
   state.vibeLimit = PAGE;
@@ -101,6 +127,45 @@ export function setVibeOutcome(outcome) {
   state.vibeOutcome = outcome in OUTCOMES && state.vibeOutcome !== outcome ? outcome : "all";
   state.vibeLimit = PAGE;
   renderView();
+}
+
+// An overview tile counts every source, so pressing it shows that status from every source; pressing it again clears it.
+export function setOverviewOutcome(outcome) {
+  const now = vibeFilters(sessionNotes());
+  const on = now.outcome === outcome && now.filter === "all";
+  state.vibeOutcome = on || !(outcome in OUTCOMES) ? "all" : outcome;
+  if (!on) state.vibeFilter = "all";
+  state.vibeLimit = PAGE;
+  renderView();
+  $(`.ov-tile[data-outcome="${CSS.escape(outcome)}"]`)?.focus({ preventScroll: true });
+}
+
+function flash(el) {
+  el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 1600);
+}
+
+// From a lane in the overview to that session's full card further down.
+export function jumpToLive(path) {
+  const card = $(`.vibe-elapsed[data-path="${CSS.escape(path)}"]`)?.closest(".vibe-live");
+  if (!card) return;
+  card.scrollIntoView({ block: "start" });
+  $("h2 a", card)?.focus({ preventScroll: true });
+  flash(card);
+}
+
+// From the overview's short list to the full one, with focus on the chip that is filtering it.
+export function jumpToList() {
+  const list = $(".vibe-sessions");
+  if (!list) return;
+  list.scrollIntoView({ block: "start" });
+  ($(".vibe-outcomes [aria-pressed=true]") || $(".vibe-sessions .day-head"))?.focus({ preventScroll: true });
+  flash(list);
+}
+
+// Leaving the page forgets what the overview showed, so it draws itself in again on the next visit.
+export function leaveVibe() {
+  ovSeen = null;
 }
 
 // Folded days stay folded across live updates; a folded day shows its totals and costs no rows of the page.
@@ -377,6 +442,7 @@ export function wireVibe() {
   }
   const bar = $(".topbar");
   if (bar) document.documentElement.style.setProperty("--topbar-h", `${bar.offsetHeight}px`);
+  wireOverview();
   $(".vibe-activity svg")?.addEventListener("keydown", (event) => {
     const day = event.target.closest?.("[data-action=vibe-jump]");
     if (!day || (event.key !== "Enter" && event.key !== " ")) return;
@@ -523,6 +589,211 @@ function liveCard(live, newest = true, total = 1) {
       ${code}
     </div>
   </section>`;
+}
+
+// ============================================================ overview band
+// Every session by status (a proportion bar with its tiles as the legend), and one lane per session running now.
+
+const two = (n) => String(n).padStart(2, "0");
+
+// A status Cairn does not know (a hand-edited file) is still counted, so the tiles add up to the session total.
+const bucketOf = (note) => (outcomeOf(note) in OUTCOMES ? outcomeOf(note) : "other");
+const bucketLabel = (key) => OUTCOMES[key] || "other";
+
+// Whole percentages that add up to exactly 100 (largest remainder), so the tiles never total 99% or 101%.
+function shares(values) {
+  const total = values.reduce((sum, n) => sum + n, 0);
+  if (!total) return values.map(() => 0);
+  const whole = values.map((n) => Math.floor((n * 100) / total));
+  let left = 100 - whole.reduce((sum, n) => sum + n, 0);
+  const order = values.map((n, index) => [(n * 100) % total, index]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  for (const [, index] of order) {
+    if (left <= 0) break;
+    whole[index] += 1;
+    left -= 1;
+  }
+  return whole;
+}
+
+// Start times are kept to the minute, so the seconds count from the top of that minute.
+function liveSeconds(started, now = new Date()) {
+  const start = core.stampMinutes(started);
+  const current = core.stampMinutes(`${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}T${two(now.getHours())}:${two(now.getMinutes())}`);
+  return start === null || current === null ? 0 : Math.max(0, (current - start) * 60 + now.getSeconds());
+}
+
+function clockText(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours ? `${hours}:${two(minutes)}:${two(seconds % 60)}` : `${minutes}:${two(seconds % 60)}`;
+}
+
+function peekRow(note) {
+  const started = startedKey(note);
+  const when = [dayLabel(sessionDayOf(note)), /T\d{2}:\d{2}/.test(started) ? started.slice(11, 16) : ""].join(" ").trim();
+  const minutes = note.status === "live" ? elapsedMinutes(note) : core.sessionMinutes(note);
+  return `<li><a href="#" data-open="${esc(note.path)}">${esc(note.title)}</a><span class="ov-meta">${esc(when)} · ${duration(minutes)}</span></li>`;
+}
+
+function lane(note) {
+  const log = core.sessionLog(note.body);
+  const passed = log.filter((e) => e.kind === "pass").length;
+  const failed = log.filter((e) => e.kind === "fail").length;
+  const last = log.at(-1);
+  const source = sessionSource(note);
+  const agent = typeof note.meta.agent === "string" && note.meta.agent ? note.meta.agent : source === "logged" ? "" : SOURCES[source];
+  const who = [agent, folderName(note)].filter(Boolean).join(" · ");
+  const checks = passed || failed
+    ? `<span class="ov-checks"><span class="check-pass" title="${passed} checks passed">${icon("check", "sm")}${passed}</span> <span class="check-fail" title="${failed} checks failed">${icon("x", "sm")}${failed}</span></span>`
+    : "";
+  const step = last
+    ? `<span class="ov-step k-${last.kind}"><span class="t">${esc(last.time)}</span><span class="kind">${last.kind}</span><span class="txt">${esc(last.text)}</span></span>`
+    : `<span class="ov-step muted">No steps yet</span>`;
+  return `<li class="ov-lane" data-path="${esc(note.path)}" data-steps="${log.length}">
+      <div class="ov-lane-head">
+        <i class="ov-pulse" aria-hidden="true"></i>
+        <a class="ov-title" href="#" data-open="${esc(note.path)}">${esc(note.title)}</a>
+        ${who ? `<span class="ov-who">${esc(who)}</span>` : ""}
+        ${checks}
+        <span class="sr-only">running for </span><span class="ov-clock" data-started="${esc(String(note.meta.started || ""))}" title="Time since it started">${clockText(liveSeconds(note.meta.started))}</span>
+      </div>
+      <button type="button" class="ov-lane-log" data-action="vibe-lane" data-path="${esc(note.path)}" title="Jump to this session's log">
+        <span class="ov-track" aria-hidden="true">${log.slice(-TRACK).map((e) => `<i class="k-${e.kind}" title="${esc(e.time)} ${e.kind}"></i>`).join("")}</span>
+        ${step}
+      </button>
+    </li>`;
+}
+
+function overview(sessions) {
+  if (!sessions.length) return "";
+  const filters = vibeFilters(sessions);
+  const counts = {};
+  for (const note of sessions) counts[bucketOf(note)] = (counts[bucketOf(note)] || 0) + 1;
+  const keys = [...Object.keys(OUTCOMES), ...(counts.other ? ["other"] : [])];
+  const share = shares(keys.map((key) => counts[key] || 0));
+  // A tile is pressed only when the list shows exactly its sessions: that status, from every source.
+  const pressed = filters.filter === "all" ? filters.outcome : "all";
+  const live = liveSessions();
+  const segments = keys.map((key, index) => {
+    const count = counts[key] || 0;
+    const action = count && key !== "other" ? ` data-action="vibe-overview"` : "";
+    return `<span class="ov-seg s-${key}${count ? "" : " empty"}${key === pressed ? " on" : ""}"${action} data-outcome="${key}" data-count="${count}" style="flex-grow:${count}" title="${count} ${esc(bucketLabel(key))} · ${share[index]}%"></span>`;
+  });
+  const tiles = keys.map((key, index) => {
+    const count = counts[key] || 0;
+    const label = bucketLabel(key);
+    const inner = `<span class="ov-name"><i class="ov-mark s-${key}" aria-hidden="true"></i>${esc(label)}</span><span class="ov-num"><b class="ov-count" data-count="${count}">${count}</b><span class="ov-share">${share[index]}%</span></span>`;
+    if (key === "other") return `<div class="ov-tile static" data-outcome="other" title="Sessions with a status Cairn does not know">${inner}</div>`;
+    return `<button type="button" class="ov-tile" data-action="vibe-overview" data-outcome="${key}" aria-pressed="${key === pressed}" aria-label="${esc(label)}: ${plural(count, "session")}, ${share[index]}%" title="${esc(DOT_LABEL[key] || label)}"${count ? "" : " disabled"}>${inner}</button>`;
+  });
+  const matching = pressed === "all" ? [] : sessions.filter((note) => outcomeOf(note) === pressed);
+  const peek = matching.length
+    ? `<div class="ov-peek">
+        <ul>${matching.slice(0, PEEK).map(peekRow).join("")}</ul>
+        <button type="button" class="btn sm ghost ov-to-list" data-action="vibe-to-list">${icon("chevron", "sm")} ${matching.length > PEEK ? `All ${matching.length} in the list` : "See in the list"}</button>
+      </div>`
+    : "";
+  const lanes = live.length
+    ? `<ol class="ov-lanes" aria-label="Running now">${live.slice(0, LANES).map(lane).join("")}</ol>${live.length > LANES ? `<p class="ov-more muted small">+${live.length - LANES} more live, listed below</p>` : ""}`
+    : "";
+  return `<section class="vibe-overview" aria-label="Overview">
+    <header>
+      <h2>Overview</h2>
+      <span class="muted small">${plural(sessions.length, "session")}${live.length ? ` · <span class="ov-live-now">${live.length} live now</span>` : ""}</span>
+      ${pressed === "all" ? "" : `<button type="button" class="btn sm ghost ov-clear" data-action="vibe-overview" data-outcome="${pressed}">Clear filter</button>`}
+    </header>
+    <div class="ov-bar${pressed === "all" ? "" : " has-on"}" aria-hidden="true">${segments.join("")}</div>
+    <div class="ov-tiles${counts.other ? " has-other" : ""}" role="group" aria-label="Sessions by status">${tiles.join("")}</div>
+    ${peek}
+    ${lanes}
+  </section>`;
+}
+
+function tickClocks() {
+  const clocks = $$(".ov-clock");
+  if (!clocks.length) {
+    clearInterval(clockTimer);
+    clockTimer = null;
+    return;
+  }
+  for (const el of clocks) el.textContent = clockText(liveSeconds(el.dataset.started));
+}
+
+// Roll a number to its new value, picking up `into` ms after the roll began.
+// The timeout writes the final number even when frames are throttled.
+function countTo(el, from, to, into = 0) {
+  const began = performance.now() - into;
+  const frame = (now) => {
+    if (!el.isConnected) return;
+    const part = Math.min(1, Math.max(0, (now - began) / 450));
+    el.textContent = String(Math.round(from + (to - from) * (1 - (1 - part) ** 3)));
+    if (part < 1) requestAnimationFrame(frame);
+  };
+  frame(performance.now());
+  setTimeout(() => {
+    if (el.isConnected) el.textContent = String(to);
+  }, Math.max(0, 650 - into));
+}
+
+function wireOverview() {
+  const band = $(".vibe-overview");
+  if (!band) {
+    ovSeen = null;
+    return;
+  }
+  if (!clockTimer && $(".ov-clock", band)) clockTimer = setInterval(tickClocks, 1000);
+  // Pointing at a tile or a piece of the bar lights its partner, so the bar and its legend read as one thing.
+  const light = (key) => {
+    band.classList.toggle("ov-dim", Boolean(key));
+    for (const el of $$(".ov-seg, .ov-tile", band)) el.classList.toggle("hot", Boolean(key) && el.dataset.outcome === key);
+  };
+  const keyAt = (event) => event.target.closest?.(".ov-seg:not(.empty), .ov-tile")?.dataset.outcome || "";
+  band.addEventListener("pointerover", (event) => light(keyAt(event)));
+  band.addEventListener("pointerleave", () => light(""));
+  band.addEventListener("focusin", (event) => light(keyAt(event)));
+  band.addEventListener("focusout", () => light(""));
+
+  const counts = {};
+  for (const tile of $$(".ov-tile", band)) counts[tile.dataset.outcome] = Number($(".ov-count", tile).dataset.count);
+  const steps = new Map($$(".ov-lane", band).map((el) => [el.dataset.path, Number(el.dataset.steps)]));
+  const before = ovSeen;
+  ovSeen = { counts, steps };
+  const still = document.hidden || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const at = performance.now();
+  if (!before) ovEnterAt = still ? -Infinity : at;
+  if (still) return;
+  const into = at - ovEnterAt;
+  if (into < ENTER_MS) {
+    // Opening the page: the bar draws in, the numbers count up, the lanes fade in. The first poll
+    // redraws the page a moment after it opens, so a redraw inside the draw-in carries on with it.
+    band.classList.add("ov-enter");
+    band.style.setProperty("--ov-into", `${-Math.round(into)}ms`);
+    for (const el of $$(".ov-count", band)) countTo(el, 0, Number(el.dataset.count), into);
+    return;
+  }
+  // While the page stays open only what really changed moves.
+  for (const tile of $$(".ov-tile", band)) {
+    const was = before.counts[tile.dataset.outcome] ?? 0;
+    const now = counts[tile.dataset.outcome];
+    if (was === now) continue;
+    tile.classList.add("ov-bump");
+    countTo($(".ov-count", tile), was, now);
+  }
+  for (const seg of $$(".ov-seg", band)) {
+    const was = before.counts[seg.dataset.outcome] ?? 0;
+    const now = Number(seg.dataset.count);
+    if (was === now) continue;
+    seg.style.transition = "none";
+    seg.style.flexGrow = String(was);
+    void seg.offsetWidth; // start the slide from the old width
+    seg.style.transition = "";
+    seg.style.flexGrow = String(now);
+  }
+  for (const el of $$(".ov-lane", band)) {
+    const was = before.steps.get(el.dataset.path);
+    if (was === undefined) el.classList.add("ov-new");
+    else if (Number(el.dataset.steps) > was) el.classList.add("ov-stepped");
+  }
 }
 
 function figures(stats) {
@@ -687,14 +958,7 @@ function sessionRow(note, showSource = true) {
 }
 
 function sessionsBlock(sessions, stats) {
-  const counts = { all: sessions.length };
-  for (const note of sessions) counts[sessionSource(note)] = (counts[sessionSource(note)] || 0) + 1;
-  const present = Object.keys(SOURCES).filter((source) => counts[source]);
-  const filter = state.vibeFilter in SOURCES && counts[state.vibeFilter] ? state.vibeFilter : "all";
-  const fromSource = filter === "all" ? sessions : sessions.filter((note) => sessionSource(note) === filter);
-  const outcomeCounts = {};
-  for (const note of fromSource) outcomeCounts[outcomeOf(note)] = (outcomeCounts[outcomeOf(note)] || 0) + 1;
-  const outcome = state.vibeOutcome in OUTCOMES && outcomeCounts[state.vibeOutcome] ? state.vibeOutcome : "all";
+  const { counts, present, filter, fromSource, outcomeCounts, outcome } = vibeFilters(sessions);
   const shown = outcome === "all" ? fromSource : fromSource.filter((note) => outcomeOf(note) === outcome);
   const limit = state.vibeLimit || PAGE;
   if (!state.vibeFolded && shown.length > PAGE) {
@@ -821,7 +1085,7 @@ function feedbackForm(sessions) {
 
 export function vibeView() {
   const stats = core.vibeStats(state.notes, today());
-  const sessions = state.notes.filter((n) => n.type === "session").sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
+  const sessions = sessionNotes();
   // Detected sessions only "ship" in the sense that code changed; call it that unless a person ended one as shipped.
   const handShipped = sessions.some((note) => sessionSource(note) === "logged" && note.status === "shipped");
   OUTCOMES.shipped = handShipped ? "shipped" : "code changed";
@@ -836,6 +1100,7 @@ export function vibeView() {
     `<button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("play")} ${liveSession() ? "Start another" : "Start session"}</button>`,
   );
   return `${head}
+    ${overview(sessions)}
     ${liveCards()}
     ${figures(stats)}
     <div class="vibe-cols">

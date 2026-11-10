@@ -72,6 +72,30 @@ class EndToEndTests(unittest.TestCase):
         go_to(page, view)
         page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
 
+    def sample_week(self, page):
+        page.click('[data-action="vibe-sample"]')
+        page.wait_for_function("() => window.cairn.state.notes.filter((n) => n.type === 'session').length === 4")
+        page.wait_for_selector(".vibe-overview")
+
+    def start_session(self, page, title):
+        page.click('[data-action="vibe-start"]')
+        page.fill(".modal input", title)
+        page.click('.modal button[type="submit"]')
+        page.wait_for_selector(".ov-lane")
+        return page.evaluate("(t) => window.cairn.state.notes.find((n) => n.type === 'session' && n.title === t).path", title)
+
+    def overview_tiles(self, page):
+        return page.eval_on_selector_all(
+            "button.ov-tile",
+            """nodes => nodes.map((n) => ({
+                key: n.dataset.outcome,
+                count: Number(n.querySelector('.ov-count').dataset.count),
+                share: parseInt(n.querySelector('.ov-share').textContent, 10),
+                pressed: n.getAttribute('aria-pressed') === 'true',
+                off: n.disabled,
+            }))""",
+        )
+
     def test_notes_list_pages_big_vaults(self):
         page = self.open()
         page.evaluate("""() => {
@@ -414,6 +438,210 @@ class EndToEndTests(unittest.TestCase):
         busy = [tip for tip in tips if " 0 sessions" not in tip and "session" in tip and "·" in tip]
         self.assertTrue(busy, tips)
         self.assertTrue(any(word in busy[0] for word in ("shipped", "no code change", "no git", "live", "partial", "dropped")), busy[0])
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_overview_counts_every_status_and_filters_the_list(self):
+        page = self.open()
+        self.go(page, "vibe")
+        self.assertEqual(page.locator(".vibe-overview").count(), 0)  # nothing to count yet: the empty card stands in
+        self.sample_week(page)
+        tiles = self.overview_tiles(page)
+        self.assertEqual([t["key"] for t in tiles], ["live", "shipped", "partial", "dropped", "done", "unknown"])
+        self.assertEqual(sum(t["count"] for t in tiles), 4)  # every session sits under exactly one status
+        self.assertEqual(sum(t["share"] for t in tiles), 100)
+        for tile in tiles:
+            self.assertEqual(tile["off"], tile["count"] == 0, tile)  # an empty status shows 0 and cannot be pressed
+            self.assertFalse(tile["pressed"], tile)
+        self.assertEqual(page.locator(".ov-bar .ov-seg").count(), 6)
+        self.assertIn("4 sessions", page.inner_text(".vibe-overview > header"))
+        # The numbers count up as the page opens and land on the real counts.
+        page.wait_for_function("() => [...document.querySelectorAll('.ov-count')].every((n) => n.textContent === n.dataset.count)")
+        count_of = {t["key"]: t["count"] for t in tiles}
+        chips = page.eval_on_selector_all('.vibe-outcomes [data-action="vibe-outcome"]', "nodes => nodes.map((n) => [n.dataset.outcome, Number(n.querySelector('b').textContent)])")
+        self.assertTrue(chips)
+        for outcome, count in chips:
+            self.assertEqual(count_of[outcome], count, outcome)  # the tiles and the legend chips agree
+        rows = page.locator(".session-row").count()
+        shipped = count_of["shipped"]
+        self.assertTrue(0 < shipped < rows, count_of)
+
+        tile = '.ov-tile[data-outcome="shipped"]'
+        page.click(tile)
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=shipped)
+        self.assertEqual(page.locator(".session-row .dot.s-shipped").count(), shipped)
+        self.assertEqual(page.get_attribute(tile, "aria-pressed"), "true")
+        self.assertEqual(page.locator('.ov-tile[aria-pressed="true"]').count(), 1)
+        pressed_chips = page.eval_on_selector_all('.vibe-outcomes [aria-pressed="true"]', "nodes => nodes.map((n) => n.dataset.outcome)")
+        self.assertEqual(pressed_chips, ["shipped"])  # the same filter the legend chip sets
+        self.assertEqual(page.locator(".ov-peek li").count(), shipped)
+        page.wait_for_function("(sel) => document.activeElement.matches(sel)", arg=tile)  # focus stays on the tile
+        page.keyboard.press("Enter")  # pressing it again clears the filter
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
+        self.assertEqual(page.locator('.ov-tile[aria-pressed="true"], .vibe-outcomes [aria-pressed="true"]').count(), 0)
+        self.assertEqual(page.locator(".ov-peek").count(), 0)
+
+        # A legend chip presses the matching tile, and "Clear filter" lets go of it.
+        page.click('.vibe-outcomes [data-outcome="partial"]')
+        page.wait_for_selector('.ov-tile[data-outcome="partial"][aria-pressed="true"]')
+        self.assertEqual(page.locator(".session-row").count(), count_of["partial"])
+        page.click(".ov-clear")
+        page.wait_for_function("(n) => document.querySelectorAll('.session-row').length === n", arg=rows)
+        self.assertEqual(page.locator('.ov-tile[aria-pressed="true"]').count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_overview_follows_a_live_session(self):
+        page = self.open()
+        self.go(page, "vibe")
+        self.sample_week(page)
+        self.assertEqual(page.locator(".ov-lane").count(), 0)  # lanes are only for sessions that are running
+        self.assertTrue(page.is_disabled('.ov-tile[data-outcome="live"]'))
+        shipped = {t["key"]: t["count"] for t in self.overview_tiles(page)}["shipped"]
+        page.wait_for_timeout(800)  # let the opening draw-in finish, so what follows is a change to a settled page
+
+        path = self.start_session(page, "Wire the overview")
+        lane = f'.ov-lane[data-path="{path}"]'
+        page.wait_for_selector(lane)
+        self.assertEqual(page.locator(".ov-lane").count(), 1)
+        self.assertEqual(page.inner_text(f"{lane} .ov-title"), "Wire the overview")
+        self.assertIn("1 live now", page.inner_text(".vibe-overview > header"))
+        tiles = self.overview_tiles(page)
+        self.assertEqual({t["key"]: t["count"] for t in tiles}["live"], 1)
+        self.assertEqual(sum(t["count"] for t in tiles), 5)
+        self.assertEqual(sum(t["share"] for t in tiles), 100)
+        # Only what changed moves: the new lane comes in and the live tile bumps.
+        self.assertEqual(page.locator(f"{lane}.ov-new").count(), 1)
+        self.assertEqual(page.eval_on_selector_all(".ov-tile.ov-bump", "nodes => nodes.map((n) => n.dataset.outcome)"), ["live"])
+
+        # The clock ticks in place, without redrawing the page.
+        clock = f"{lane} .ov-clock"
+        shown = page.inner_text(clock)
+        self.assertRegex(shown, r"^\d+:\d{2}(:\d{2})?$")
+        page.evaluate("document.querySelector('.vibe-overview').dataset.kept = 'yes'")
+        page.wait_for_function("([sel, was]) => document.querySelector(sel).textContent !== was", arg=[clock, shown])
+        self.assertEqual(page.get_attribute(".vibe-overview", "data-kept"), "yes")
+
+        # A new step shows in the lane as soon as it is logged, with no reload.
+        steps = int(page.get_attribute(lane, "data-steps"))
+        page.evaluate("window.__sameLoad = true")
+        page.select_option(".vibe-log-form select", "pass")
+        page.fill(".vibe-log-form input", "overview probe green")
+        page.press(".vibe-log-form input", "Enter")
+        page.wait_for_function("(sel) => document.querySelector(sel)?.textContent === 'overview probe green'", arg=f"{lane} .ov-step .txt")
+        self.assertEqual(int(page.get_attribute(lane, "data-steps")), steps + 1)
+        self.assertEqual(page.locator(f"{lane} .ov-step.k-pass").count(), 1)
+        self.assertEqual(page.locator(f"{lane} .ov-track i").count(), steps + 1)
+        self.assertEqual(page.inner_text(f"{lane} .ov-checks .check-pass").strip(), "1")
+        self.assertEqual(page.locator(f"{lane}.ov-stepped").count(), 1)
+        self.assertTrue(page.evaluate("window.__sameLoad"))
+
+        # The step line jumps down to that session's own card.
+        page.click(f"{lane} .ov-lane-log")
+        page.wait_for_function("() => Boolean(document.activeElement.closest('.vibe-live'))")
+
+        # Ending it moves it from live to shipped.
+        page.click(f'[data-action="vibe-end"][data-result="shipped"][data-path="{path}"]')
+        page.wait_for_function("() => document.querySelectorAll('.ov-lane').length === 0")
+        tiles = self.overview_tiles(page)
+        after = {t["key"]: t for t in tiles}
+        self.assertEqual(after["live"]["count"], 0)
+        self.assertTrue(after["live"]["off"])
+        self.assertEqual(after["shipped"]["count"], shipped + 1)
+        self.assertEqual(sum(t["count"] for t in tiles), 5)
+        self.assertNotIn("live now", page.inner_text(".vibe-overview > header"))
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_overview_draw_in_carries_on_through_a_redraw(self):
+        page = self.open()
+        self.go(page, "vibe")
+        # Timed inside the page, so a slow machine cannot stretch the gaps between the steps.
+        seen = page.evaluate(
+            """async () => {
+                const drawn = new Promise((resolve) => {
+                    const watch = new MutationObserver(() => {
+                        if (!document.querySelector('.vibe-overview')) return;
+                        watch.disconnect();
+                        resolve(performance.now());
+                    });
+                    watch.observe(document.body, { childList: true, subtree: true });
+                });
+                document.querySelector('[data-action="vibe-sample"]').click();
+                const at = await drawn;
+                const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+                const read = () => {
+                    const band = document.querySelector('.vibe-overview');
+                    const bar = getComputedStyle(band.querySelector('.ov-bar'));
+                    return {
+                        since: performance.now() - at,
+                        enter: band.classList.contains('ov-enter'),
+                        into: parseFloat(band.style.getPropertyValue('--ov-into')),
+                        name: bar.animationName,
+                        delay: parseFloat(bar.animationDelay),
+                    };
+                };
+                const first = read();
+                await wait(250);
+                window.cairn.rerender();
+                const during = read();
+                while (performance.now() - at < 800) await wait(20);
+                window.cairn.rerender();
+                const after = read();
+                return { first, during, after };
+            }"""
+        )
+        first, during, after = seen["first"], seen["during"], seen["after"]
+        self.assertTrue(first["enter"], seen)
+        self.assertEqual(first["into"], 0, seen)
+        self.assertEqual(first["name"], "ov-reveal", seen)
+        if during["since"] < 500:  # a stalled machine may already be past the draw-in; then there is nothing to carry on
+            self.assertTrue(during["enter"], seen)
+            self.assertLessEqual(during["into"], -240, seen)  # it picks up where it was; it does not start over
+            self.assertLessEqual(during["delay"], -0.24, seen)
+        self.assertFalse(after["enter"], seen)  # once drawn, a redraw leaves it alone
+        self.assertEqual(after["name"], "none", seen)
+        page.wait_for_function("() => [...document.querySelectorAll('.ov-count')].every((n) => n.textContent === n.dataset.count)")
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_overview_keeps_still_with_reduced_motion(self):
+        page = self.open()
+        page.emulate_media(reduced_motion="reduce")
+        self.go(page, "vibe")
+        self.sample_week(page)
+        still = """() => ({
+            moving: document.querySelectorAll('.ov-enter, .ov-new, .ov-stepped, .ov-bump').length,
+            settled: [...document.querySelectorAll('.ov-count')].every((n) => n.textContent === n.dataset.count),
+            bar: getComputedStyle(document.querySelector('.ov-bar')).animationName,
+            slide: getComputedStyle(document.querySelector('.ov-seg')).transitionDuration,
+        })"""
+        self.assertEqual(page.evaluate(still), {"moving": 0, "settled": True, "bar": "none", "slide": "0s"})
+
+        self.start_session(page, "Quiet session")
+        page.select_option(".vibe-log-form select", "pass")
+        page.fill(".vibe-log-form input", "still green")
+        page.press(".vibe-log-form input", "Enter")
+        page.wait_for_function("() => document.querySelector('.ov-lane .ov-step .txt')?.textContent === 'still green'")
+        self.assertEqual(page.evaluate(still), {"moving": 0, "settled": True, "bar": "none", "slide": "0s"})
+        self.assertEqual(page.evaluate("getComputedStyle(document.querySelector('.ov-pulse')).animationName"), "none")
+        # Still is not frozen: the clock keeps the time.
+        shown = page.inner_text(".ov-lane .ov-clock")
+        page.wait_for_function("(was) => document.querySelector('.ov-lane .ov-clock').textContent !== was", arg=shown)
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_overview_on_a_phone_in_dark_mode(self):
+        page = self.open(viewport=(390, 844), theme="dark")
+        page.evaluate("location.hash = '#/vibe'")
+        page.wait_for_selector(".vibe-figures")
+        self.sample_week(page)
+        self.start_session(page, "Pocket check")
+        overflow = "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        self.assertLessEqual(page.evaluate(overflow), 0)
+        sizes = page.eval_on_selector_all("button.ov-tile", "nodes => nodes.map((n) => Math.min(n.getBoundingClientRect().width, n.getBoundingClientRect().height))")
+        self.assertEqual(len(sizes), 6)
+        self.assertGreaterEqual(min(sizes), 44, sizes)  # every status is big enough to tap
+        page.click('.ov-tile[data-outcome="shipped"]')
+        page.wait_for_selector('.ov-tile[data-outcome="shipped"][aria-pressed="true"]')
+        self.assertGreater(page.locator(".ov-peek li").count(), 0)
+        self.assertEqual(page.locator(".session-row").count(), page.locator(".ov-peek li").count())
+        self.assertLessEqual(page.evaluate(overflow), 0)
         self.assertEqual(self.errors, [])
 
     def test_feedback_capture_prefix(self):
