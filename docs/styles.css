@@ -1926,7 +1926,7 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
 .founder-figure { font-size: 15px; }
 .founder-meta { flex: 1 1 260px; color: var(--ink-2); font-size: 13px; }
 @media (max-width: 760px) {
-  .founder-stage { padding: 0 12px 24px; }
+  .founder-stage { padding: 0 16px 24px; }
   .founder-stage iframe { height: calc(100vh - 160px); min-height: 560px; border-radius: 10px; }
 }
 
