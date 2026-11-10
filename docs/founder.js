@@ -39,9 +39,9 @@ window.addEventListener("message", (event) => {
 });
 
 // Opens the studio's first setup step so a visitor can swap the example for their own idea.
-function editIdea() {
+function editIdea(section = "productSection") {
   const frame = stage?.querySelector("iframe");
-  frame?.contentWindow?.postMessage({ type: "founder-studio:edit" }, location.origin);
+  frame?.contentWindow?.postMessage({ type: "founder-studio:edit", section }, location.origin);
   frame?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -64,7 +64,7 @@ function stepsHtml() {
     ? `${esc(shortName(business))} · <button class="founder-link" type="button" data-action="founder-edit">write your own</button>`
     : "Loading the example idea";
   let runStatus = business ? "current" : "todo";
-  let runDetail = "Press <b>Run panel</b> in the studio";
+  let runDetail = "Simulated buyers walk to the stall and decide";
   if (running) {
     runStatus = "current";
     runDetail = "Buyers are deciding now";
@@ -94,9 +94,67 @@ function stepsHtml() {
 export function founderView() {
   return `${pageHead(
     "Founder Studio",
-    "Write a pitch, then watch simulated buyers walk up to your stall in a 3D market square and decide to buy or pass. Every number comes from the founder skill's own scripts. Save a finished panel to keep it with your notes.",
+    "Watch simulated buyers decide on your idea in a 3D market square, then keep the result with your notes.",
   )}
-    <div class="founder-result" id="founder-result" aria-live="polite"></div>`;
+    <div class="founder-result" id="founder-result" aria-live="polite"></div>
+    <section class="founder-saved" id="founder-saved" aria-label="Saved panels"></section>`;
+}
+
+// One concrete next move for each reason the founder skill's buyers can give for passing.
+const NEXT_STEP = {
+  price: "Try a lower price or say what the price buys, then run again.",
+  habit: "Make switching easy (a first visit, a trial), then run again.",
+  need: "Name the problem it solves in the first line of the pitch, then run again.",
+  trust: "Add proof (reviews, a guarantee, who is behind it), then run again.",
+  quality: "Say what makes it better than what they use now, then run again.",
+  convenience: "Say where and how fast they get it, then run again.",
+  timing: "Give a reason to try it now, then run again.",
+  values: "Speak to what they care about (sourcing, impact), then run again.",
+};
+
+function nextStep(result) {
+  if (result.rate >= result.target) {
+    return "It meets your target. Next: a real launch test (pre-orders or a landing page), since simulated buyers are only a first filter.";
+  }
+  return NEXT_STEP[result.topReason] || "Read why buyers passed in the studio, then sharpen the pitch and run again.";
+}
+
+const tagsOf = (note) => note.tags || note.meta?.tags || [];
+
+// Past panels saved from this page, newest first, so the brain shows the idea improving run by run.
+function savedPanels() {
+  return (state.notes || [])
+    .filter((note) => tagsOf(note).includes("founder-studio"))
+    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+    .slice(0, 6);
+}
+
+function savedHtml() {
+  const notes = savedPanels();
+  if (!notes.length) {
+    return `<span class="founder-saved-head">Saved panels</span>
+      <span class="founder-saved-empty muted">None yet. Saved panels show up here so you can compare runs as the pitch improves.</span>`;
+  }
+  const rows = notes.map((note) => {
+    const meta = note.meta || {};
+    const rate = Number(meta.buy_rate);
+    const target = Number(meta.target);
+    const known = Number.isFinite(rate) && Number.isFinite(target);
+    const name = String(note.title || "").replace(/^Founder Studio · /, "").replace(/ · \d{4}-\d{2}-\d{2}$/, "");
+    const date = meta.created || (note.mtime ? new Date(note.mtime).toISOString().slice(0, 10) : "");
+    return `<li><a class="founder-saved-item" href="#" data-open="${esc(note.path)}">
+        <span class="founder-saved-date">${esc(String(date))}</span>
+        <span class="founder-saved-name">${esc(shortName(name) || name)}</span>
+        ${known ? `<span class="founder-saved-rate ${rate >= target ? "good" : "bad"}">${pct(rate)} <span class="muted">vs ${pct(target)}</span></span>` : ""}
+      </a></li>`;
+  }).join("");
+  return `<span class="founder-saved-head">Saved panels</span>
+    <ul class="founder-saved-list">${rows}</ul>`;
+}
+
+function paintSaved() {
+  const box = $("#founder-saved");
+  if (box) box.innerHTML = savedHtml();
 }
 
 function resultKey(result) {
@@ -106,9 +164,10 @@ function resultKey(result) {
 function paintResult() {
   const box = $("#founder-result");
   if (!box) return;
+  paintSaved();
   if (!latest) {
     box.innerHTML = stepsHtml();
-    box.querySelector("[data-action=founder-edit]")?.addEventListener("click", editIdea);
+    box.querySelector("[data-action=founder-edit]")?.addEventListener("click", () => editIdea());
     return;
   }
   const good = latest.rate >= latest.target;
@@ -116,9 +175,11 @@ function paintResult() {
   box.innerHTML = `${stepsHtml()}<div class="founder-strip ${good ? "good" : "bad"}">
       <div class="founder-figure"><b>${latest.buys} of ${latest.n}</b> would buy <span class="muted">(${pct(latest.rate)} vs ${pct(latest.target)} target)</span></div>
       <div class="founder-meta">${esc(latest.business)} · ${esc(latest.heading)}${latest.topReason ? ` · top reason to pass: <b>${esc(latest.topReason)}</b>` : ""}</div>
+      <div class="founder-next"><b>Next:</b> ${esc(nextStep(latest))} <button class="founder-link" type="button" data-action="founder-pitch">Edit pitch</button></div>
       ${readOnly() ? "" : `<button class="btn${saved ? "" : " primary"}" data-action="founder-save" ${saved ? "disabled" : ""}>${icon(saved ? "check" : "save", "sm")} ${saved ? "Saved to brain" : "Save to brain"}</button>`}
     </div>`;
-  box.querySelector("[data-action=founder-edit]")?.addEventListener("click", editIdea);
+  box.querySelector("[data-action=founder-edit]")?.addEventListener("click", () => editIdea());
+  box.querySelector("[data-action=founder-pitch]")?.addEventListener("click", () => editIdea("pitchSection"));
   box.querySelector("[data-action=founder-save]")?.addEventListener("click", () => {
     saveResult().catch((error) => toast(error.message, { error: true }));
   });

@@ -43,3 +43,20 @@ def test_steps_follow_studio_events():
         assert event in host, f"Cairn ignores {event}"
     assert "founder-studio:edit" in studio and "founder-studio:edit" in host
     assert "event.source !== window.parent" in studio, "the studio only takes edit requests from its host"
+
+
+def test_saved_panels_and_next_step_on_the_page():
+    host = read("founder.js")
+    assert 'id="founder-saved"' in host, "past panels are listed on the page"
+    assert 'includes("founder-studio")' in host, "the list reads notes tagged founder-studio"
+    assert "data-open=" in host, "each saved panel opens its note"
+    assert "function nextStep" in host and "founder-next" in host, "a finished panel points at the next thing to test"
+    for reason in ("price", "habit", "need", "trust", "quality", "convenience", "timing", "values"):
+        assert f"  {reason}:" in host, f"no next step for buyers who pass on {reason}"
+
+
+def test_embedded_studio_drops_its_own_brand():
+    studio = read("founder/js/app.js")
+    assert 'classList.add("embedded")' in studio
+    assert ".embedded .brand { display: none; }" in read("founder/styles.css")
+    assert "Quick sim is a rule model, not evidence" in studio, "the honesty note stays when embedded"

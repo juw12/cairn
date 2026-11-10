@@ -1840,3 +1840,30 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
   .founder-steps { grid-template-columns: 1fr; gap: 6px; }
   .founder-step { padding: 8px 10px; }
 }
+
+/* Founder Studio: next step under the result, and past panels saved to the brain. */
+.founder-next { flex: 1 1 100%; font-size: 13px; color: var(--ink-2); }
+.founder-next b { color: var(--ink); font-weight: 600; }
+.founder-saved { display: flex; align-items: center; gap: 10px; min-width: 0; margin-top: 10px; font-size: 13px; }
+.founder-saved-head { flex: none; font-weight: 600; color: var(--ink); }
+.founder-saved-list { list-style: none; margin: 0; padding: 0 0 2px; display: flex; gap: 6px; overflow-x: auto; min-width: 0; scrollbar-width: thin; }
+.founder-saved-item { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+.founder-saved-item:hover { border-color: var(--accent); color: var(--ink); }
+.founder-saved-date { color: var(--ink-3, var(--ink-2)); font-variant-numeric: tabular-nums; }
+.founder-saved-name { color: var(--ink); }
+.founder-saved-rate { font-weight: 600; font-variant-numeric: tabular-nums; }
+.founder-saved-rate.good { color: #2f7d4f; }
+.founder-saved-rate.bad { color: #b4452f; }
+.founder-saved-rate .muted { font-weight: 400; }
+@media (max-width: 760px) {
+  .founder-saved { flex-wrap: wrap; gap: 6px; }
+  .founder-saved-list { flex: 1 1 100%; }
+}
+
+/* Founder Studio reads as one page: the studio sits on the page's paper with a single hairline above it. */
+.founder-stage iframe { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+@media (max-width: 760px) {
+  body.founder-open .log-fab { display: none; }
+  .founder-saved-list { flex-wrap: wrap; overflow: visible; }
+  .founder-saved-list li:nth-child(n+4) { display: none; }
+}
