@@ -1882,3 +1882,103 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
   .founder-saved-list { flex-wrap: wrap; overflow: visible; }
   .founder-saved-list li:nth-child(n+4) { display: none; }
 }
+
+/* ============================================================ Projects: ranked GitHub repos */
+.proj-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 14px; }
+.proj-toolbar .input { width: 200px; }
+.proj-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.proj-status { font-size: 12.5px; margin-left: auto; }
+.proj-lead { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 14px; color: var(--ink-2); }
+.proj-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.proj-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) 210px; gap: 14px; align-items: start; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.proj-card.podium { border-color: var(--line-strong); }
+.proj-card.self { box-shadow: inset 3px 0 0 var(--accent), var(--shadow-sm); }
+.proj-rank { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.proj-rank > span { font: 400 30px/1 var(--display); color: var(--ink); }
+.proj-move { font: 600 11px/1 var(--mono); }
+.proj-move.up { color: var(--journal); }
+.proj-move.down { color: var(--danger); }
+.proj-move.new { color: var(--muted); font-weight: 500; }
+.proj-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.proj-title a { font-weight: 600; font-size: 16px; color: var(--ink); text-decoration: none; }
+.proj-title a:hover { text-decoration: underline; }
+.proj-tier { font-size: 11.5px; }
+.tier-flagship { background: var(--accent-soft); color: var(--accent-ink); }
+.tier-rising { background: var(--idea-soft); color: var(--idea-ink); }
+.tier-solid { background: var(--task-soft); color: var(--task); }
+.tier-seedling { background: var(--journal-soft); color: var(--journal-ink); }
+.tier-dormant, .tier-empty, .tier-archived { background: var(--note-soft); color: var(--note-ink); }
+.proj-self { background: var(--ink); color: var(--bg); font-size: 11px; }
+.proj-desc { margin: 4px 0 6px; color: var(--ink-2); font-size: 14px; }
+.proj-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12.5px; color: var(--muted); }
+.proj-meta span, .proj-meta a { display: inline-flex; align-items: center; gap: 4px; color: inherit; }
+.proj-why, .proj-next { margin: 6px 0 0; font-size: 13px; color: var(--ink-2); }
+.proj-next strong { color: var(--accent-ink); }
+.proj-scores { display: grid; gap: 6px; }
+.proj-overall { display: flex; align-items: baseline; gap: 6px; justify-content: flex-end; }
+.proj-overall strong { font: 400 34px/1 var(--display); }
+.proj-overall span { font-size: 12px; color: var(--muted); }
+.proj-bar { display: grid; grid-template-columns: 64px 1fr 26px; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.proj-bar strong { color: var(--ink); text-align: right; font-family: var(--mono); font-size: 12px; }
+.proj-bar-track { height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden; }
+.proj-bar-track span { display: block; height: 100%; border-radius: 3px; }
+.proj-bar.solid .proj-bar-track span { background: var(--task); }
+.proj-bar.potential .proj-bar-track span { background: var(--accent); }
+.proj-foot { margin-top: 16px; font-size: 12.5px; max-width: 760px; }
+@media (max-width: 760px) {
+  .proj-card { grid-template-columns: 40px minmax(0, 1fr); }
+  .proj-scores { grid-column: 1 / -1; }
+  .proj-overall { justify-content: flex-start; }
+  .proj-status { margin-left: 0; width: 100%; }
+}
+
+/* ============================================================ Databases (```database blocks) */
+.db { margin: 14px 0; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
+.db-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.db-name-label { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.db-head .count { font: 500 11.5px/1 var(--mono); color: var(--muted); }
+.db-views { margin-left: auto; border-bottom: 0; }
+.db-views button { height: 28px; font-size: 12.5px; }
+.db-views button span { margin-left: 4px; }
+.db-scroll { overflow-x: auto; }
+.db-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.db-table th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); text-transform: capitalize; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.db-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.db-table tr:last-child td { border-bottom: 0; }
+.db-table td[data-db-edit] { cursor: text; min-width: 80px; }
+.db-table td[data-db-edit]:hover, .db-table td[data-db-edit]:focus { background: var(--surface-2); outline: none; }
+.db-name { font-weight: 500; min-width: 160px; }
+.db-empty { color: var(--line-strong); }
+.db-input { width: 100%; min-width: 90px; font: inherit; padding: 3px 6px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--surface); color: var(--ink); }
+.db-title { font-weight: 500; }
+.db-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.db-board { display: flex; gap: 10px; padding: 10px; overflow-x: auto; align-items: flex-start; }
+.db-col { flex: 0 0 230px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; }
+.db-col.over { border-color: var(--accent); background: var(--accent-soft); }
+.db-col header { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; text-transform: capitalize; }
+.db-col header .count { font: 500 11.5px/1 var(--mono); color: var(--muted); }
+.db-cards { display: grid; gap: 6px; min-height: 8px; }
+.db-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; display: grid; gap: 4px; cursor: grab; }
+.db-card.dragging { opacity: .5; }
+.db-add-in { margin-top: 6px; width: 100%; display: inline-flex; align-items: center; gap: 4px; justify-content: center; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; padding: 5px; cursor: pointer; }
+.db-add-in:hover { color: var(--ink); border-color: var(--ink-2); }
+.db-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; padding: 10px; }
+.db-tile { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; background: var(--surface-2); display: grid; gap: 6px; align-content: start; }
+.db-tile p { margin: 0; font-size: 12.5px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.db-list { list-style: none; margin: 0; padding: 4px 10px; }
+.db-list li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.db-list li:last-child { border-bottom: 0; }
+.db-cal { padding: 10px; }
+.db-cal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.db-cal-head .muted { margin-left: auto; font-size: 12px; }
+.db-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.db-cal-dow { font-size: 11px; color: var(--muted); text-align: center; padding: 2px 0; }
+.db-cal-day { min-height: 64px; border: 1px solid var(--line); border-radius: 4px; padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; overflow: hidden; }
+.db-cal-day > span { color: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+.db-cal-day.out { opacity: .45; }
+.db-cal-day.today { border-color: var(--accent); }
+.db-cal-day .db-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--task-soft); color: var(--task); border-radius: 3px; padding: 0 3px; text-decoration: none; }
+.db-none, .db-more { padding: 12px; margin: 0; font-size: 13px; color: var(--muted); }
+
+/* ============================================================ the / menu */
+.slash-menu { max-height: 340px; overflow-y: auto; }

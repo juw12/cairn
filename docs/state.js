@@ -17,6 +17,7 @@ export const VIEWS = [
   { id: "map", label: "Map", icon: "map", group: "Remember" },
   { id: "canvas", label: "Canvas", icon: "canvas", group: "Remember" },
   { id: "code", label: "Code inbox", icon: "code", group: "Project" },
+  { id: "projects", label: "Projects", icon: "star", group: "Project" },
   { id: "vibe", label: "Vibe", icon: "activity", group: "Project" },
   { id: "autopilot", label: "Autopilot", icon: "route", group: "Project" },
   { id: "founder", label: "Founder Studio", icon: "target", group: "Project" },

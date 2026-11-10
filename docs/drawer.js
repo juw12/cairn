@@ -11,6 +11,7 @@ import { moveNote } from "./views.js";
 import { emit as emitPluginEvent } from "./plugins.js";
 import { pick } from "./palette.js";
 import { render, renderView, setView } from "./app.js";
+import { closeSlash, handleSlashKey, slashOpen, updateSlash } from "./slash.js";
 
 // ============================================================ editor drawer
 
@@ -789,16 +790,20 @@ function wireBody(body, note) {
       previewTimer = setTimeout(() => refreshPreview(note, body.value), 140);
     }
     updateSuggest(body, note);
+    updateSlash(body, caretPoint);
   });
   body.addEventListener("keyup", remember);
   body.addEventListener("click", () => {
     remember();
     updateSuggest(body, note);
+    closeSlash();
   });
   body.addEventListener("blur", () => setTimeout(() => {
     if (!suggest?.el.matches(":hover")) closeSuggest();
+    if (!document.querySelector(".slash-menu:hover")) closeSlash();
   }, 120));
   body.addEventListener("keydown", (e) => {
+    if (slashOpen() && handleSlashKey(e, body, caretPoint)) return;
     if (suggest && handleSuggestKey(e, body)) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && !e.shiftKey && (e.key.toLowerCase() === "b" || e.key.toLowerCase() === "i")) {

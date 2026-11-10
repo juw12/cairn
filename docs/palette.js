@@ -12,6 +12,7 @@ import { fillTemplate, searchNotes, searchScore, templates } from "./vault.js";
 import { startTour } from "./tour.js";
 import { showShortcuts } from "./shortcuts.js";
 import { monthlyReview, openLogSheet, readAloud, weeklyReview } from "./voicelog.js";
+import { DATABASE_EXAMPLE } from "./database.js";
 import { render, setView } from "./app.js";
 
 function commands() {
@@ -33,6 +34,7 @@ function commands() {
     if (state.open) {
       list.push(
         { label: "Insert template into this note", kind: "Note", icon: "template", run: insertTemplate },
+        { label: "Insert a database (table, board, gallery, calendar)", kind: "Note  /", icon: "columns", run: () => insertIntoOpenNote(DATABASE_EXAMPLE) },
         { label: "Rename or move this note", kind: "Note", icon: "pencil", run: renameOpenNote },
       );
     }

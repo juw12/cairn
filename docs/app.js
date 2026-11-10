@@ -25,6 +25,8 @@ import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
 import { founderView, syncFounderStage, wireFounder } from "./founder.js";
+import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
+import { initDatabases } from "./database.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
 
 // ============================================================ shell rendering
@@ -45,6 +47,7 @@ function counts() {
     journal: by("journal"),
     map: "",
     code: state.todos ? state.todos.length : "",
+    projects: "",
     vibe: ((n) => (n > 1 ? `${n} live` : n ? "live" : ""))(liveSessions().length),
     autopilot: autopilotCount() || queueItems().length || "",
     founder: "",
@@ -183,7 +186,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, founder: founderView };
+  const renderers = { home, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, founder: founderView, projects: projectsView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -359,6 +362,9 @@ function wireGlobal() {
       "vibe-jump": () => jumpToDay(actionEl.dataset.day),
       "vibe-to-chart": () => backToChart(actionEl.dataset.day),
       "vibe-why": () => toggleWhy(actionEl.dataset.why),
+      "projects-refresh": () => projectsAction("projects-refresh", actionEl),
+      "projects-sort": () => projectsAction("projects-sort", actionEl),
+      "projects-note": () => projectsAction("projects-note", actionEl),
       "copy-context": () => copyText(core.contextPack(state.notes, state.info.project, today()), "Context pack copied"),
       "save-context": saveContext,
       "copy-mcp": () => copyText(mcpSnippet(), "MCP setup copied"),
@@ -435,6 +441,7 @@ function wireGlobal() {
     const move = event.target.closest("[data-move]");
     if (move) moveNote(move.dataset.move, move.value);
     if (event.target.matches("[data-obsidian-auto]")) toggleAutoSync(event.target.checked);
+    if (event.target.matches("[data-projects-auto]")) projectsAction("projects-auto-note", event.target);
     handlePluginChange(event.target);
   });
 
@@ -461,6 +468,10 @@ function wireGlobal() {
     if (event.target.id === "proof-login-form") {
       event.preventDefault();
       return setProofLogin(event.target);
+    }
+    if (event.target.id === "projects-form") {
+      event.preventDefault();
+      return submitProjectsOwner(event.target);
     }
     if (event.target.id === "create-brain-form") {
       event.preventDefault();
@@ -646,6 +657,7 @@ async function boot() {
   wireGlobal();
   initHoverPreview();
   initRichContent();
+  initDatabases();
 
   const params = new URLSearchParams(location.search);
   const brainParam = params.get("brain");
