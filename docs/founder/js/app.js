@@ -373,9 +373,7 @@ function setTicker(html, tone = "") {
   ticker.className = `ticker ${tone}`;
   ticker.innerHTML = html;
   // Phones: the full roster and decision list sit below the square; one tap jumps there.
-  ticker.querySelector("[data-jump=feed]")?.addEventListener("click", () => {
-    $(".feed").scrollIntoView({ behavior: "smooth", block: "start" });
-  });
+  ticker.querySelector("[data-jump=feed]")?.addEventListener("click", () => openFeed());
   $("#tickerResults")?.addEventListener("click", () => {
     document.querySelector('.tab[data-tab="results"]')?.click();
     $(".tabs").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1545,7 +1543,30 @@ for (const stepId of SETUP_STEPS) {
 for (const button of document.querySelectorAll(".step-next")) {
   button.addEventListener("click", () => openSetupStep(button.dataset.next));
 }
-$("#miniRoster")?.addEventListener("click", () => $(".feed").scrollIntoView({ behavior: "smooth", block: "start" }));
+// Phones: the full buyer list opens as a bottom sheet so the square stays in view.
+const phoneQuery = window.matchMedia("(max-width: 760px)");
+function openFeed() {
+  const feed = $(".feed");
+  if (!phoneQuery.matches) {
+    feed.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  // Bring the square to the top so it stays visible above the sheet.
+  $(".arena").scrollIntoView({ block: "start" });
+  feed.classList.add("sheet-open");
+  document.body.classList.add("sheet-lock");
+  $("#sheetClose")?.focus();
+}
+function closeFeed() {
+  $(".feed").classList.remove("sheet-open");
+  document.body.classList.remove("sheet-lock");
+}
+$("#miniRoster")?.addEventListener("click", openFeed);
+$("#sheetClose")?.addEventListener("click", closeFeed);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && $(".feed").classList.contains("sheet-open")) closeFeed();
+});
+phoneQuery.addEventListener("change", closeFeed);
 $("#pitch")?.addEventListener("input", () => updatePitchSummary());
 
 // Inside Cairn: small same-origin events let the host page track progress and open setup.
