@@ -812,7 +812,7 @@ class EndToEndTests(unittest.TestCase):
             return [...deg.entries()].sort((a, b) => b[1] - a[1])[0][0];
         }""")
         node = page.locator(f'#map-svg .map-node[data-node="{hub}"]')
-        node.click()
+        node.locator("circle").click()  # the dot itself: the group's box also spans the label, which ignores the pointer
         self.assertIn("selected", node.get_attribute("class"))
         self.assertTrue(page.locator("#map-card").is_visible())
         # Arrow keys walk to a linked note.
