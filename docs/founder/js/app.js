@@ -1577,8 +1577,19 @@ function notifyHost(type, detail = {}) {
 
 window.addEventListener("message", (event) => {
   if (event.origin !== location.origin || event.source !== window.parent) return;
-  if (event.data?.type === "founder-studio:edit") openSetupStep("productSection");
+  if (event.data?.type !== "founder-studio:edit") return;
+  const section = ["productSection", "buyersSection", "pitchSection"].includes(event.data.section) ? event.data.section : "productSection";
+  openSetupStep(section);
 });
+
+// Inside Cairn the host page already names the studio, so drop the brand block and keep the honesty note short.
+if (window.parent !== window) {
+  document.documentElement.classList.add("embedded");
+  const banner = document.querySelector(".demo-banner");
+  if (banner) {
+    banner.innerHTML = 'Runs in your browser with the founder skill\'s own scripts. Quick sim is a rule model, not evidence; AI buyers need the <a href="https://github.com/juw12/founder-studio#run" target="_blank" rel="noopener">local app</a>.';
+  }
+}
 
 // Inside Cairn: hand each finished panel to the host page so it can be saved as a note in the brain.
 function shareWithHost(run, summary, heading) {
