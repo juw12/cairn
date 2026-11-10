@@ -24,7 +24,7 @@ HUBS = {
     "plan": ["board", "ideas", "decisions"],
     "notes": ["notes", "journal"],
     "map": ["map", "canvas"],
-    "build": ["vibe", "autopilot", "code"],
+    "build": ["vibe", "projects", "autopilot", "code"],
     "founder": ["founder"],
     "integrations": ["context", "obsidian", "plugins"],
     "people": ["people", "proof"],
@@ -179,7 +179,7 @@ class EndToEndTests(unittest.TestCase):
                 expected = {"view": view, "hubs": [hub], "tabs": tabs, "tab": view if tabs else None}
                 self.assertEqual(self.nav_state(page), expected)
                 self.assertTrue(page.inner_text("#view").strip(), view)
-        self.assertEqual(sum(len(views) for views in HUBS.values()), 17)
+        self.assertEqual(sum(len(views) for views in HUBS.values()), 18)
         self.assertEqual(self.errors, [])
 
     def test_a_sidebar_entry_reopens_the_tab_used_last(self):

@@ -273,7 +273,9 @@ class NotionAndProjectsTests(unittest.TestCase):
 
     def test_projects_view_ranks_repos_and_saves_a_note(self):
         page = self.open()
-        page.click('#nav [data-go="projects"]')
+        # Projects is a tab of the Build hub in the sidebar.
+        page.click('#nav [data-hub="build"]')
+        page.click('.hub-tabs [data-go="projects"]')
         page.wait_for_selector(".proj-card")
         names = page.eval_on_selector_all(".proj-card .proj-title a", "els => els.map((e) => e.textContent)")
         self.assertEqual(names[0], "cairn")

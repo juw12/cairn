@@ -221,7 +221,9 @@ export function rankProjects(repos, { sort = "overall", now = Date.now(), facts 
   // and each card keeps the steps that are specific to it.
   const shared = new Set(sharedSteps(scored));
   for (const project of scored) {
-    project.score.nextSteps = project.score.fixes.filter((fix) => !shared.has(fix)).slice(0, 2);
+    const specific = project.score.fixes.filter((fix) => !shared.has(fix));
+    // Nothing specific left (usually your best repos): still show the one step that would lift it most.
+    project.score.nextSteps = specific.length ? specific.slice(0, 2) : project.score.fixes.slice(0, 1);
   }
   return scored;
 }
@@ -287,7 +289,7 @@ const local = {
   },
 };
 
-const view = { owner: null, loading: false, error: "", repos: null, facts: {}, loadedAt: 0, moves: {}, timer: null };
+const view = { owner: null, loading: false, error: "", repos: null, facts: {}, loadedAt: 0, failedAt: 0, moves: {}, timer: null };
 
 export function defaultOwner() {
   const saved = local.get(OWNER_KEY);
@@ -394,6 +396,7 @@ export async function loadProjects({ owner = view.owner || defaultOwner(), quiet
     if (local.get(AUTO_NOTE_KEY, false)) await saveRankingNote({ quiet: true });
   } catch (error) {
     view.error = error.message || "Couldn't reach GitHub.";
+    view.failedAt = Date.now();
     if (!quiet) toast(view.error, { error: true });
   } finally {
     view.loading = false;
@@ -402,11 +405,18 @@ export async function loadProjects({ owner = view.owner || defaultOwner(), quiet
 }
 
 // Re-rank on its own: when the page opens with old data, and every few minutes while Cairn stays open.
+// A failed fetch waits as long as a stale ranking before trying again (Refresh retries at once),
+// so a GitHub outage or rate limit never turns into a request loop.
+function isStale() {
+  const now = Date.now();
+  return now - view.loadedAt > STALE_MS && now - view.failedAt > STALE_MS;
+}
+
 function ensureFresh() {
-  if (!view.loading && Date.now() - view.loadedAt > STALE_MS) loadProjects({ quiet: Boolean(view.repos) });
+  if (!view.loading && isStale()) loadProjects({ quiet: Boolean(view.repos) });
   if (!view.timer) {
     view.timer = setInterval(() => {
-      if (state.view === "projects" && !document.hidden && Date.now() - view.loadedAt > STALE_MS) loadProjects({ quiet: true });
+      if (state.view === "projects" && !document.hidden && isStale()) loadProjects({ quiet: true });
     }, 60 * 1000);
   }
 }

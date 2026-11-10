@@ -35,7 +35,7 @@ export const HUBS = [
   { id: "plan", label: "Plan", icon: "board", views: ["board", "ideas", "decisions"], count: "board" },
   { id: "notes", label: "Notes", icon: "note", views: ["notes", "journal"], count: "notes" },
   { id: "map", label: "Map", icon: "map", views: ["map", "canvas"] },
-  { id: "build", label: "Build", icon: "code", views: ["vibe", "autopilot", "code"], count: "vibe" },
+  { id: "build", label: "Build", icon: "code", views: ["vibe", "projects", "autopilot", "code"], count: "vibe" },
   { id: "founder", label: "Founder Studio", icon: "target", views: ["founder"] },
   { id: "integrations", label: "Integrations", icon: "puzzle", views: ["context", "obsidian", "plugins"] },
   { id: "people", label: "People", icon: "users", views: ["people", "proof"] },

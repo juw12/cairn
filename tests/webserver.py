@@ -178,6 +178,9 @@ class GitHubMock:
             return self.reply(route, user, headers={"x-oauth-scopes": "public_repo"})
         if path == "/users/juw12":
             return self.reply(route, MOCK_USER)
+        if path == "/users/juw12/repos":
+            # The Projects page lists the owner's repos; tests that rank real repos pass them via `extra`.
+            return self.reply(route, [])
         if path.startswith("/users/"):
             return self.reply(route, {"message": "Not Found"}, 404)
         if path == "/search/repositories":
