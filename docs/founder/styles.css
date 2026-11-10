@@ -931,3 +931,21 @@ html { scrollbar-gutter: stable; }
 .demo-engine-status { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 50;
   padding: 10px 16px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line);
   color: var(--text); font-size: 13px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); }
+
+/* v2-r13: phone decision list as a bottom sheet over the lower screen */
+.sheet-close { display: none; margin-left: auto; min-height: 32px; padding: 4px 12px; }
+@media (max-width: 760px) {
+  .feed.sheet-open {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    max-height: 40vh; border-radius: 16px 16px 0 0; border: 1px solid var(--line);
+    background: var(--panel); box-shadow: 0 -10px 30px var(--shadow);
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+    animation: sheet-in 180ms ease-out;
+  }
+  .feed.sheet-open .sheet-close { display: inline-flex; align-items: center; }
+  .feed.sheet-open .roster-head, .feed.sheet-open .roster, .feed.sheet-open .roster-key { display: none; }
+  .feed.sheet-open .feed-head { display: flex; align-items: center; gap: 8px; }
+  body.sheet-lock { overflow: hidden; }
+}
+@keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .feed.sheet-open { animation: none; } }
