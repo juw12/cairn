@@ -1888,13 +1888,15 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
 .proj-toolbar .input { width: 200px; }
 .proj-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
 .proj-status { font-size: 12.5px; margin-left: auto; }
-.proj-lead { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 14px; color: var(--ink-2); }
+.proj-lead { margin: 0 0 12px; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.proj-lead .icon { vertical-align: -2px; margin-right: 4px; }
 .proj-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .proj-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) 210px; gap: 14px; align-items: start; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .proj-card.podium { border-color: var(--line-strong); }
 .proj-card.self { box-shadow: inset 3px 0 0 var(--accent), var(--shadow-sm); }
 .proj-rank { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .proj-rank > span { font: 400 30px/1 var(--display); color: var(--ink); }
+.proj-card.podium .proj-rank > span { color: var(--accent); }
 .proj-move { font: 600 11px/1 var(--mono); }
 .proj-move.up { color: var(--journal); }
 .proj-move.down { color: var(--danger); }
@@ -1909,7 +1911,7 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
 .tier-seedling { background: var(--journal-soft); color: var(--journal-ink); }
 .tier-dormant, .tier-empty, .tier-archived { background: var(--note-soft); color: var(--note-ink); }
 .proj-self { background: var(--ink); color: var(--bg); font-size: 11px; }
-.proj-desc { margin: 4px 0 6px; color: var(--ink-2); font-size: 14px; }
+.proj-desc { margin: 4px 0 6px; color: var(--ink-2); font-size: 14px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .proj-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12.5px; color: var(--muted); }
 .proj-meta span, .proj-meta a { display: inline-flex; align-items: center; gap: 4px; color: inherit; }
 .proj-why, .proj-next { margin: 6px 0 0; font-size: 13px; color: var(--ink-2); }

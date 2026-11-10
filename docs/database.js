@@ -5,7 +5,8 @@
 //   from: tasks                 folder (optional)
 //   type: task                  note types, comma separated (optional)
 //   tag: release                every tag must match (optional)
-//   where: status != done       one condition per line: = != > < >= <= contains, or "has x" / "no x"
+//   where: status != done       one condition per line: = != > < >= <= contains, or "has x" / "no x";
+//                               dates can be relative: due < today, due <= today+7
 //   sort: due asc               any property, or title / created / updated
 //   view: table                 table | board | gallery | list | calendar
 //   group: status               the board's columns (default: status)
@@ -63,17 +64,31 @@ export function parseCondition(text) {
   const value = String(text || "").trim();
   const has = /^(has|no)\s+([\w-]+)$/i.exec(value);
   if (has) return { key: has[2].toLowerCase(), op: has[1].toLowerCase() === "has" ? "has" : "no", value: "" };
+  // The operator that comes first wins (so "title contains a=b" is a contains), the longest one on a tie
+  // (">=" over ">").
+  const lower = value.toLowerCase();
+  let best = null;
   for (const op of OPERATORS) {
-    const index = value.toLowerCase().indexOf(op);
-    if (index > 0) {
-      return {
-        key: value.slice(0, index).trim().toLowerCase(),
-        op: op.trim(),
-        value: value.slice(index + op.length).trim().replace(/^["']|["']$/g, ""),
-      };
-    }
+    const index = lower.indexOf(op);
+    if (index > 0 && (!best || index < best.index || (index === best.index && op.length > best.op.length))) best = { index, op };
   }
-  return null;
+  if (!best) return null;
+  return {
+    key: value.slice(0, best.index).trim().toLowerCase(),
+    op: best.op.trim(),
+    value: value.slice(best.index + best.op.length).trim().replace(/^["']|["']$/g, ""),
+  };
+}
+
+// "today", "tomorrow", "yesterday" and "today+7" / "today-3" in a condition mean that local date, so
+// `where: due < today` keeps finding overdue work without editing the block every day.
+export function resolveDate(text, now = new Date()) {
+  const match = /^(today|tomorrow|yesterday)([+-]\d+)?$/i.exec(String(text || "").trim());
+  if (!match) return text;
+  const base = { today: 0, tomorrow: 1, yesterday: -1 }[match[1].toLowerCase()];
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + base + Number(match[2] || 0));
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
 }
 
 // A note's value for a property, with a few names that always work.
@@ -105,20 +120,21 @@ function compare(a, b) {
   return String(a ?? "").localeCompare(String(b ?? ""), undefined, { numeric: true, sensitivity: "base" });
 }
 
-export function matches(note, condition) {
+export function matches(note, condition, now = new Date()) {
   const value = propValue(note, condition.key);
   if (condition.op === "has") return !isEmpty(value);
   if (condition.op === "no") return isEmpty(value);
-  const wanted = condition.value.toLowerCase();
+  const target = resolveDate(condition.value, now);
+  const wanted = target.toLowerCase();
   const values = (Array.isArray(value) ? value : [value]).map((v) => String(v ?? "").toLowerCase());
   switch (condition.op) {
     case "=": return wanted === "" ? isEmpty(value) : values.includes(wanted);
     case "!=": return wanted === "" ? !isEmpty(value) : !values.includes(wanted);
     case "contains": return values.some((v) => v.includes(wanted));
-    case ">": return !isEmpty(value) && compare(value, condition.value) > 0;
-    case "<": return !isEmpty(value) && compare(value, condition.value) < 0;
-    case ">=": return !isEmpty(value) && compare(value, condition.value) >= 0;
-    case "<=": return !isEmpty(value) && compare(value, condition.value) <= 0;
+    case ">": return !isEmpty(value) && compare(value, target) > 0;
+    case "<": return !isEmpty(value) && compare(value, target) < 0;
+    case ">=": return !isEmpty(value) && compare(value, target) >= 0;
+    case "<=": return !isEmpty(value) && compare(value, target) <= 0;
     default: return true;
   }
 }

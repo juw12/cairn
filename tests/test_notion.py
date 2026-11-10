@@ -64,6 +64,9 @@ REPOS = [
     # Never ranked: a fork and an archived repo.
     repo("someone-elses", fork=True, size=999, stargazers_count=500),
     repo("retired", archived=True, size=999, stargazers_count=500),
+    # Settings, not projects: the profile README repo and .github.
+    repo("juw12", description="Profile README", size=50, pushed_at="2026-11-09T00:00:00Z"),
+    repo(".github", description="Default community files", size=10, pushed_at="2026-11-09T00:00:00Z"),
 ]
 
 ROOTS = {
@@ -143,6 +146,10 @@ class NotionAndProjectsTests(unittest.TestCase):
                     ], 'trail-mix'),
                     moves: P.rankMoves({ 'juw12/cairn': 2, 'juw12/rocket': 1 }, ranked),
                     md: P.rankingMarkdown('juw12', ranked, '2026-11-10'),
+                    // Five near-identical repos that differ only in size still get distinct, ordered scores.
+                    spread: P.rankProjects([1, 2, 3, 4, 5].map((i) => ({
+                        ...repos[1], name: `twin${i}`, full_name: `juw12/twin${i}`, size: 200 * i,
+                    })), { now: at }).map((p) => [p.repo.name, p.score.overall]),
                 };
             }""",
             [REPOS, ROOTS, DAY],
@@ -153,8 +160,14 @@ class NotionAndProjectsTests(unittest.TestCase):
         self.assertEqual(result["tiers"]["old-thing"], "Dormant")
         self.assertEqual(result["tiers"]["cairn"], "Flagship")
         self.assertGreater(result["cairn"]["solid"], 80)
-        # "Why" lists the three signals that added the most: recent work, traction, tests.
-        self.assertEqual(result["cairn"]["strengths"], ["pushed 1d ago", "40 stars", "has tests"])
+        # "Why" leads with what sets Cairn apart from the other repos (only it has tests; it has by far the
+        # most stars), ahead of what most repos share (a recent push).
+        self.assertEqual(result["cairn"]["strengths"], ["has tests", "40 stars", "pushed 1d ago"])
+        # Similar repos spread out by how they compare with each other: bigger codebase, higher score.
+        names = [name for name, _ in result["spread"]]
+        scores = [score for _, score in result["spread"]]
+        self.assertEqual(names, ["twin5", "twin4", "twin3", "twin2", "twin1"])
+        self.assertEqual(len(set(scores)), 5, result["spread"])
         # Next steps are things you can do, biggest gain first: a dormant repo needs a push, then tests.
         self.assertTrue(result["oldNext"][0].startswith("Push an update"), result["oldNext"])
         self.assertEqual(result["oldNext"][1], "Add tests")
@@ -192,10 +205,26 @@ class NotionAndProjectsTests(unittest.TestCase):
                     addOption: D.setBlockOption(body, 'type: task\\nview: table', 'group', 'tags'),
                     missing: D.setBlockOption(body, 'type: idea', 'view', 'board'),
                     calendarFirst: weeks[0][0].date,
+                    // Relative dates resolve against "now"; the first operator in the line wins.
+                    overdue: D.runDatabase(notes, D.parseDatabase('where: due < today')).rows.map((n) => n.title),
+                    soon: D.resolveDate('today+7', new Date(2026, 10, 10)),
+                    yesterday: D.resolveDate('yesterday', new Date(2026, 10, 1)),
+                    plain: D.resolveDate('2026-01-01'),
+                    firstOp: D.parseCondition('title contains a=b'),
                     onTwelfth: weeks.flat().find((d) => d.date === '2026-11-12').rows.map((n) => n.title),
                 };
             }"""
         )
+        self.assertEqual(result["soon"], "2026-11-17")
+        self.assertEqual(result["yesterday"], "2026-10-31")
+        self.assertEqual(result["plain"], "2026-01-01")
+        self.assertEqual(result["firstOp"], {"key": "title", "op": "contains", "value": "a=b"})
+        # Both dated tasks are due before the real today (2026-11-12 and 2026-11-02 are in the past by CI time
+        # only if today is later), so compare with a date computed the same way in Python.
+        import datetime
+        today = datetime.date.today().isoformat()
+        expected_overdue = sorted(t for t, due in (("Alpha", "2026-11-12"), ("Beta", "2026-11-02")) if due < today)
+        self.assertEqual(sorted(result["overdue"]), expected_overdue)
         self.assertEqual(result["spec"]["view"], "board")
         self.assertEqual(result["spec"]["from"], "tasks")
         self.assertEqual(result["spec"]["columns"], ["status", "due"])
@@ -250,6 +279,8 @@ class NotionAndProjectsTests(unittest.TestCase):
         self.assertEqual(names[0], "cairn")
         self.assertEqual(set(names), {"cairn", "rocket", "old-thing"})
         self.assertEqual(page.locator(".proj-card.self .proj-self").count(), 1)
+        # First ranking ever: nothing to compare with, so no "new"/up/down badges.
+        self.assertEqual(page.locator(".proj-move").count(), 0)
         self.assertIn("Focus pick", page.inner_text(".proj-lead"))
         # Re-sorting by potential is instant (no new GitHub calls).
         before = len(self.calls)

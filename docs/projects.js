@@ -67,11 +67,29 @@ function weigh(signals) {
   return max ? Math.round((got / max) * 100) : 0;
 }
 
-// One repo -> its scores, tier, the reasons it ranks where it does and the next steps that would lift it.
-//   repo:    a GitHub REST repo object (as returned by /users/:owner/repos)
-//   facts:   rootFacts(...) or null when the root wasn't checked
-//   mentions: notes in this brain that mention it, or null when there is no brain to ask
-export function scoreProject(repo, { now = Date.now(), facts = null, mentions = null } = {}) {
+// Raw numbers that are compared within your own set of repos (a 3 MB repo is big for one person, small for
+// a company). Each entry: key -> repo -> number.
+const RELATIVE = {
+  size: (repo) => repo.size || 0,
+  longevity: (repo, now) => days(Date.parse(repo.created_at || "") || now, Date.parse(repo.pushed_at || repo.updated_at || "") || now),
+  stars: (repo) => repo.stargazers_count || 0,
+  forks: (repo) => repo.forks_count || 0,
+};
+
+// Where `value` sits among `sorted` numbers: 0 = lowest, 1 = highest (ties share the middle). Zero is never a
+// strength, so it always scores 0.
+function percentile(sorted, value) {
+  if (!value || sorted.length < 2) return 0;
+  let below = 0;
+  let equal = 0;
+  for (const other of sorted) {
+    if (other < value) below += 1;
+    else if (other === value) equal += 1;
+  }
+  return clamp01((below + Math.max(0, equal - 1) / 2) / (sorted.length - 1));
+}
+
+function signalsFor(repo, { now, facts, mentions, cohort }) {
   const created = Date.parse(repo.created_at || "") || now;
   const pushed = Date.parse(repo.pushed_at || repo.updated_at || "") || created;
   const age = days(created, now);
@@ -81,29 +99,58 @@ export function scoreProject(repo, { now = Date.now(), facts = null, mentions = 
   const topics = repo.topics || [];
   const hasDemo = Boolean(String(repo.homepage || "").trim()) || Boolean(repo.has_pages);
   const known = (value) => (facts ? (value ? 1 : 0) : null);
+  // Half absolute (how good it is in general), half relative (how it compares with your other repos), so a
+  // set of similar repos still spreads out instead of tying.
+  const blend = (key, absolute) => (cohort?.sorted?.[key] ? 0.5 * absolute + 0.5 * percentile(cohort.sorted[key], RELATIVE[key](repo, now)) : absolute);
 
-  const solidSignals = [
+  const solid = [
     { key: "demo", label: "live demo or site", weight: 14, value: hasDemo ? 1 : 0, fix: "Ship a live demo (GitHub Pages is free)" },
     { key: "tests", label: "has tests", weight: 16, value: known(facts?.tests), fix: "Add tests" },
-    { key: "size", label: "real codebase", weight: 14, value: logScale(repo.size || 0, 5000), fix: "Build out the core feature" },
-    { key: "longevity", label: "kept up over time", weight: 12, value: clamp01(span / 120), fix: "Keep shipping small updates" },
-    { key: "ci", label: "CI checks", weight: 10, value: known(facts?.ci), fix: "Add a CI workflow" },
-    { key: "describe", label: "clear description", weight: 8, value: description.length >= 20 ? 1 : description ? 0.5 : 0, fix: "Write a one-line description" },
-    { key: "readme", label: "README", weight: 6, value: known(facts?.readme), fix: "Write a README" },
-    { key: "packaged", label: "installable package", weight: 6, value: known(facts?.packaged), fix: "Make it installable (package manifest)" },
-    { key: "license", label: "license", weight: 6, value: repo.license ? 1 : 0, fix: "Add a license" },
-    { key: "topics", label: "tagged topics", weight: 4, value: clamp01(topics.length / 3), fix: "Add 3+ topics" },
+    { key: "size", label: "substantial codebase", weight: 14, value: blend("size", logScale(repo.size || 0, 5000)), fix: null },
+    { key: "longevity", label: "kept up for months", weight: 12, value: blend("longevity", clamp01(span / 120)), fix: null },
+    { key: "ci", label: "CI checks", weight: 10, value: known(facts?.ci), fix: "Add a CI workflow that runs the tests" },
+    { key: "describe", label: "clear description", weight: 8, value: description.length >= 20 ? 1 : description ? 0.5 : 0, fix: "Write a one-line description on GitHub" },
+    { key: "readme", label: "README", weight: 6, value: known(facts?.readme), fix: "Write a README with a screenshot" },
+    // A package manifest counts in its favour, but its absence doesn't: a web app or a game needn't be a package.
+    { key: "packaged", label: "installable package", weight: 6, value: facts?.packaged ? 1 : null, fix: null },
+    { key: "license", label: "licensed", weight: 6, value: repo.license ? 1 : 0, fix: "Add a license (MIT takes a minute)" },
+    { key: "topics", label: "tagged topics", weight: 4, value: clamp01(topics.length / 3), fix: "Add 3+ topics on GitHub" },
   ];
-  const potentialSignals = [
-    { key: "stars", label: `${repo.stargazers_count || 0} stars`, weight: 26, value: logScale(repo.stargazers_count || 0, 100), fix: null },
+  const potential = [
+    { key: "stars", label: plural(repo.stargazers_count || 0, "star"), weight: 26, value: blend("stars", logScale(repo.stargazers_count || 0, 100)), fix: hasDemo && (repo.stargazers_count || 0) < 5 ? "Share the demo where your users are to get first stars" : null },
     { key: "momentum", label: idle < 1 ? "pushed today" : `pushed ${Math.round(idle)}d ago`, weight: 24, value: Math.exp(-idle / 30), fix: `Push an update (idle ${Math.round(idle)} days)` },
-    { key: "focus", label: mentions ? `in ${plural(mentions, "note")} of yours` : "in your notes", weight: 14, value: mentions === null ? null : logScale(mentions, 10), fix: "Write down what's next for it in a note" },
-    { key: "usable", label: "usable by others today", weight: 12, value: hasDemo ? 1 : 0, fix: "Give people a link to try it" },
+    { key: "focus", label: mentions ? `in ${plural(mentions, "note")} of yours` : "in your notes", weight: 14, value: mentions === null ? null : logScale(mentions, 10), fix: "Write down what's next for it in a note", brain: true },
+    { key: "usable", label: "usable by others today", weight: 12, value: hasDemo ? 1 : 0, fix: null },
     { key: "rising", label: "young and moving fast", weight: 10, value: age <= 180 && idle <= 14 ? 1 : age <= 365 && idle <= 30 ? 0.5 : 0, fix: null },
-    { key: "forks", label: `${repo.forks_count || 0} forks`, weight: 8, value: logScale(repo.forks_count || 0, 20), fix: null },
-    { key: "discoverable", label: "easy to discover", weight: 6, value: topics.length >= 3 && description ? 1 : topics.length || description ? 0.4 : 0, fix: "Add topics so people can find it" },
+    { key: "forks", label: plural(repo.forks_count || 0, "fork"), weight: 8, value: blend("forks", logScale(repo.forks_count || 0, 20)), fix: null },
+    { key: "discoverable", label: "easy to discover", weight: 6, value: topics.length >= 3 && description ? 1 : topics.length || description ? 0.4 : 0, fix: null },
   ];
+  return { solid, potential, idle };
+}
 
+// Facts about the whole set of repos that make each score relative: sorted raw numbers, and how common each
+// strength is (a strength every repo has, like "pushed today", says little about any one of them).
+export function buildCohort(repos, { now = Date.now(), facts = {}, mentions = null } = {}) {
+  const sorted = {};
+  for (const [key, read] of Object.entries(RELATIVE)) sorted[key] = repos.map((repo) => read(repo, now)).sort((a, b) => a - b);
+  const counts = {};
+  for (const repo of repos) {
+    const { solid, potential } = signalsFor(repo, { now, facts: facts[repo.full_name] || null, mentions: mentions ? mentions(repo.name) : null, cohort: { sorted } });
+    for (const signal of [...solid, ...potential]) {
+      if (signal.value !== null && signal.value >= 0.5) counts[signal.key] = (counts[signal.key] || 0) + 1;
+    }
+  }
+  const common = Object.fromEntries(Object.entries(counts).map(([key, count]) => [key, repos.length ? count / repos.length : 0]));
+  return { sorted, common };
+}
+
+// One repo -> its scores, tier, the reasons it ranks where it does and the next steps that would lift it.
+//   repo:     a GitHub REST repo object (as returned by /users/:owner/repos)
+//   facts:    rootFacts(...) or null when the root wasn't checked
+//   mentions: notes in this brain that mention it, or null when there is no brain to ask
+//   cohort:   buildCohort(...) of all the owner's repos, or null to score the repo on its own
+export function scoreProject(repo, { now = Date.now(), facts = null, mentions = null, cohort = null } = {}) {
+  const { solid: solidSignals, potential: potentialSignals, idle } = signalsFor(repo, { now, facts, mentions, cohort });
   const solid = weigh(solidSignals);
   const potential = weigh(potentialSignals);
   const overall = Math.round(0.6 * Math.max(solid, potential) + 0.4 * Math.min(solid, potential));
@@ -112,25 +159,26 @@ export function scoreProject(repo, { now = Date.now(), facts = null, mentions = 
   if (repo.archived) tier = "Archived";
   else if (!repo.size) tier = "Empty";
   else if (idle > 180) tier = "Dormant";
+  // Tiers follow the overall score, so a higher-ranked repo never gets a lower tier than one below it.
   else if (overall >= 70) tier = "Flagship";
-  else if (potential >= 55 && potential >= solid + 10) tier = "Rising";
-  else if (solid >= 60) tier = "Solid";
+  else if (overall >= 55) tier = potential >= solid + 10 ? "Rising" : "Solid";
 
   const all = [...solidSignals, ...potentialSignals].filter((s) => s.value !== null);
+  // Strengths: what this repo has that most of your others don't come first.
+  const rarity = (s) => 1.2 - (cohort?.common?.[s.key] ?? 0);
   const strengths = [...new Map(
     all
       .filter((s) => s.value >= 0.5)
-      .sort((a, b) => b.weight * b.value - a.weight * a.value)
+      .sort((a, b) => b.weight * b.value * rarity(b) - a.weight * a.value * rarity(a))
       .map((s) => [s.label, s]),
   ).values()].slice(0, 3).map((s) => s.label);
-  const nextSteps = [...new Map(
-    all
-      .filter((s) => s.fix && s.value < 0.5)
-      .sort((a, b) => b.weight * (1 - b.value) - a.weight * (1 - a.value))
-      .map((s) => [s.fix, s]),
-  ).values()].slice(0, 2).map((s) => s.fix);
+  // Next steps: concrete changes to the repo first, then "write it down" for the brain.
+  const gaps = all
+    .filter((s) => s.fix && s.value < 0.5)
+    .sort((a, b) => Number(Boolean(a.brain)) - Number(Boolean(b.brain)) || b.weight * (1 - b.value) - a.weight * (1 - a.value));
+  const fixes = [...new Set(gaps.map((s) => s.fix))];
 
-  return { solid, potential, overall, tier, strengths, nextSteps, idleDays: Math.round(idle) };
+  return { solid, potential, overall, tier, strengths, nextSteps: fixes.slice(0, 2), fixes, idleDays: Math.round(idle) };
 }
 
 const SORTS = {
@@ -139,29 +187,56 @@ const SORTS = {
   potential: (p) => p.score.potential,
 };
 
-// Score and order a list of repos. Forks and archived repos are left out (they aren't yours to grow),
-// except Cairn itself, which is always kept. Ties go to stars, then the most recent push.
+// Repos that hold settings rather than a project: the profile README (owner/owner) and owner/.github.
+const isMeta = (repo) => {
+  const name = String(repo.name || "").toLowerCase();
+  return name === ".github" || name === String(repo.owner?.login || "").toLowerCase();
+};
+
+// Score and order a list of repos. Forks, archived and profile/settings repos are left out (they aren't
+// projects to grow), except Cairn itself, which is always kept. Ties go to stars, then the most recent push.
 export function rankProjects(repos, { sort = "overall", now = Date.now(), facts = {}, mentions = null, keep = CAIRN } = {}) {
   const by = SORTS[sort] || SORTS.overall;
   const seen = new Set();
-  return repos
-    .filter((repo) => {
-      const name = String(repo.full_name || "").toLowerCase();
-      if (seen.has(name)) return false;
-      seen.add(name);
-      if (name === keep.toLowerCase()) return true;
-      return !repo.fork && !repo.archived;
-    })
+  const kept = repos.filter((repo) => {
+    const name = String(repo.full_name || "").toLowerCase();
+    if (seen.has(name)) return false;
+    seen.add(name);
+    if (name === keep.toLowerCase()) return true;
+    return !repo.fork && !repo.archived && !isMeta(repo);
+  });
+  const cohort = buildCohort(kept, { now, facts, mentions });
+  const scored = kept
     .map((repo) => ({
       repo,
       self: String(repo.full_name || "").toLowerCase() === keep.toLowerCase(),
-      score: scoreProject(repo, { now, facts: facts[repo.full_name] || null, mentions: mentions ? mentions(repo.name) : null }),
+      score: scoreProject(repo, { now, facts: facts[repo.full_name] || null, mentions: mentions ? mentions(repo.name) : null, cohort }),
     }))
     .sort((a, b) =>
       by(b) - by(a) ||
       (b.repo.stargazers_count || 0) - (a.repo.stargazers_count || 0) ||
       String(b.repo.pushed_at || "").localeCompare(String(a.repo.pushed_at || "")))
     .map((project, index) => ({ ...project, rank: index + 1 }));
+  // A step most of your repos need is advice about you, not about one repo: it is shown once above the list,
+  // and each card keeps the steps that are specific to it.
+  const shared = new Set(sharedSteps(scored));
+  for (const project of scored) {
+    project.score.nextSteps = project.score.fixes.filter((fix) => !shared.has(fix)).slice(0, 2);
+  }
+  return scored;
+}
+
+// Next steps that at least `share` of the repos have in common (only for sets of 6+ repos).
+export function sharedSteps(ranked, share = 0.6) {
+  if (ranked.length < 6) return [];
+  const counts = new Map();
+  for (const project of ranked) {
+    for (const fix of project.score.fixes || []) counts.set(fix, (counts.get(fix) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count / ranked.length >= share)
+    .sort((a, b) => b[1] - a[1])
+    .map(([fix]) => fix);
 }
 
 // Rank changes since the last different day: { name: +2 } means it climbed two places.
@@ -229,8 +304,14 @@ async function listRepos(owner) {
   const path = mine
     ? "/user/repos?affiliation=owner&sort=pushed&per_page=100"
     : `/users/${encodeURIComponent(owner)}/repos?type=owner&sort=pushed&per_page=100`;
-  const repos = await gh.apiGet(path);
-  if (!Array.isArray(repos)) throw new gh.GitHubError("GitHub didn't return a list of repos.");
+  const repos = [];
+  // 100 per page; people with more repos get up to 300 (newest pushes first).
+  for (let page = 1; page <= 3; page += 1) {
+    const batch = await gh.apiGet(`${path}&page=${page}`);
+    if (!Array.isArray(batch)) throw new gh.GitHubError("GitHub didn't return a list of repos.");
+    repos.push(...batch);
+    if (batch.length < 100) break;
+  }
   if (!repos.some((r) => String(r.full_name).toLowerCase() === CAIRN.toLowerCase())) {
     try {
       repos.push(await gh.apiGet(`/repos/${CAIRN}`));
@@ -241,20 +322,35 @@ async function listRepos(owner) {
   return repos;
 }
 
-// Root listings tell us about tests, CI, README and packaging. Anonymous visitors get 60 GitHub requests an
-// hour, so only the leading repos are checked then; signed in, every repo is (answers are cached 10 minutes).
-async function loadFacts(repos) {
+// Root listings tell us about tests, CI, README and packaging. A root only changes when the repo is pushed, so
+// answers are kept per repo and push time, and only new or pushed repos are asked again. Anonymous visitors get
+// 60 GitHub requests an hour, so they check at most 12 repos per refresh (the leading ones first); every
+// refresh fills in more until all are known. Signed in, up to 60 per refresh.
+const FACTS_KEY = (owner) => `cairn.projects.facts:${owner.toLowerCase()}`;
+
+async function loadFacts(owner, repos) {
   const budget = auth.session() ? 60 : 12;
-  const preliminary = rankProjects(repos, { mentions: mentionCounter() }).slice(0, budget);
+  const saved = local.get(FACTS_KEY(owner), {});
   const facts = {};
-  await Promise.all(preliminary.map(async ({ repo }) => {
+  const missing = [];
+  for (const { repo } of rankProjects(repos, { mentions: mentionCounter() })) {
+    const cached = saved[repo.full_name];
+    if (cached && cached.pushed === repo.pushed_at) facts[repo.full_name] = cached.facts;
+    else missing.push(repo);
+  }
+  await Promise.all(missing.slice(0, budget).map(async (repo) => {
     try {
       const listing = await gh.apiGet(`/repos/${repo.full_name}/contents/`);
-      facts[repo.full_name] = rootFacts(Array.isArray(listing) ? listing.map((item) => item.name) : null);
+      const found = rootFacts(Array.isArray(listing) ? listing.map((item) => item.name) : null);
+      if (found) {
+        facts[repo.full_name] = found;
+        saved[repo.full_name] = { pushed: repo.pushed_at, facts: found };
+      }
     } catch {
       /* an empty repo or the hourly limit: score from what we have */
     }
   }));
+  local.set(FACTS_KEY(owner), saved);
   return facts;
 }
 
@@ -291,7 +387,7 @@ export async function loadProjects({ owner = view.owner || defaultOwner(), quiet
   try {
     const repos = await listRepos(owner);
     view.repos = repos;
-    view.facts = await loadFacts(repos);
+    view.facts = await loadFacts(owner, repos);
     view.loadedAt = Date.now();
     const list = rankProjects(repos, { facts: view.facts, mentions: mentionCounter() });
     view.moves = rankMoves(rememberRanks(owner, list), list);
@@ -352,8 +448,11 @@ function bar(label, value, cls) {
   return `<div class="proj-bar ${cls}" title="${label} ${value} / 100"><span class="proj-bar-label">${label}</span><span class="proj-bar-track"><span style="width:${value}%"></span></span><strong>${value}</strong></div>`;
 }
 
+// delta: a number of places (from rankMoves), null for a repo that wasn't ranked yesterday, undefined when
+// there is no earlier ranking to compare with (the first day): then nothing is shown.
 function move(delta) {
-  if (delta === null || delta === undefined) return `<span class="proj-move new" title="New since yesterday">new</span>`;
+  if (delta === undefined) return "";
+  if (delta === null) return `<span class="proj-move new" title="New since yesterday">new</span>`;
   if (!delta) return "";
   return delta > 0
     ? `<span class="proj-move up" title="Up ${delta} since yesterday">▲${delta}</span>`
@@ -379,7 +478,7 @@ function card(project) {
           <span class="pill proj-tier tier-${score.tier.toLowerCase()}" title="${esc(TIER_HINT[score.tier] || "")}">${score.tier}</span>
           ${self ? `<span class="pill proj-self">this app</span>` : ""}
         </div>
-        ${repo.description ? `<p class="proj-desc">${esc(repo.description)}</p>` : ""}
+        ${repo.description ? `<p class="proj-desc" title="${esc(repo.description)}">${esc(repo.description)}</p>` : ""}
         <div class="proj-meta">${chips}</div>
         ${score.strengths.length ? `<p class="proj-why"><strong>Why:</strong> ${score.strengths.map(esc).join(" · ")}</p>` : ""}
         ${score.nextSteps.length ? `<p class="proj-next"><strong>Next:</strong> ${score.nextSteps.map(esc).join(" · ")}</p>` : ""}
@@ -390,6 +489,13 @@ function card(project) {
         ${bar("Potential", score.potential, "potential")}
       </div>
     </li>`;
+}
+
+// Anonymous GitHub limits mean tests/CI/README are only known for some repos at first; say so honestly.
+function coverage(list) {
+  const checked = list.filter((p) => view.facts[p.repo.full_name]).length;
+  if (!list.length || checked >= list.length) return "";
+  return ` · tests & CI checked for ${checked} of ${list.length} (more each refresh${auth.session() ? "" : "; sign in to check all"})`;
 }
 
 export function projectsView() {
@@ -403,11 +509,13 @@ export function projectsView() {
   const status = view.loading
     ? "Ranking…"
     : view.loadedAt
-      ? `Re-ranked ${relativeTime(view.loadedAt)} · refreshes every 15 min`
+      ? `Re-ranked ${relativeTime(view.loadedAt)} · refreshes every 15 min${coverage(list)}`
       : "";
   const top = list[0];
+  const shared = sharedSteps(list).slice(0, 2);
   const lead = top
-    ? `<p class="proj-lead">${icon("target", "sm")} Focus pick: <strong>${esc(top.repo.name)}</strong>${top.score.nextSteps[0] ? ` · next: ${esc(top.score.nextSteps[0])}` : ""}</p>`
+    ? `<p class="proj-lead">${icon("target", "sm")} Focus pick: <strong>${esc(top.repo.name)}</strong>${top.score.nextSteps[0] ? ` · next: ${esc(top.score.nextSteps[0])}` : ""}</p>
+       ${shared.length ? `<p class="proj-lead proj-shared">${icon("sparkle", "sm")} Across most of your repos: ${shared.map(esc).join(" · ")}</p>` : ""}`
     : "";
   const body = view.error && !list.length
     ? `<div class="card"><div class="empty-state">${icon("github")}<h3>Couldn't load the repos</h3><p>${esc(view.error)}</p></div></div>`
@@ -432,7 +540,7 @@ export function projectsView() {
     </form>
     ${lead}
     ${body}
-    <p class="muted proj-foot">Solid: live demo, tests, CI, codebase size, months of upkeep, README, license, packaging. Potential: stars, recent pushes, how often your notes mention it, whether people can try it, forks. Overall weighs the stronger side more, so a project can top the list by being either very solid or very promising. Forks and archived repos are left out.</p>`;
+    <p class="muted proj-foot">Solid: live demo, tests, CI, codebase size, months of upkeep, README, license, packaging. Potential: stars, recent pushes, how often your notes mention it, whether people can try it, forks. Overall weighs the stronger side more, so a project can top the list by being either very solid or very promising. Forks, archived repos and profile/settings repos are left out.</p>`;
 }
 
 // Clicks and the owner form (called from the app's global handlers).
