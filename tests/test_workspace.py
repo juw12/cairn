@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from webserver import install_github_mock, launch_browser, start_static_server  # noqa: E402
+from webserver import go_to, install_github_mock, launch_browser, start_static_server  # noqa: E402
 
 try:
     from playwright.sync_api import sync_playwright
@@ -55,7 +55,7 @@ class WorkspaceTests(unittest.TestCase):
         return page.evaluate("(p) => JSON.parse(window.cairn.state.files.find((f) => f.path === p).text)", path)
 
     def open_canvas(self, page):
-        page.click('#nav [data-go="canvas"]')
+        go_to(page, "canvas")
         page.click(f'.cv-card[data-cv-open="{CANVAS}"]')
         page.wait_for_selector(".cv-node")
 
@@ -200,7 +200,7 @@ class WorkspaceTests(unittest.TestCase):
             {"canvas": "canvases/a.canvas", "note": "notes/user-interviews.md"},
         ])
         # The demo board holds tasks/gpx-import.md: its drawer lists the board under "On canvases".
-        page.click('#nav [data-go="notes"]')
+        go_to(page, "notes")
         page.click('#view [data-open="tasks/gpx-import.md"]')
         page.wait_for_selector(".on-canvases [data-open-canvas]")
         self.assertEqual(page.get_attribute(".on-canvases [data-open-canvas]", "data-open-canvas"), CANVAS)
@@ -208,7 +208,7 @@ class WorkspaceTests(unittest.TestCase):
         page.wait_for_selector(".cv-node")
         self.assertEqual(page.evaluate("() => window.cairn.state.canvas"), CANVAS)
         # The Map shows the board as a square joined to the notes it holds.
-        page.click('#nav [data-go="map"]')
+        go_to(page, "map")
         page.wait_for_selector(f'.map-canvas[data-node="canvas:{CANVAS}"]')
         self.assertGreaterEqual(page.locator(".map-edge-canvas").count(), 3)
         self.assertEqual(self.errors, [])
@@ -288,7 +288,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_new_canvas_add_note_and_unknown_fields_survive(self):
         page = self.open()
-        page.click('#nav [data-go="canvas"]')
+        go_to(page, "canvas")
         page.click("[data-cv-new]")
         page.fill(".modal input", "Ideas wall")
         page.press(".modal input", "Enter")
@@ -339,7 +339,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_tabs_open_switch_close_and_reopen(self):
         page = self.open()
-        page.click('#nav [data-go="ideas"]')
+        go_to(page, "ideas")
         page.click('.item-card[data-open="ideas/offline-maps.md"]')
         page.wait_for_selector("#ed-body")
         self.assertEqual(page.locator(".tab-strip").count(), 0, "one note, no tab strip")
@@ -371,7 +371,7 @@ class WorkspaceTests(unittest.TestCase):
         # Tabs are remembered after a reload and survive a rename.
         page.reload()
         page.wait_for_selector("#nav button")
-        page.click('#nav [data-go="ideas"]')
+        go_to(page, "ideas")
         page.click('.item-card[data-open="ideas/weather-overlay.md"]')
         page.wait_for_selector(".tab-strip")
         self.assertEqual(len(tabs()), 3)
@@ -385,7 +385,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_split_view_shows_two_notes_side_by_side(self):
         page = self.open()
-        page.click('#nav [data-go="ideas"]')
+        go_to(page, "ideas")
         page.click('.item-card[data-open="ideas/offline-maps.md"]')
         page.wait_for_selector("#ed-body")
         side_title = page.evaluate("() => window.cairn.state.notes.find((n) => n.path === 'ideas/share-trip-link.md').title")
@@ -414,7 +414,7 @@ class WorkspaceTests(unittest.TestCase):
         page.wait_for_function("() => window.cairn.state.open === 'ideas/share-trip-link.md' && window.cairn.state.split === 'ideas/offline-maps.md'")
         page.reload()
         page.wait_for_selector("#nav button")
-        page.click('#nav [data-go="ideas"]')
+        go_to(page, "ideas")
         page.click('.item-card[data-open="ideas/share-trip-link.md"]')
         page.wait_for_selector('.split-pane[data-split-path="ideas/offline-maps.md"]')
         # Close it; Ctrl+Alt+\\ opens the picker again.
@@ -468,7 +468,8 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_canvas_opens_readable_on_a_phone(self):
         page = self.open(viewport=(390, 844))
-        page.evaluate("() => document.querySelector('#nav [data-go=\"canvas\"]').click()")
+        page.evaluate("() => document.querySelector('#nav [data-views~=\"canvas\"]').click()")
+        page.click('.hub-tabs [data-go="canvas"]')
         page.click(f'.cv-card[data-cv-open="{CANVAS}"]')
         page.wait_for_selector(".cv-node")
         page.wait_for_function("() => /scale\\(/.test(document.querySelector('#cv-world').style.transform)")
@@ -487,7 +488,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_deleting_a_note_closes_its_tab(self):
         page = self.open()
-        page.click('#nav [data-go="ideas"]')
+        go_to(page, "ideas")
         page.click('.item-card[data-open="ideas/offline-maps.md"]')
         page.wait_for_selector("#ed-body")
         page.keyboard.press("Escape")
@@ -502,7 +503,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_plugins_are_off_until_turned_on_and_bundled_ones_work(self):
         page = self.open()
-        page.click('#nav [data-go="plugins"]')
+        go_to(page, "plugins")
         self.assertIn("Community plugins are off", page.inner_text("#view"))
         self.assertEqual(page.locator("[data-plugin-install]").count(), 0)
         page.click('[data-plugins-toggle="on"]')
@@ -519,7 +520,7 @@ class WorkspaceTests(unittest.TestCase):
         page.wait_for_selector(".ws-tiles")
         self.assertIn("27", page.inner_text(".ws-tiles"))  # demo brain: 27 notes
         # Code blocks: a ```query block in a note becomes a live table.
-        page.click('#nav [data-go="notes"]')
+        go_to(page, "notes")
         page.click('#view [data-open="notes/architecture.md"]')
         page.fill("#ed-body", "```query\ntype: task\nstatus: todo, doing\nsort: title asc\nshow: table\n```\n")
         page.click('[data-editor-mode="preview"]')
@@ -538,7 +539,7 @@ class WorkspaceTests(unittest.TestCase):
         # Everything comes back after a reload, and turning plugins off removes their views.
         page.reload()
         page.wait_for_selector('#nav [data-go="plugin:calendar:calendar"]')
-        page.click('#nav [data-go="plugins"]')
+        go_to(page, "plugins")
         page.click('[data-plugins-toggle="off"]')
         page.wait_for_selector('[data-plugins-toggle="on"]')
         self.assertEqual(page.locator('#nav [data-go^="plugin:"]').count(), 0)
@@ -546,7 +547,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_plugin_settings_problems_and_the_brains_plugin_list(self):
         page = self.open()
-        page.click('#nav [data-go="plugins"]')
+        go_to(page, "plugins")
         page.click('[data-plugins-toggle="on"]')
         page.click('[data-plugin-install="plugins/writing-stats.js"]')
         page.wait_for_selector('.plugin-row[data-plugin="writing-stats"]')
@@ -564,7 +565,7 @@ class WorkspaceTests(unittest.TestCase):
         page.click('#nav [data-go="plugin:writing-stats:stats"]')
         page.wait_for_selector(".ws-tiles")
         self.assertIn("last 14 days", page.inner_text("#view"))
-        page.click('#nav [data-go="plugins"]')
+        go_to(page, "plugins")
         # The settings stay open while you look at the result.
         page.wait_for_selector('[data-plugin-form="writing-stats"]')
         self.assertEqual(page.get_attribute('[data-plugin-settings="writing-stats"]', "aria-expanded"), "true")
@@ -581,8 +582,8 @@ class WorkspaceTests(unittest.TestCase):
         page.keyboard.press("Control+k")
         page.fill(".palette input", "Explode now")
         page.keyboard.press("Enter")
-        page.click('#nav [data-go="home"]')
-        page.click('#nav [data-go="plugins"]')
+        go_to(page, "home")
+        go_to(page, "plugins")
         page.wait_for_selector('.plugin-row.has-error[data-plugin="broken"]')
         self.assertIn("kaboom", page.inner_text('.plugin-row[data-plugin="broken"]'))
         self.assertIn("1 with a problem", page.inner_text("#view"))
@@ -600,8 +601,8 @@ class WorkspaceTests(unittest.TestCase):
             const { saveNote } = await import('./state.js');
             await saveNote('cairn/plugins.md', { properties: { plugins: ['plugins/writing-stats.js', 'https://example.com/broken.js', 'plugins/calendar.js'] } });
         }""")
-        page.click('#nav [data-go="home"]')
-        page.click('#nav [data-go="plugins"]')
+        go_to(page, "home")
+        go_to(page, "plugins")
         page.wait_for_selector(".plugin-brain-missing")
         self.assertIn("plugins/calendar.js", page.inner_text(".plugin-brain-missing"))
         page.click("[data-plugins-install-list]")
@@ -632,7 +633,7 @@ class WorkspaceTests(unittest.TestCase):
             "https://raw.githubusercontent.com/someone/cairn-hello/HEAD/main.js",
             lambda route: route.fulfill(status=200, content_type="text/javascript", body=code, headers={"Access-Control-Allow-Origin": "*"}),
         )
-        page.click('#nav [data-go="plugins"]')
+        go_to(page, "plugins")
         page.click('[data-plugins-toggle="on"]')
         page.fill("#plugin-install-form input", "someone/cairn-hello")
         page.press("#plugin-install-form input", "Enter")

@@ -201,7 +201,6 @@ export function proofView() {
         ? `What @${esc(subject)} claims, and what GitHub confirms.`
         : "What you claim, and what GitHub confirms. Levels are earned from evidence, never typed in.",
       local ? actions : "",
-      "Network",
     )}
     ${who}
     ${check?.checked && !check.running ? levelSummary(check.checked) : ""}

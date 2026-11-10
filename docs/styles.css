@@ -188,6 +188,21 @@ kbd {
 }
 .view { padding: 40px 40px 80px; max-width: 1240px; width: 100%; }
 
+/* Pages that share one sidebar entry: a row of tabs above the page title (same look as .segmented).
+   --hub-tabs is how far the strip pushes the page down, so full-height pages (map, canvas) stay on screen. */
+.view.has-hub-tabs { padding-top: 22px; --hub-tabs: 44px; }
+.hub-tabs { display: flex; width: fit-content; max-width: 100%; gap: 4px; margin: 0 0 26px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.hub-tabs::-webkit-scrollbar { display: none; }
+.hub-tab { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 12px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 500; white-space: nowrap; }
+.hub-tab:hover { color: var(--ink); }
+.hub-tab.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.hub-tab:focus-visible { outline-offset: -2px; border-radius: 4px 4px 0 0; }
+.hub-tab .count { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) {
+  .view.has-hub-tabs { padding-top: 12px; }
+  .hub-tabs { margin-bottom: 20px; }
+}
+
 /* ------------------------------------------------------------ controls */
 
 .btn {
@@ -374,7 +389,7 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 
 /* map */
 .map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
-.map-wrap { position: relative; height: calc(100vh - 240px); min-height: 460px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+.map-wrap { position: relative; height: calc(100vh - 240px - var(--hub-tabs, 0px)); min-height: 460px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
   background-image: radial-gradient(color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px); background-size: 22px 22px; }
 .map-wrap svg { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none; }
 .map-wrap svg:focus { outline: none; }
@@ -444,7 +459,7 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .map-tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
 .map-tools-row kbd { font-family: var(--mono); font-size: 12px; padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; }
 .map-dot.on-path circle { stroke: var(--accent); stroke-width: 3px; }
-.map-side { display: flex; flex-direction: column; gap: 0; max-height: calc(100vh - 240px); min-height: 460px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.map-side { display: flex; flex-direction: column; gap: 0; max-height: calc(100vh - 240px - var(--hub-tabs, 0px)); min-height: 460px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .map-section { padding: 14px 16px; border-bottom: 1px solid var(--line); min-width: 0; }
 .map-section:last-child { border-bottom: 0; }
 .map-section h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -1056,7 +1071,7 @@ pre.math { white-space: pre-wrap; }
 .cv-card .icon { grid-row: span 3; width: 22px; height: 22px; color: var(--accent); }
 .cv-card-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-card-meta { color: var(--muted); font-size: 12.5px; }
-.cv-page { display: flex; flex-direction: column; gap: 10px; height: calc(100vh - 150px); min-height: 480px; }
+.cv-page { display: flex; flex-direction: column; gap: 10px; height: calc(100vh - 150px - var(--hub-tabs, 0px)); min-height: 480px; }
 .cv-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cv-heading { display: flex; flex-direction: column; min-width: 0; }
 .cv-title { font-family: var(--display); font-weight: 400; font-size: 26px; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1147,7 +1162,7 @@ pre.math { white-space: pre-wrap; }
 .plugin-block { margin: 12px 0; }
 
 @media (max-width: 900px) {
-  .cv-page { height: calc(100vh - 130px); }
+  .cv-page { height: calc(100vh - 130px - var(--hub-tabs, 0px)); }
   .cv-tools .btn span { display: none; }
   .cv-hint { display: none; }
   .note-tab { max-width: 140px; }

@@ -56,6 +56,16 @@ def launch_browser(playwright):
     raise RuntimeError("no Chromium-based browser available for Playwright")
 
 
+def go_to(page, view: str) -> None:
+    """Open a page the way a person does: its sidebar entry, then its tab when the entry holds several pages."""
+    entry = f'#nav [data-views~="{view}"]'
+    page.click(entry)
+    page.wait_for_selector(f'{entry}[aria-current="page"]')
+    tab = page.locator(f'.hub-tabs [data-go="{view}"]:not([aria-current="page"])')
+    if tab.count():
+        tab.click()
+
+
 BRAIN = Path(__file__).resolve().parents[1] / "brain"
 MOCK_USER = {
     "login": "juw12",

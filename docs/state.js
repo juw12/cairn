@@ -19,13 +19,28 @@ export const VIEWS = [
   { id: "code", label: "Code inbox", icon: "code", group: "Project" },
   { id: "vibe", label: "Vibe", icon: "activity", group: "Project" },
   { id: "autopilot", label: "Autopilot", icon: "route", group: "Project" },
-  { id: "founder", label: "Founder Studio", icon: "users", group: "Project" },
+  { id: "founder", label: "Founder Studio", icon: "target", group: "Project" },
   { id: "context", label: "Context pack", icon: "sparkle", group: "Project" },
   { id: "obsidian", label: "Obsidian sync", icon: "vault", group: "Project" },
   { id: "plugins", label: "Plugins", icon: "puzzle", group: "Project" },
   { id: "people", label: "People", icon: "users", group: "Network" },
   { id: "proof", label: "Proof", icon: "check", group: "Network" },
 ];
+
+// The sidebar shows one entry per hub. A hub with several pages shows them as tabs at the top of the page;
+// the first page is the one it opens on a fresh browser, and `count` names the page whose count the entry shows.
+export const HUBS = [
+  { id: "today", label: "Today", icon: "home", views: ["home"] },
+  { id: "plan", label: "Plan", icon: "board", views: ["board", "ideas", "decisions"], count: "board" },
+  { id: "notes", label: "Notes", icon: "note", views: ["notes", "journal"], count: "notes" },
+  { id: "map", label: "Map", icon: "map", views: ["map", "canvas"] },
+  { id: "build", label: "Build", icon: "code", views: ["vibe", "autopilot", "code"], count: "vibe" },
+  { id: "founder", label: "Founder Studio", icon: "target", views: ["founder"] },
+  { id: "integrations", label: "Integrations", icon: "puzzle", views: ["context", "obsidian", "plugins"] },
+  { id: "people", label: "People", icon: "users", views: ["people", "proof"] },
+];
+
+export const hubOf = (view) => HUBS.find((hub) => hub.views.includes(view)) || null;
 
 export const REPO_URL = "https://github.com/juw12/cairn";
 export const LAST_BRAIN_KEY = "cairn.lastBrain";

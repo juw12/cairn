@@ -220,7 +220,7 @@ class SyncTests(unittest.TestCase):
         import sys
 
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from webserver import launch_browser
+        from webserver import go_to, launch_browser
 
         server = make_server(self.brain, port=0)
         port = server.server_address[1]
@@ -244,7 +244,7 @@ class SyncTests(unittest.TestCase):
                 page.wait_for_function(
                     "() => window.cairn.state.files.find((f) => f.path === 'obsidian/Offline Maps.md')?.text === 'Edited in Obsidian.\\n'"
                 )
-                page.click('#nav [data-go="map"]')
+                go_to(page, "map")
                 page.wait_for_selector("#map-svg")
                 ids = page.evaluate("[...document.querySelectorAll('#map-svg .map-node')].map((n) => n.dataset.node)")
                 self.assertIn("obsidian/Projects/Trail App.md", ids)

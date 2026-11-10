@@ -192,7 +192,7 @@ export function canvasView() {
   if (path) state.canvas = null;
   const files = canvasFiles().sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
   const action = readOnly() ? "" : `<button class="btn primary" data-cv-new>${icon("plus", "sm")} New canvas</button>`;
-  const head = pageHead("Canvas", "Lay notes, cards and links out on an open board and draw the connections. Saved as .canvas files that Obsidian opens too.", action, "Remember");
+  const head = pageHead("Canvas", "Lay notes, cards and links out on an open board and draw the connections. Saved as .canvas files that Obsidian opens too.", action);
   if (!files.length) {
     return `${head}${emptyState("canvas", "No canvases yet", "A canvas is a whiteboard for thinking: drop in notes, write cards, group them and draw arrows between them.", action)}`;
   }
