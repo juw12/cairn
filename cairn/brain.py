@@ -325,7 +325,12 @@ class Brain:
     def git_available(self) -> bool:
         if not shutil.which("git"):
             return False
-        result = self._git("rev-parse", "--is-inside-work-tree")
+        try:
+            result = self._git("rev-parse", "--is-inside-work-tree")
+        except (subprocess.TimeoutExpired, OSError):
+            # A git that stalls or cannot start counts as "no git" for this call, so whoever
+            # asked (/api/info on every page load) still gets an answer.
+            return False
         return result.returncode == 0 and result.stdout.strip() == "true"
 
     def git_status(self) -> dict:

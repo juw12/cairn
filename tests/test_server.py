@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from cairn.brain import Brain
@@ -105,6 +106,19 @@ class ServerTests(unittest.TestCase):
         files = git("show", "--name-only", "--format=", "HEAD").stdout.split()
         self.assertTrue(files and all(f.startswith("brain/") for f in files), files)
         self.assertIn("src/app.py", git("status", "--porcelain").stdout)
+
+    def test_info_still_answers_when_the_git_check_stalls(self):
+        # A git that hangs past its time limit used to raise out of /api/info: the request died
+        # and the web app fell back to its welcome page. It now counts as "no git" for that call.
+        stalled = subprocess.TimeoutExpired(cmd=["git"], timeout=20)
+        with mock.patch("cairn.brain.shutil.which", return_value="git"), \
+                mock.patch("cairn.brain.subprocess.run", side_effect=stalled) as git_run:
+            status, info = self.call("GET", "/api/info")
+            self.assertFalse(self.brain.git_available())
+        self.assertTrue(git_run.called, "the stalled git call was never reached")
+        self.assertEqual(status, 200)
+        self.assertIs(info["git"], False)
+        self.assertEqual(info["mode"], "server")
 
 
 class VaultFolderTests(unittest.TestCase):
