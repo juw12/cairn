@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from webserver import install_github_mock, launch_browser, start_static_server  # noqa: E402
+from webserver import go_to, install_github_mock, launch_browser, start_static_server  # noqa: E402
 
 from cairn.brain import Brain  # noqa: E402
 from cairn.server import make_server  # noqa: E402
@@ -259,7 +259,7 @@ class VaultFeatureTests(unittest.TestCase):
 
     def test_notes_search_operators_folders_and_bookmarks(self):
         page = self.open()
-        page.click('#nav [data-go="notes"]')
+        go_to(page, "notes")
         page.fill("#notes-search", "tag:release")
         page.wait_for_function("() => document.querySelectorAll('#notes-list .list-row').length === 2")
         page.fill("#notes-search", "tag:release -path:ideas")

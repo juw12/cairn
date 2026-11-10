@@ -18,24 +18,24 @@ const STEPS = [
     text: "Type a thought and press Enter. Start with todo:, decision: or log: to file it as a task, a decision or a journal line, and add #tags. Press C anywhere to jump here.",
   },
   {
-    target: '#nav [data-go="ideas"]',
+    target: '#nav [data-views~="ideas"]',
     title: "Brainstorm ideas",
-    text: "Ideas move from Raw to Ready on a board. Open one and press Spark for a prompt that pushes it further, then Promote it to a task.",
+    text: "Plan holds three tabs: Board, Ideas and Decisions. On the Ideas tab, ideas move from Raw to Ready. Open one and press Spark for a prompt that pushes it further, then Promote it to a task.",
   },
   {
-    target: '#nav [data-go="board"]',
+    target: '#nav [data-views~="board"]',
     title: "Get it done",
-    text: "Tasks on a board. Drag cards between To do, Doing and Done; each move is a one-line change in the note's file.",
+    text: "Plan opens on the Board: your tasks. Drag cards between To do, Doing and Done; each move is a one-line change in the note's file.",
   },
   {
-    target: '#nav [data-go="notes"]',
+    target: '#nav [data-views~="notes"]',
     title: "Notes that link",
-    text: "Every note, as a list or a folder tree, with bookmarks and search operators like tag:release or path:ideas/. In a note, type [[ to link another one; backlinks and unlinked mentions appear underneath.",
+    text: "Every note, as a list or a folder tree, with bookmarks and search operators like tag:release or path:ideas/. In a note, type [[ to link another one; backlinks and unlinked mentions appear underneath. The Journal is the tab next to it.",
   },
   {
-    target: '#nav [data-go="map"]',
+    target: '#nav [data-views~="map"]',
     title: "See how it connects",
-    text: "The Map draws every link between notes: clusters, orphans and broken links you can fix in one click.",
+    text: "The Map draws every link between notes: clusters, orphans and broken links you can fix in one click. The Canvas tab is a board where you arrange cards and notes yourself.",
   },
   {
     target: "#search-btn",
@@ -43,14 +43,14 @@ const STEPS = [
     text: "Ctrl+K searches every note and runs commands: new note from a template, open a random note, rename, bookmark and more.",
   },
   {
-    target: '#nav [data-go="obsidian"]',
+    target: '#nav [data-views~="obsidian"]',
     title: "Works with Obsidian",
-    text: "Point Cairn at an Obsidian vault and it keeps both in sync. Callouts, embeds, ==highlights==, footnotes and properties look the same here.",
+    text: "Under Integrations, the Obsidian sync tab points Cairn at an Obsidian vault and keeps both in sync. Callouts, embeds, ==highlights==, footnotes and properties look the same here.",
   },
   {
-    target: '#nav [data-go="proof"]',
+    target: '#nav [data-views~="proof"]',
     title: "Proof of work",
-    text: "Claims in your notes, checked against GitHub, so your public profile shows what you really shipped.",
+    text: "Under People, the Proof tab lists the claims in your notes, checked against GitHub, so your public profile shows what you really shipped.",
   },
   {
     target: "#sidebar-foot",

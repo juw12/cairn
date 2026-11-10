@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from webserver import CORS, MOCK_REPO, OTHER_TOKEN, VALID_TOKEN, install_github_mock, launch_browser, start_static_server  # noqa: E402
+from webserver import CORS, MOCK_REPO, OTHER_TOKEN, VALID_TOKEN, go_to, install_github_mock, launch_browser, start_static_server  # noqa: E402
 
 try:
     from playwright.sync_api import sync_playwright
@@ -98,7 +98,7 @@ class SignInTests(unittest.TestCase):
         # An agent on another machine pushes a live session while you watch.
         self.mock.set_text(REPO, "brain/sessions/2026-11-07-remote-agent.md",
                            "---\ntitle: Remote agent\ntype: session\nstatus: live\nstarted: 2026-11-07T09:00\n---\n## Log\n\n- 09:00 start: Remote agent\n- 09:05 skill: /refine 6.0 -> 8.8\n")
-        page.click('#nav [data-go="vibe"]')
+        go_to(page, "vibe")
         page.wait_for_function("() => document.querySelector('.vibe-live h2')?.innerText.includes('Remote agent')", timeout=8000)
         self.assertIn("Following GitHub", page.inner_text(".vibe-live"))
         # Later polls are conditional: GitHub answers 304 for an unchanged folder, which costs no rate limit.
@@ -114,7 +114,7 @@ class SignInTests(unittest.TestCase):
 
     def test_vibe_on_someone_elses_brain_signed_out_does_not_poll(self):
         page = self.open(f"?brain={REPO}", wait=".ro-banner")
-        page.click('#nav [data-go="vibe"]')
+        go_to(page, "vibe")
         page.wait_for_selector(".vibe-figures")
         page.wait_for_timeout(400)
         self.assertEqual(self.mock.listings, [])
@@ -145,7 +145,7 @@ class SignInTests(unittest.TestCase):
         self.assertIn("tags: [mobile]", created)
 
         # Edit: a burst of typing becomes one commit, sent with the file's current sha.
-        page.click('#nav [data-go="board"]')
+        go_to(page, "board")
         page.click('.item-card[data-open="tasks/write-from-my-phone.md"]')
         page.wait_for_selector("#ed-body")
         before = len(self.mock.writes())

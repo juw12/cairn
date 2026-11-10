@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from cairn.brain import Brain  # noqa: E402
 from cairn.server import make_server  # noqa: E402
-from webserver import launch_browser, start_static_server  # noqa: E402
+from webserver import go_to, launch_browser, start_static_server  # noqa: E402
 
 OUT = ROOT / ".shots"
 
@@ -46,7 +46,7 @@ def main() -> int:
         page.press("#capture-input", "Enter")
         page.wait_for_timeout(1200)
         page.screenshot(path=str(OUT / "server-home.png"))
-        page.click('#nav [data-go="ideas"]')
+        go_to(page, "ideas")
         page.click(".item-card")
         page.wait_for_selector("#ed-body")
         page.click('[data-editor-mode="preview"]')

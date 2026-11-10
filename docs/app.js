@@ -6,7 +6,7 @@ import { ServerStore, FolderStore, DemoStore, GitHubStore } from "./store.js";
 import * as gh from "./github.js";
 import * as auth from "./auth.js";
 import { $, LOGO, SPARKS, TYPE_META, ask, icon, plural, toast, today } from "./ui.js";
-import { GUIDE_KEY, LAST_BRAIN_KEY, REPO_URL, VIEWS, createNote, deleteNote, guide, loadAll, markGuide, noteByPath, readOnly, refreshGit, refreshTodos, state } from "./state.js";
+import { GUIDE_KEY, HUBS, LAST_BRAIN_KEY, REPO_URL, VIEWS, createNote, deleteNote, guide, hubOf, loadAll, markGuide, noteByPath, readOnly, refreshGit, refreshTodos, state } from "./state.js";
 import { board, codeView, contextView, decisions, home, ideas, mcpSnippet, moveNote, notesView, showMoreNotes, wireBoard } from "./views.js";
 import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
@@ -57,19 +57,59 @@ function counts() {
   };
 }
 
+// ---- hubs: the sidebar has one entry per hub; the pages inside a hub are tabs at the top of the view.
+
+const HUB_TAB_KEY = "cairn.hubTab";
+
+function hubTabs() {
+  try {
+    return JSON.parse(localStorage.getItem(HUB_TAB_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+// The page a sidebar entry opens: the tab used last inside that hub, else its first page.
+function hubTarget(hub, remembered) {
+  return hub.views.includes(remembered[hub.id]) ? remembered[hub.id] : hub.views[0];
+}
+
+function rememberHubTab(view) {
+  const hub = hubOf(view);
+  if (!hub || hub.views.length < 2) return;
+  try {
+    localStorage.setItem(HUB_TAB_KEY, JSON.stringify({ ...hubTabs(), [hub.id]: view }));
+  } catch {
+    /* storage is off: the entry just opens its first page */
+  }
+}
+
+function hubTabStrip() {
+  const hub = hubOf(state.view);
+  if (!hub || hub.views.length < 2) return "";
+  const counted = counts();
+  const tabs = hub.views.map((id) => {
+    const active = id === state.view;
+    const count = counted[id] === "" ? "" : `<span class="count">${counted[id]}</span>`;
+    return `<button type="button" class="hub-tab${active ? " active" : ""}" data-go="${id}" ${active ? 'aria-current="page"' : ""}>${VIEWS.find((view) => view.id === id).label}${count}</button>`;
+  });
+  return `<nav class="hub-tabs" aria-label="${hub.label} pages">${tabs.join("")}</nav>`;
+}
+
 export function renderNav() {
   const counted = counts();
-  let lastGroup = "";
+  const nav = $("#nav");
+  // Rendering replaces the buttons, so note which entry holds the keyboard focus and hand it back afterwards.
+  const focused = nav.contains(document.activeElement) ? document.activeElement : null;
+  const focusKey = focused ? focused.dataset.hub || focused.dataset.go : "";
+  const remembered = hubTabs();
   const html = [];
-  for (const view of VIEWS) {
-    if (view.group !== lastGroup) {
-      html.push(`<div class="nav-label">${view.group}</div>`);
-      lastGroup = view.group;
-    }
-    const active = state.view === view.id ? " active" : "";
-    const count = counted[view.id] === "" ? "" : `<span class="count">${counted[view.id]}</span>`;
+  for (const hub of HUBS) {
+    const active = hub.views.includes(state.view);
+    const number = hub.count ? counted[hub.count] : "";
+    const count = number === "" ? "" : `<span class="count">${number}</span>`;
     html.push(
-      `<button class="${active.trim()}" data-go="${view.id}" ${active ? 'aria-current="page"' : ""}>${icon(view.icon)}<span>${view.label}</span>${count}</button>`,
+      `<button class="${active ? "active" : ""}" data-hub="${hub.id}" data-views="${hub.views.join(" ")}" data-go="${hubTarget(hub, remembered)}" ${active ? 'aria-current="page"' : ""}>${icon(hub.icon)}<span>${hub.label}</span>${count}</button>`,
     );
   }
   const extra = pluginViews();
@@ -78,7 +118,13 @@ export function renderNav() {
     const active = state.view === view.id;
     html.push(`<button class="${active ? "active" : ""}" data-go="${esc(view.id)}" ${active ? 'aria-current="page"' : ""}>${icon(view.icon)}<span>${esc(view.label)}</span></button>`);
   }
-  $("#nav").innerHTML = html.join("");
+  nav.innerHTML = html.join("");
+  // On a phone the sidebar is a drawer that closes after a choice, so only refocus while it is on screen.
+  const sidebarShown = !matchMedia("(max-width: 900px)").matches || $("#app").classList.contains("nav-open");
+  if (focusKey && sidebarShown) {
+    const again = [...nav.querySelectorAll("button")].find((button) => (button.dataset.hub || button.dataset.go) === focusKey);
+    if (again) again.focus({ preventScroll: true });
+  }
 }
 
 export function renderSidebarFoot() {
@@ -126,6 +172,7 @@ export function setView(view, { push = true } = {}) {
   if (!VIEWS.some((v) => v.id === view) && !isPluginView(view)) view = "home";
   if (state.view === "canvas" && view !== "canvas") flushCanvas();
   state.view = view;
+  rememberHubTab(view);
   emitPluginEvent("view-change", { view });
   if (push && location.hash !== `#/${view}`) history.pushState(null, "", `#/${view}`);
   $("#app").classList.remove("nav-open");
@@ -146,10 +193,14 @@ export function renderView() {
   const kept = active && view.contains(active) && active.id && /^(INPUT|TEXTAREA)$/.test(active.tagName)
     ? { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd }
     : null;
+  const onTabs = Boolean(active && view.contains(active) && active.closest(".hub-tabs"));
   const pluginView = isPluginView(state.view);
-  view.innerHTML = readOnlyBanner() + (pluginView
+  const tabs = pluginView ? "" : hubTabStrip();
+  view.classList.toggle("has-hub-tabs", Boolean(tabs));
+  view.innerHTML = readOnlyBanner() + tabs + (pluginView
     ? `<div class="plugin-view" data-plugin-view="${esc(state.view)}"></div>`
     : (renderers[state.view] || home)());
+  if (onTabs) $('.hub-tabs [aria-current="page"]')?.focus({ preventScroll: true });
   if (kept) {
     const restored = document.getElementById(kept.id);
     if (restored) {

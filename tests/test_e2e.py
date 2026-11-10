@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from webserver import install_github_mock, launch_browser, start_static_server  # noqa: E402
+from webserver import go_to, install_github_mock, launch_browser, start_static_server  # noqa: E402
 
 try:
     from playwright.sync_api import sync_playwright
@@ -17,6 +17,18 @@ except ImportError:  # pragma: no cover
     sync_playwright = None
 
 VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "autopilot", "context", "plugins", "people", "proof"]
+
+# The sidebar has one entry per hub; a hub with several pages shows them as tabs (docs/state.js HUBS).
+HUBS = {
+    "today": ["home"],
+    "plan": ["board", "ideas", "decisions"],
+    "notes": ["notes", "journal"],
+    "map": ["map", "canvas"],
+    "build": ["vibe", "autopilot", "code"],
+    "founder": ["founder"],
+    "integrations": ["context", "obsidian", "plugins"],
+    "people": ["people", "proof"],
+}
 
 
 # The demo brain has 27 notes: the original 18 plus 9 dated journal pages (docs/store.js DEMO_DAYS),
@@ -57,7 +69,7 @@ class EndToEndTests(unittest.TestCase):
         return page.evaluate("(p) => window.cairn.state.files.find((f) => f.path === p)?.text ?? null", path)
 
     def go(self, page, view):
-        page.click(f'#nav [data-go="{view}"]')
+        go_to(page, view)
         page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
 
     def test_notes_list_pages_big_vaults(self):
@@ -139,6 +151,102 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(page.locator(".map-node").count(), DEMO_NOTES)
         self.assertEqual(self.errors, [])
 
+    # ------------------------------------------------------------ sidebar hubs and the tabs inside them
+
+    def nav_state(self, page):
+        return page.evaluate("""() => ({
+            view: window.cairn.state.view,
+            hubs: [...document.querySelectorAll('#nav button[aria-current="page"]')].map((b) => b.dataset.hub),
+            tabs: [...document.querySelectorAll('.hub-tabs .hub-tab')].map((b) => b.dataset.go),
+            tab: document.querySelector('.hub-tabs [aria-current="page"]')?.dataset.go ?? null,
+        })""")
+
+    def test_sidebar_has_eight_entries_and_no_group_labels(self):
+        page = self.open()
+        entries = page.eval_on_selector_all("#nav button", "els => els.map((e) => e.querySelector('span').textContent)")
+        self.assertEqual(entries, ["Today", "Plan", "Notes", "Map", "Build", "Founder Studio", "Integrations", "People"])
+        self.assertEqual(page.locator("#nav .nav-label").count(), 0)
+        self.assertEqual(page.eval_on_selector_all("#nav button", "els => els.map((e) => e.dataset.hub)"), list(HUBS))
+        self.assertEqual(self.errors, [])
+
+    def test_every_old_address_opens_its_page_inside_a_hub(self):
+        page = self.open()
+        for hub, views in HUBS.items():
+            tabs = views if len(views) > 1 else []
+            for view in views:
+                page.goto(f"{self.url}?demo=1#/{view}")
+                page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
+                expected = {"view": view, "hubs": [hub], "tabs": tabs, "tab": view if tabs else None}
+                self.assertEqual(self.nav_state(page), expected)
+                self.assertTrue(page.inner_text("#view").strip(), view)
+        self.assertEqual(sum(len(views) for views in HUBS.values()), 17)
+        self.assertEqual(self.errors, [])
+
+    def test_a_sidebar_entry_reopens_the_tab_used_last(self):
+        page = self.open()
+        self.assertEqual(page.get_attribute('#nav [data-hub="plan"]', "data-go"), "board")
+        self.go(page, "ideas")
+        self.go(page, "home")
+        page.click('#nav [data-hub="plan"]')
+        page.wait_for_function("() => window.cairn.state.view === 'ideas'")
+        self.assertEqual(self.nav_state(page)["tab"], "ideas")
+        # It is remembered in this browser, so it is still the choice after a reload.
+        self.go(page, "home")
+        page.reload()
+        page.wait_for_selector("#nav button")
+        self.assertEqual(page.evaluate("() => window.cairn.state.view"), "home")
+        self.assertEqual(page.get_attribute('#nav [data-hub="plan"]', "data-go"), "ideas")
+        self.assertEqual(self.errors, [])
+
+    def test_sidebar_entries_and_tabs_are_buttons_that_keep_the_keyboard_focus(self):
+        page = self.open()
+        self.go(page, "board")
+        page.focus('.hub-tabs [data-go="ideas"]')
+        page.keyboard.press("Enter")
+        page.wait_for_function("() => window.cairn.state.view === 'ideas'")
+        focused = page.evaluate("() => [document.activeElement.className, document.activeElement.dataset.go]")
+        self.assertEqual(focused, ["hub-tab active", "ideas"])
+        page.focus('#nav [data-hub="notes"]')
+        page.keyboard.press("Enter")
+        page.wait_for_function("() => window.cairn.state.view === 'notes'")
+        self.assertEqual(page.evaluate("() => document.activeElement.dataset.hub"), "notes")
+        reachable = page.eval_on_selector_all("#nav button, .hub-tabs .hub-tab", "els => els.map((e) => e.tagName === 'BUTTON' && e.tabIndex === 0)")
+        self.assertEqual(reachable, [True] * 10)
+        self.assertEqual(self.errors, [])
+
+    def test_tabs_fit_a_phone_and_the_drawer_closes_after_a_choice(self):
+        page = self.open(viewport=(390, 844))
+        for view in ("obsidian", "decisions", "code"):
+            page.goto(f"{self.url}?demo=1#/{view}")
+            page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
+            self.assertLessEqual(page.evaluate("() => document.documentElement.scrollWidth - innerWidth"), 0, view)
+            strip = page.locator(".hub-tabs").bounding_box()
+            self.assertGreaterEqual(strip["x"], 0, view)
+            self.assertLessEqual(strip["x"] + strip["width"], 390, view)
+            self.assertTrue(page.is_visible(f'.hub-tabs [data-go="{view}"]'), view)
+        page.click("#menu-btn")
+        page.click('#nav [data-hub="notes"]')
+        page.wait_for_function("() => window.cairn.state.view === 'notes'")
+        self.assertFalse(page.evaluate("() => document.querySelector('#app').classList.contains('nav-open')"))
+        self.assertEqual(self.errors, [])
+
+    def test_palette_reaches_every_page_and_lands_inside_its_hub(self):
+        page = self.open()
+        labels = page.evaluate("() => import('./state.js').then((m) => m.VIEWS.map((v) => [v.id, v.label]))")
+        self.assertEqual(sorted(view for view, _ in labels), sorted(view for views in HUBS.values() for view in views))
+        page.keyboard.press("Control+k")
+        page.wait_for_selector(".palette input")
+        for view, label in labels:
+            # The palette lists six commands at a time, so ask for each page by name.
+            page.fill(".palette input", f"Go to {label}")
+            shown = page.eval_on_selector_all(".palette-item .label", "els => els.map((e) => e.textContent.trim())")
+            self.assertIn(f"Go to {label}", shown, view)
+        page.fill(".palette input", "Go to Proof")
+        page.keyboard.press("Enter")
+        page.wait_for_function("() => window.cairn.state.view === 'proof'")
+        self.assertEqual(self.nav_state(page), {"view": "proof", "hubs": ["people"], "tabs": ["people", "proof"], "tab": "proof"})
+        self.assertEqual(self.errors, [])
+
     def test_vibe_session_feedback_and_stats(self):
         page = self.open()
         self.go(page, "vibe")
@@ -147,7 +255,7 @@ class EndToEndTests(unittest.TestCase):
         page.fill(".modal input", "Add dark mode")
         page.click('.modal button[type="submit"]')
         page.wait_for_selector(".vibe-live h2")
-        self.assertEqual(page.inner_text('#nav [data-go="vibe"] .count'), "live")
+        self.assertEqual(page.inner_text('#nav [data-views~="vibe"] .count'), "live")
         path = page.evaluate("window.cairn.state.notes.find((n) => n.type === 'session').path")
         self.assertRegex(path, r"^sessions/\d{4}-\d{2}-\d{2}-add-dark-mode\.md$")
 
@@ -175,7 +283,7 @@ class EndToEndTests(unittest.TestCase):
         figures = page.inner_text(".vibe-figures")
         self.assertIn("100%", figures)  # ship rate and checks green
         self.assertIn("3.0", figures)  # average rating
-        self.assertEqual(page.locator('#nav [data-go="vibe"] .count').count(), 0)
+        self.assertEqual(page.locator('#nav [data-views~="vibe"] .count').count(), 0)
 
         page.select_option('[data-fb-status="feedback/the-toggle-is-hard-to-find.md"]', "addressed")
         page.wait_for_function("() => window.cairn.state.files.find((f) => f.path === 'feedback/the-toggle-is-hard-to-find.md').text.includes('status: addressed')")
@@ -190,7 +298,7 @@ class EndToEndTests(unittest.TestCase):
             page.click('.modal button[type="submit"]')
             page.wait_for_function("(t) => window.cairn.state.notes.some((n) => n.type === 'session' && n.title === t)", arg=title)
         page.wait_for_function("() => document.querySelectorAll('.vibe-live').length === 2")
-        self.assertEqual(page.inner_text('#nav [data-go="vibe"] .count'), "2 live")
+        self.assertEqual(page.inner_text('#nav [data-views~="vibe"] .count'), "2 live")
         self.assertIn("Share link", page.inner_text(".vibe-live >> nth=0"))  # newest first
 
         # A note that starts with a slash command is logged as a skill run, on the session whose form was used.
@@ -208,7 +316,7 @@ class EndToEndTests(unittest.TestCase):
 
         page.click(f'[data-action="vibe-end"][data-result="partial"][data-path="{older}"]')
         page.wait_for_function("(p) => window.cairn.state.files.find((f) => f.path === p).text.includes('status: partial')", arg=older)
-        self.assertEqual(page.inner_text('#nav [data-go="vibe"] .count'), "live")
+        self.assertEqual(page.inner_text('#nav [data-views~="vibe"] .count'), "live")
         self.assertEqual(page.locator(".vibe-live").count(), 1)
         self.assertEqual(self.errors, [])
 
@@ -427,7 +535,7 @@ class EndToEndTests(unittest.TestCase):
         task = page.evaluate("() => window.cairn.state.notes.find((n) => n.tags.includes('queue'))")
         self.assertEqual(task["title"], "Add CSV export to the report page")
         self.assertEqual(task["tags"], ["queue", "auto"])
-        self.assertEqual(page.inner_text('#nav [data-go="autopilot"] .count'), "1")
+        self.assertEqual(page.inner_text('.hub-tabs [data-go="autopilot"] .count'), "1")
         page.click('.ap-q [data-flag="needs-me"]')
         page.wait_for_selector(".ap-q.needs-me")
         page.click('.ap-q [data-action="ap-q-done"]')
@@ -993,13 +1101,13 @@ class EndToEndTests(unittest.TestCase):
         page = self.open("?brain=juw12/cairn#/proof", wait=".claim")
         page.wait_for_selector(".lvl-summary", timeout=15000)
         self.assertIn("L3", page.inner_text('.claim[data-claim="claim-built-cairn"] .lvl-badge'))
-        self.assertEqual(page.inner_text('#nav [data-go="proof"] .count'), "1")
+        self.assertEqual(page.inner_text('.hub-tabs [data-go="proof"] .count'), "1")
         self.assertEqual(page.locator('[data-action="new-claim"]').count(), 0)  # read-only: no create button
         self.assertEqual(self.errors, [])
 
     def test_unknown_user_and_bad_input(self):
         page = self.open()
-        page.click('#nav [data-go="people"]')
+        go_to(page, "people")
         page.fill("#people-query", "nobody-here-123")
         page.click("#people-form button[type=submit]")
         page.wait_for_selector(".notice")
@@ -1010,7 +1118,7 @@ class EndToEndTests(unittest.TestCase):
 
     def test_typing_survives_background_render(self):
         page = self.open()
-        page.click('#nav [data-go="people"]')
+        go_to(page, "people")
         page.fill("#people-query", "juw12")
         page.evaluate("window.cairn.rerender()")
         self.assertEqual(page.input_value("#people-query"), "juw12")

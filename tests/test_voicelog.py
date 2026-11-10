@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from webserver import install_github_mock, launch_browser, start_static_server  # noqa: E402
+from webserver import go_to, install_github_mock, launch_browser, start_static_server  # noqa: E402
 
 try:
     from playwright.sync_api import sync_playwright
@@ -247,7 +247,7 @@ class VoiceLogTests(unittest.TestCase):
         page.keyboard.press("l")
         page.wait_for_timeout(200)
         self.assertEqual(page.locator(".log-sheet").count(), 0)
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.locator("[data-jl='log']").count(), 0)
         self.assertEqual(self.errors, [])
@@ -256,7 +256,7 @@ class VoiceLogTests(unittest.TestCase):
 
     def test_journal_memories_heatmap_search_and_weekly_review(self):
         page = self.open()
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.locator(".heat-grid .heat").count(), 53 * 7)
         self.assertGreater(page.locator(".heat-grid .heat.l1, .heat-grid .heat.l2, .heat-grid .heat.l3").count(), 4)
@@ -414,7 +414,7 @@ class VoiceLogTests(unittest.TestCase):
         )
         self.assertEqual(found["people"], ["sam", "ana-lu"])
         self.assertEqual(found["entry"], ["sam"])
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         chip = page.locator(".tag.person[data-jl-search='@sam']")
         self.assertEqual(chip.count(), 1)
@@ -432,7 +432,7 @@ class VoiceLogTests(unittest.TestCase):
 
     def test_mood_range_and_look_back_details(self):
         page = self.open()
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.get_attribute("[data-jl-range='30']", "aria-pressed"), "true")
         page.click("[data-jl-range='90']")
@@ -619,7 +619,7 @@ class VoiceLogTests(unittest.TestCase):
         self.assertEqual(hits["exact"], [["Finished the GPX export", False]])
         self.assertEqual(hits["typo"], [["Finished the GPX export", True]])
         self.assertEqual(hits["none"], 0)
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.locator(".heat-grid .heat").count(), 53 * 7)
         self.assertGreater(page.evaluate("document.querySelector('.heatmap').scrollLeft"), 0)
@@ -684,7 +684,7 @@ class VoiceLogTests(unittest.TestCase):
 
     def test_journal_monthly_review_mind_range_and_linked_days(self):
         page = self.open()
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.get_attribute("[data-jl-mind='30']", "aria-pressed"), "true")
         page.click("[data-jl-mind='0']")
@@ -708,7 +708,7 @@ class VoiceLogTests(unittest.TestCase):
           const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
           return dl.pendingReviews(dl.journalDays(s.notes), s.notes, today);
         }""")
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         week = next((r for r in due if r["kind"] == "week"), None)
         if not week:
@@ -720,7 +720,7 @@ class VoiceLogTests(unittest.TestCase):
         page.wait_for_selector(".scrim")
         page.keyboard.press("Escape")
         page.wait_for_selector(".scrim", state="detached")
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.locator(".review-due [data-review='week']").count(), 0)
         self.assertEqual(self.errors, [])
@@ -762,7 +762,7 @@ class VoiceLogTests(unittest.TestCase):
 
     def test_keyboard_focus_is_always_visible_on_the_journal(self):
         page = self.open()
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         page.click(".page-head h1, h1")
         seen = []
@@ -831,7 +831,7 @@ class VoiceLogTests(unittest.TestCase):
     def journal_contrast(self, theme):
         page = self.open()
         page.evaluate("(t) => { localStorage.setItem('cairn.theme', t); document.documentElement.dataset.theme = t; }", theme)
-        page.click('#nav [data-go="journal"]')
+        go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.evaluate("document.documentElement.dataset.theme"), theme)
         return page.evaluate(self.CONTRAST)

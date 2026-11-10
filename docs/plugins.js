@@ -628,7 +628,7 @@ async function loadCatalog() {
 export function pluginsView() {
   const store = loadStore();
   const installed = Object.values(store.installed);
-  const head = pageHead("Plugins", "Add features made by the community: calendars, queries, stats and more. Plugin code lives on this device; the list of plugins can travel with the brain.", "", "Project");
+  const head = pageHead("Plugins", "Add features made by the community: calendars, queries, stats and more. Plugin code lives on this device; the list of plugins can travel with the brain.");
   const listed = brainPluginList();
   const intro = `
     <section class="plugin-gate${store.enabled ? " on" : ""}">
