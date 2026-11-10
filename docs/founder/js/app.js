@@ -10,8 +10,9 @@ import {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const params = new URLSearchParams(location.search);
+// Price-chart colours are named design tokens, so the chart follows a theme change without a redraw.
+const tone = (name) => `var(${name})`;
 // Segment colours come from the CSS design tokens so the legend, feed dots and 3D bots always match.
-const tone = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const SEGMENT_HEX = [1, 2, 3, 4, 5, 6].map((i) => getComputedStyle(document.documentElement).getPropertyValue(`--seg-${i}`).trim() || "#475569");
 const REASONS = ["price", "habit", "need", "trust", "quality", "convenience", "timing", "values", "other"];
 

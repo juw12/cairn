@@ -770,6 +770,110 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector(".ap-queue .empty")
         self.assertEqual(self.errors, [])
 
+    def test_founder_studio_wears_cairns_controls_and_follows_its_theme(self):
+        """The studio inside Cairn uses Cairn's control shapes and colours, in light and in dark.
+
+        The studio's Python engine (a large download from another site) is replaced by one that never
+        starts: this test is about the page's chrome, so it stays offline.
+        """
+
+        engine_requests = []
+
+        def idle_engine(route):
+            engine_requests.append(route.request.url)
+            route.fulfill(
+                content_type="text/javascript",
+                headers={"access-control-allow-origin": "*"},
+                body="export const loadPyodide = () => new Promise(() => {});",
+            )
+
+        def open_studio(viewport, theme):
+            page = self.open(viewport=viewport, theme=theme)
+            page.route("**/pyodide.mjs", idle_engine)
+            engine_requests.clear()
+            # By address, not by the sidebar: on a phone the sidebar sits in a closed drawer.
+            with page.expect_request("**/pyodide.mjs"):
+                page.evaluate("location.hash = '#/founder'")
+            page.wait_for_function("window.cairn.state.view === 'founder'")
+            frame = page.wait_for_selector("#founder-stage iframe").content_frame()
+            frame.wait_for_selector("#runBtn")
+            frame.wait_for_function("document.readyState !== 'loading'")
+            self.assertTrue(engine_requests, "the studio's engine did not come from this test's stand-in")
+            return page, frame
+
+        cairn_colours = """() => {
+            const colour = (token) => {
+                const probe = document.body.appendChild(document.createElement("i"));
+                probe.style.color = `var(${token})`;
+                const value = getComputedStyle(probe).color;
+                probe.remove();
+                return value;
+            };
+            return {
+                theme: document.documentElement.dataset.theme,
+                paper: colour("--bg"),
+                ink: colour("--ink"),
+                accent: colour("--accent"),
+                overflow: document.documentElement.scrollWidth - window.innerWidth,
+            };
+        }"""
+        studio_look = """() => {
+            const style = (selector) => getComputedStyle(document.querySelector(selector));
+            const height = (selector) => document.querySelector(selector).getBoundingClientRect().height;
+            const run = style("#runBtn");
+            const mode = style(".mode .seg.active");
+            const tab = style(".tabs .tab.active");
+            return {
+                embedded: document.documentElement.classList.contains("embedded"),
+                theme: document.documentElement.dataset.theme,
+                paper: getComputedStyle(document.body).backgroundColor,
+                text: getComputedStyle(document.body).color,
+                run: { fill: run.backgroundColor, text: run.color, radius: run.borderTopLeftRadius, height: height("#runBtn") },
+                project: { radius: style("#projectSelect").borderTopLeftRadius, height: height("#projectSelect") },
+                mode: { fill: mode.backgroundColor, shadow: mode.boxShadow, underline: mode.borderBottomColor, height: height(".mode .seg.active") },
+                tab: { weight: tab.fontWeight, underline: tab.borderBottomColor },
+                overflow: document.documentElement.scrollWidth - window.innerWidth,
+            };
+        }"""
+
+        def check(page, frame, theme, control_height):
+            cairn = page.evaluate(cairn_colours)
+            look = frame.evaluate(studio_look)
+            where = f"{theme}, {page.viewport_size['width']}px wide"
+            self.assertEqual(cairn["theme"], theme, where)
+            self.assertTrue(look["embedded"], where)
+            self.assertEqual(look["theme"], theme, f"the studio is not in Cairn's theme ({where})")
+            self.assertEqual(look["paper"], cairn["paper"], f"the studio's paper is not Cairn's ({where})")
+            self.assertEqual(look["text"], cairn["ink"], f"the studio's text is not Cairn's ink ({where})")
+            self.assertEqual(look["run"]["fill"], cairn["ink"], f"Run panel is not an ink button ({where})")
+            self.assertEqual(look["run"]["text"], cairn["paper"], where)
+            self.assertEqual(look["run"]["radius"], "6px", where)
+            self.assertEqual(look["project"]["radius"], "6px", where)
+            self.assertAlmostEqual(look["run"]["height"], control_height, delta=0.5, msg=where)
+            self.assertAlmostEqual(look["project"]["height"], control_height, delta=0.5, msg=where)
+            self.assertEqual(look["mode"]["fill"], "rgba(0, 0, 0, 0)", f"the mode switch still has a filled chip ({where})")
+            self.assertEqual(look["mode"]["shadow"], "none", where)
+            self.assertEqual(look["mode"]["underline"], cairn["accent"], f"the mode switch is not underlined in the accent ({where})")
+            self.assertEqual(look["tab"]["weight"], "600", where)
+            self.assertEqual(look["tab"]["underline"], cairn["accent"], f"the open result tab is not underlined in the accent ({where})")
+            self.assertLessEqual(cairn["overflow"], 0, f"Cairn scrolls sideways ({where})")
+            self.assertLessEqual(look["overflow"], 0, f"the studio scrolls sideways ({where})")
+            return look
+
+        page, frame = open_studio((1280, 900), "light")
+        check(page, frame, "light", 34)
+        frame.evaluate("window.sameStudio = true")
+        page.click('[data-action="theme"]')
+        frame.wait_for_function("document.documentElement.dataset.theme === 'dark'")
+        check(page, frame, "dark", 34)
+        self.assertTrue(frame.evaluate("window.sameStudio === true"), "changing the theme reloaded the studio")
+        self.assertEqual(self.errors, [])
+
+        page, frame = open_studio((390, 844), "dark")
+        look = check(page, frame, "dark", 44)
+        self.assertGreaterEqual(look["mode"]["height"], 44, "the mode switch is a comfortable tap target on a phone")
+        self.assertEqual(self.errors, [])
+
     def test_mobile_and_dark_have_no_horizontal_scroll(self):
         for theme, width in (("light", 390), ("dark", 390), ("light", 320)):
             page = self.open(viewport=(width, 844), theme=theme)
