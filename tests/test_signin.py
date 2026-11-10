@@ -112,6 +112,33 @@ class SignInTests(unittest.TestCase):
         page.wait_for_function("() => document.querySelector('.vibe-log')?.innerText.includes('40 passed')", timeout=8000)
         self.assertEqual(self.errors, [])
 
+    def test_vibe_overview_follows_a_remote_session_as_it_runs(self):
+        page = self.open(f"?brain={REPO}#/board", session=session_json())
+        page.wait_for_selector(".board")
+        path = "brain/sessions/2026-11-07-remote-agent.md"
+        self.mock.set_text(REPO, path, "---\ntitle: Remote agent\ntype: session\nstatus: live\nstarted: 2026-11-07T09:00\n---\n## Log\n\n- 09:00 start: Remote agent\n- 09:05 skill: /refine 6.0 -> 8.8\n")
+        go_to(page, "vibe")
+        page.wait_for_function("() => document.querySelector('.ov-lane .ov-step .txt')?.textContent.includes('/refine 6.0')", timeout=8000)
+        self.assertEqual(page.locator(".ov-lane").count(), 1)
+        self.assertEqual(page.inner_text(".ov-lane .ov-title"), "Remote agent")
+        self.assertEqual(page.get_attribute('.ov-tile[data-outcome="live"] .ov-count', "data-count"), "1")
+
+        # The agent logs a check: the lane shows it on the next poll, on the same page load.
+        steps = int(page.get_attribute(".ov-lane", "data-steps"))
+        page.evaluate("window.__sameLoad = true")
+        self.mock.set_text(REPO, path, self.mock.text(REPO, path) + "- 09:20 pass: pytest · 40 passed\n")
+        page.wait_for_function("() => document.querySelector('.ov-lane .ov-step .txt')?.textContent.includes('40 passed')", timeout=8000)
+        self.assertEqual(int(page.get_attribute(".ov-lane", "data-steps")), steps + 1)
+        self.assertEqual(page.locator(".ov-lane .ov-step.k-pass").count(), 1)
+        self.assertTrue(page.evaluate("window.__sameLoad"))
+
+        # The agent finishes: the lane goes and the session is counted as shipped.
+        ended = self.mock.text(REPO, path).replace("status: live", "status: shipped\nended: 2026-11-07T09:30") + "- 09:30 end: shipped\n"
+        self.mock.set_text(REPO, path, ended)
+        page.wait_for_function("() => !document.querySelector('.ov-lane') && document.querySelector('.ov-tile[data-outcome=\"shipped\"] .ov-count')?.dataset.count === '1'", timeout=8000)
+        self.assertTrue(page.is_disabled('.ov-tile[data-outcome="live"]'))
+        self.assertEqual(self.errors, [])
+
     def test_vibe_on_someone_elses_brain_signed_out_does_not_poll(self):
         page = self.open(f"?brain={REPO}", wait=".ro-banner")
         go_to(page, "vibe")

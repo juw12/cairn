@@ -12,7 +12,7 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
-import { copyAgentHook, endSession, liveSessions, loadSampleSessions, setVibeFilter, setVibeOutcome, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
+import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -229,6 +229,7 @@ function afterRender() {
   const pluginView = $("[data-plugin-view]");
   if (pluginView) renderPluginView(state.view, pluginView);
   if (state.view === "vibe") wireVibe();
+  else leaveVibe();
   if (state.view === "autopilot") wireAutopilot();
   if (state.view === "founder") wireFounder();
   else syncFounderStage();
@@ -351,6 +352,9 @@ function wireGlobal() {
       "vibe-filter": () => setVibeFilter(actionEl.dataset.source),
       "vibe-more": () => showMoreSessions(actionEl.dataset.all === "1"),
       "vibe-outcome": () => setVibeOutcome(actionEl.dataset.outcome),
+      "vibe-overview": () => setOverviewOutcome(actionEl.dataset.outcome),
+      "vibe-lane": () => jumpToLive(actionEl.dataset.path),
+      "vibe-to-list": jumpToList,
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
       "ap-toggle": toggleEnabled,
       "ap-job": () => jobAction(actionEl.dataset.op, actionEl.dataset.id),

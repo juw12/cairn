@@ -1551,8 +1551,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .dist-row .star-label .icon { width: 11px; height: 11px; fill: currentColor; }
 .session-row .meta .check-pass .icon, .session-row .meta .check-fail .icon { width: 12px; height: 12px; stroke-width: 2.2; vertical-align: -1px; }
 /* vibe: secondary text one step louder than the app-wide --muted, still quieter than --ink-2 */
-.vibe-live, .vibe-figures, .vibe-cols, .vibe-hook { --muted: #59544b; }
-:root[data-theme="dark"] :is(.vibe-live, .vibe-figures, .vibe-cols, .vibe-hook) { --muted: #a9a296; }
+.vibe-overview, .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook { --muted: #59544b; }
+:root[data-theme="dark"] :is(.vibe-overview, .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook) { --muted: #a9a296; }
 .vibe-figures .figure .label { font-size: 13px; }
 @media (max-width: 600px) {
   :is(.vibe-log-form, .fb-form, .fb-row, .vibe-end) :is(.input, .select, .btn) { min-height: 40px; }
@@ -1821,6 +1821,97 @@ details.vibe-fold[open] > summary { margin-bottom: 12px; }
 details.vibe-fold > summary::after { content: "Show"; margin-left: 12px; font-size: 12px; color: var(--accent-ink, var(--ink)); }
 details.vibe-fold[open] > summary::after { content: "Hide"; }
 details.vibe-fold > summary .muted { margin-left: auto; }
+
+/* Vibe overview: every session by status (a proportion bar, its tiles as the legend) and a lane per session running now */
+.vibe-overview { padding: 0 0 16px; border-bottom: 1px solid var(--line); }
+.vibe-overview > header { display: flex; align-items: baseline; gap: 10px; min-height: 28px; margin-bottom: 10px; }
+.vibe-overview > header h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.vibe-overview .ov-live-now { color: var(--accent-ink); font-weight: 600; }
+.vibe-overview .ov-clear { margin-left: auto; align-self: center; }
+.ov-bar { display: flex; height: 10px; border-radius: 3px; overflow: hidden; }
+.ov-seg { flex: 0 1 0; min-width: 6px; box-shadow: -2px 0 0 var(--bg); transition: flex-grow .5s cubic-bezier(.2, .7, .2, 1), opacity .15s ease; }
+.ov-seg[data-action] { cursor: pointer; }
+.ov-seg.empty { min-width: 0; box-shadow: none; }
+:is(.ov-seg, .ov-mark).s-live { background: var(--accent); }
+:is(.ov-seg, .ov-mark).s-shipped { background: var(--session); }
+:is(.ov-seg, .ov-mark).s-partial { background: var(--idea); }
+:is(.ov-seg, .ov-mark).s-dropped { background: var(--muted); }
+:is(.ov-seg, .ov-mark).s-done { background: color-mix(in srgb, var(--session) 45%, transparent); }
+:is(.ov-seg, .ov-mark).s-unknown { background: repeating-linear-gradient(135deg, var(--muted) 0 1.5px, transparent 1.5px 4px); }
+:is(.ov-seg, .ov-mark).s-other { background: var(--line-strong); }
+.vibe-overview.ov-dim .ov-seg:not(.hot), .vibe-overview:not(.ov-dim) .ov-bar.has-on .ov-seg:not(.on) { opacity: .28; }
+.ov-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.ov-tiles.has-other { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.ov-tile { display: flex; flex-direction: column; justify-content: space-between; gap: 4px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: inherit; text-align: left; transition: background .15s ease, border-color .15s ease; }
+button.ov-tile { cursor: pointer; }
+button.ov-tile:not(:disabled):hover, .ov-tile.hot:not(:disabled) { border-color: var(--line-strong); background: var(--surface); }
+button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); background: var(--surface); }
+.ov-tile:disabled { color: var(--muted); cursor: default; }
+.ov-tile:disabled .ov-mark { opacity: .45; }
+.ov-name { display: flex; align-items: center; gap: 6px; font-size: 12.5px; line-height: 1.25; color: var(--ink-2); }
+.ov-tile:disabled .ov-name { color: inherit; }
+.ov-mark { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.ov-num { display: flex; align-items: baseline; gap: 6px; }
+.ov-count { display: inline-block; font-family: var(--display); font-weight: 400; font-size: 24px; line-height: 1; font-variant-numeric: tabular-nums; }
+.ov-share { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.ov-peek { margin-top: 10px; }
+.ov-peek ul { list-style: none; margin: 0 0 6px; padding: 0; }
+.ov-peek li { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.ov-peek li a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font-weight: 500; text-decoration: none; }
+.ov-peek li a:hover, .ov-title:hover { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.ov-meta { margin-left: auto; flex: none; font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.ov-to-list { margin-left: -10px; }
+.ov-lanes { list-style: none; margin: 14px 0 0; padding: 0; border-top: 1px solid var(--line); }
+.ov-lane { padding: 8px 0 4px; }
+.ov-lane + .ov-lane { border-top: 1px solid var(--line); }
+.ov-lane-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ov-pulse { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--accent); animation: live-pulse 2s ease-out infinite; }
+.ov-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font-size: 14px; font-weight: 600; text-decoration: none; }
+.ov-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--muted); }
+.ov-checks { display: inline-flex; align-items: center; gap: 8px; flex: none; font-size: 12.5px; }
+.ov-checks > span { display: inline-flex; align-items: center; gap: 2px; }
+.ov-checks .icon { width: 12px; height: 12px; stroke-width: 2.2; }
+.ov-clock { margin-left: auto; flex: none; font-family: var(--mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--accent-ink); }
+.ov-lane-log { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; margin-top: 2px; padding: 5px 8px 5px 18px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background .15s ease; }
+.ov-lane-log:hover { background: var(--surface); }
+.ov-track { display: inline-flex; align-items: flex-end; justify-content: flex-end; gap: 2px; flex: none; height: 12px; max-width: 45%; overflow: hidden; }
+.ov-track i { width: 3px; height: 8px; border-radius: 1px; flex: none; background: var(--line-strong); transform-origin: bottom; }
+.ov-track i.k-pass { height: 12px; background: var(--journal); }
+.ov-track i.k-fail { height: 12px; background: var(--danger); }
+.ov-track i.k-commit { height: 12px; background: var(--ink); }
+.ov-track i.k-prompt { background: var(--decision); }
+.ov-track i.k-skill { background: var(--feedback); }
+.ov-track i.k-start, .ov-track i.k-end { background: var(--accent); }
+.ov-step { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; }
+.ov-step .t, .ov-step .kind { flex: none; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.ov-step .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-step.k-pass .kind { color: var(--journal); font-weight: 600; }
+.ov-step.k-fail .kind { color: var(--danger); font-weight: 600; }
+.ov-step.k-prompt .kind { color: var(--decision); }
+.ov-step.k-skill .kind { color: var(--feedback); font-weight: 600; }
+.ov-step.k-start .kind, .ov-step.k-end .kind { color: var(--accent-ink); }
+.ov-more { margin: 6px 0 0; }
+/* the band draws itself in when the page opens; after that only what changed moves */
+.vibe-overview.ov-enter .ov-bar { animation: ov-reveal .7s cubic-bezier(.2, .7, .2, 1) var(--ov-into, 0s) both; }
+@keyframes ov-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+.vibe-overview.ov-enter .ov-lane, .ov-lane.ov-new { animation: fade .4s ease var(--ov-into, 0s) both; }
+.ov-tile.ov-bump .ov-count { animation: ov-bump .5s ease; }
+@keyframes ov-bump { 40% { transform: translateY(-3px); color: var(--accent-ink); } }
+.ov-lane.ov-stepped .ov-step { animation: ov-step-in .35s ease both; }
+@keyframes ov-step-in { from { opacity: 0; transform: translateY(5px); } }
+.ov-lane.ov-stepped .ov-track i:last-child { animation: ov-tick-in .5s ease both; }
+@keyframes ov-tick-in { from { transform: scaleY(0); } }
+/* where the overview jumps to: the live card and the list show briefly where you landed */
+.vibe-live, .vibe-sessions { scroll-margin-top: calc(var(--topbar-h, 0px) + 8px); }
+.vibe-live, .vibe-sessions > header { transition: background .6s ease; }
+.vibe-live.flash, .vibe-sessions.flash > header { background: color-mix(in srgb, var(--session) 14%, var(--bg)); }
+@media (max-width: 600px) {
+  .ov-tiles, .ov-tiles.has-other { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ov-who { display: none; }
+  .ov-track { max-width: 30%; }
+  .ov-lane-log { padding-left: 8px; min-height: 40px; }
+  .ov-tile { min-height: 64px; }
+}
 
 /* ------------------------------------------------------------ founder studio */
 body.founder-open .view { padding-bottom: 16px; }
