@@ -14,7 +14,7 @@ import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peop
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
 import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
-import { capture, commitBrain, copyText, newNote, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
+import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { showShortcuts } from "./shortcuts.js";
 import { initVoiceLog, journalView, openLogSheet, syncLogFab, wireJournal } from "./voicelog.js";
@@ -777,5 +777,6 @@ async function applyUpdate({ restart = false } = {}) {
 }
 
 // reload(): the desktop app calls this after a background sync brought in someone else's edits.
-window.cairn = { state, core, rerender: () => renderView(), reload: () => reloadBrain(), applyUpdate };
+// pairPhone(): the tray's "Pair a phone" opens the QR code.
+window.cairn = { state, core, rerender: () => renderView(), reload: () => reloadBrain(), applyUpdate, pairPhone: () => openPairPhone() };
 boot();

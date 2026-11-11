@@ -1039,6 +1039,14 @@ details.callout[open] > summary::after { transform: rotate(90deg); }
 .settings-publish .field { display: grid; gap: 6px; margin-top: 8px; font-size: 13.5px; }
 .settings-publish input[type="text"] { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
 .settings-publish .publish-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+/* Pair a phone: the QR code stays black on white in both themes so every camera reads it. */
+.pair-phone { max-width: 420px; }
+.pair-qr { display: grid; place-items: center; margin: 14px auto 6px; padding: 10px; width: max-content; background: #fff; border-radius: 12px; }
+.pair-qr svg { display: block; width: 232px; height: auto; }
+.pair-qr.expired { opacity: .2; }
+.pair-url { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; word-break: break-all; }
+.pair-others { font-size: 12.5px; margin-top: 6px; }
+.pair-others code { word-break: break-all; }
 
 /* Maths (KaTeX) and diagrams (Mermaid) */
 .math-block { margin: 14px 0; overflow-x: auto; overflow-y: hidden; padding: 4px 0; }

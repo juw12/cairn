@@ -276,6 +276,54 @@ function publishStatus(last) {
   return `Last published ${last.at}${last.commit ? ` (${last.commit})` : ""} to ${last.repo}.`;
 }
 
+function phoneStatus(info) {
+  const phone = info.phone;
+  if (!info.phoneAccess || !phone?.running) {
+    return phone?.error || "Off. Pair a phone to watch the Vibe page, autopilot and notes from it.";
+  }
+  const paired = phone.devices.length ? plural(phone.devices.length, "phone") + " paired" : "No phones paired yet";
+  return `${paired} \u00b7 ${phone.addresses[0] || `port ${phone.port}`}`;
+}
+
+// The QR code a phone scans to pair (Settings > Pair a phone, or the tray icon).
+export async function openPairPhone() {
+  document.querySelector(".modal-wrap .pair-phone")?.closest(".modal-wrap")?.remove();
+  const result = await desktopAction("phone-pair", {});
+  if (!result) return;
+  const pairedBefore = result.phone.devices.length;
+  modal(`
+    <div class="modal pair-phone" role="dialog" aria-modal="true" aria-labelledby="pair-title">
+      <h2 id="pair-title">Pair a phone</h2>
+      <p>Scan this with your phone's camera. Your phone and this PC need to be on the same Wi-Fi (or the same Tailscale network).</p>
+      ${result.qr ? `<div class="pair-qr">${result.qr}</div>` : `<p class="muted">Open this address on your phone:</p>`}
+      <p class="pair-url"><code>${esc(result.url)}</code> <button type="button" class="btn sm ghost" data-copy-url>${icon("copy", "sm")} Copy</button></p>
+      ${result.others.length ? `<details class="pair-others"><summary>Phone can't connect? Try another address</summary>${result.others.map((url) => `<p><code>${esc(url)}</code></p>`).join("")}</details>` : ""}
+      <p class="hint" data-pair-status>The code works once and expires in 5 minutes. A paired phone stays paired; unpair it in Settings.</p>
+      <div class="actions"><button type="button" class="btn ghost" data-cancel>Done</button></div>
+    </div>`, (wrap, close) => {
+    const expires = Date.now() + result.expiresIn * 1000;
+    const timer = setInterval(async () => {
+      if (!document.body.contains(wrap)) return clearInterval(timer);
+      if (Date.now() > expires) {
+        clearInterval(timer);
+        $("[data-pair-status]", wrap).textContent = "This code expired. Close this and pair again for a new one.";
+        $(".pair-qr", wrap)?.classList.add("expired");
+        return;
+      }
+      const fresh = await state.store.desktop().catch(() => null);
+      if (fresh?.phone && fresh.phone.devices.length > pairedBefore) {
+        clearInterval(timer);
+        close();
+        toast("Phone paired. It opens on the Vibe page.");
+      }
+    }, 2000);
+    wrap.addEventListener("click", (e) => {
+      if (!e.target.closest("[data-copy-url]")) return;
+      navigator.clipboard.writeText(result.url).then(() => toast("Address copied."), () => toast("Couldn't copy.", { error: true }));
+    });
+  });
+}
+
 export async function openSettings() {
   let info;
   try {
@@ -304,6 +352,15 @@ export async function openSettings() {
           <small class="muted" data-publish-status>${esc(publishStatus(info.lastPublish))}</small>
         </div>
       </fieldset>
+      ${info.phone ? `<fieldset class="settings-publish settings-phone">
+        <legend>Phone</legend>
+        <small class="muted" data-phone-status>${esc(phoneStatus(info))}</small>
+        <div class="publish-row">
+          <button class="btn sm primary" data-settings="phone-pair">${icon("link", "sm")} Pair a phone</button>
+          ${info.phone.devices.length ? `<button class="btn sm ghost" data-settings="phone-unpair">Unpair all phones</button>` : ""}
+        </div>
+        <label class="check"><input type="checkbox" data-settings="phone-access" ${info.phoneAccess ? "checked" : ""}> Let paired phones connect <span class="muted">(same Wi-Fi or Tailscale; turning it off keeps them paired)</span></label>
+      </fieldset>` : ""}
       <div class="settings-update">
         <span>Cairn ${esc(info.version)}${info.build ? ` <span class="muted">· ${esc(info.build)}</span>` : ""}</span>
         ${info.updates ? `<button class="btn sm" data-settings="check-update">${icon("refresh", "sm")} Check for updates</button>` : `<span class="muted">Updates come with your package manager.</span>`}
@@ -334,6 +391,28 @@ export async function openSettings() {
       if (button.dataset.settings === "switch") {
         close();
         return openBrainDialog();
+      }
+      if (button.dataset.settings === "phone-pair") {
+        close();
+        return openPairPhone();
+      }
+      if (button.dataset.settings === "phone-unpair") {
+        const sure = await ask({
+          title: "Unpair all phones?",
+          text: "Every paired phone loses access right away. You can pair again any time.",
+          confirm: "Unpair",
+          noInput: true,
+          danger: true,
+        });
+        if (!sure) return;
+        const result = await desktopAction("phone-unpair", {});
+        if (result) {
+          button.remove();
+          const fresh = await state.store.desktop().catch(() => null);
+          if (fresh) $("[data-phone-status]", wrap).textContent = phoneStatus(fresh);
+          toast("All phones unpaired.");
+        }
+        return;
       }
       if (button.dataset.settings === "check-update") {
         button.disabled = true;

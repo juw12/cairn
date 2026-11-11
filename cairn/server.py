@@ -4,6 +4,9 @@ Security model: binds to 127.0.0.1, checks the Host header (DNS rebinding) and r
 `X-Cairn: 1` header on every API call, which browsers can't send cross-site without a CORS
 preflight that this server never approves.
 
+Phones reach the same app through a second, opt-in listener (cairn.phone) that swaps the Host
+check for a paired-device cookie and has no /api/desktop.
+
 The desktop app (cairn.desktop) plugs in a `desktop` object for the things only a native app
 can do: open another folder, clone a repo, start with Windows, self-update. Plain `cairn serve`
 has none of that and answers 404 for /api/desktop.
@@ -303,8 +306,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type + ("; charset=utf-8" if content_type.startswith("text") else ""))
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
+        self._static_headers(target)
         self.end_headers()
         self.wfile.write(data)
+
+    def _static_headers(self, target: Path) -> None:
+        """Extra headers for a static file (the phone listener renews its cookie here)."""
 
 
 def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop=None) -> ThreadingHTTPServer:

@@ -214,6 +214,19 @@ stand by and take over within five minutes of it stopping.
   as one hour, so it can never exceed the length of the day. The summed agent time is shown next to it as
   "N× in parallel".
 
+### Watch it from your phone
+
+Pair a phone the way `opencode pair` does: in the desktop app open **Settings > Pair a phone** (or the tray icon's
+*Pair a phone...*, or run `cairn pair` in a terminal) and scan the QR code. The phone opens straight on the Vibe page
+and stays paired, so a home-screen bookmark keeps working: live sessions, autopilot jobs and notes, from the couch.
+
+- Phone and PC need the same Wi-Fi. To watch from anywhere, put both on [Tailscale](https://tailscale.com); Cairn
+  puts the Tailscale address in the QR code first when it finds one.
+- Each QR code works once and expires after 5 minutes. A paired phone gets a random device cookie (only its hash is
+  stored); *Unpair all phones* in Settings cuts every phone off at once, and unticking *Let paired phones connect*
+  closes the port.
+- If the phone can't connect, Windows Firewall may be blocking Python: allow it on private networks.
+
 ### Hand over a goal: precedent and autopilot
 
 Say what you want once and get what you would have asked for next. `cairn precedent` learns from your own
@@ -528,6 +541,7 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 * The only external requests are to `api.github.com` and `raw.githubusercontent.com`, and only when you look someone up, open a published brain or sign in. A local brain never leaves your machine.
 * Signing in is optional. Your token is kept in this tab only (`sessionStorage`) unless you tick *Remember on this device*; it is sent only to `api.github.com` (tested), and *Sign out* deletes it. With the optional Worker, the device-flow token passes through your own Worker once on its way back to the browser.
 * The local server binds to `127.0.0.1` only, checks the `Host` header and requires a custom header on every API call, so other websites can't reach it.
+* Phone access is off until you pair a phone. It then adds a listener on port 47778 of your local network that answers only to paired devices (single-use QR code, then a device cookie) and has none of the desktop controls. It is plain HTTP, so use it on your own Wi-Fi or Tailscale, not on public Wi-Fi.
 * It reads and writes only `.md` files inside the brain folder; paths that escape it are refused (tested).
 
 ## Development

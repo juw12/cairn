@@ -37,6 +37,7 @@ from pathlib import Path
 
 from . import __version__, watch
 from .brain import NO_WINDOW, Brain, SyncError, clone_repo, repo_folder_name
+from .phone import PhoneAccess
 from .server import attach_autopilot, make_server, switch_brain
 from .winshell import AUMID, stamp_shortcut, start_menu_shortcut
 
@@ -50,7 +51,7 @@ VIBE_WATCH_FIRST_SECONDS = 20
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE = "Cairn"
 MAX_RECENT = 8
-DEPENDENCIES = ["pywebview", "pystray", "pillow"]
+DEPENDENCIES = ["pywebview", "pystray", "pillow", "segno"]  # segno draws the phone-pairing QR code
 
 
 # ============================================================ settings on disk
@@ -343,6 +344,7 @@ class DesktopHooks:
         self.server = server
         self.pick_folder = None  # set by the app: () -> str | None (native folder dialog)
         self.request_restart = None  # set by the app: () -> None
+        self.phone: PhoneAccess | None = None  # set by the app: the opt-in listener for paired phones
         self.loaded_head = app_head()  # the build whose Python code is running
         self.page_head = self.loaded_head  # the build whose web app the window has loaded
 
@@ -370,6 +372,8 @@ class DesktopHooks:
             "autostartSupported": sys.platform == "win32",
             "autoSync": self.config.get("autoSync", True),
             "vibeWatch": bool(self.config.get("vibeWatch", True)),
+            "phoneAccess": bool(self.config.get("phoneAccess", False)),
+            "phone": self.phone.status() if self.phone is not None else None,
             "folder": str(current) if current is not None else self.config.get("folder"),
             "places": places[:MAX_RECENT],
         }
@@ -390,6 +394,9 @@ class DesktopHooks:
             "restart": self.restart_now,
             "publish-settings": lambda: self.publish_settings(str(payload.get("to", "")), bool(payload.get("auto"))),
             "publish": self.publish,
+            "phone-pair": self.pair_phone,
+            "phone-access": lambda: self.toggle_phone_access(bool(payload.get("on"))),
+            "phone-unpair": self.unpair_phones,
         }
         if action not in handlers:
             raise ValueError(f"unknown desktop action: {action}")
@@ -463,6 +470,41 @@ class DesktopHooks:
         brain = self.server.RequestHandlerClass.brain
         return publish_now(brain.dir, repo, self.config)
 
+    # -------------------------------------------------- phone
+    def _need_phone(self) -> PhoneAccess:
+        if self.phone is None:
+            raise ValueError("Pairing a phone needs the Cairn desktop app.")
+        return self.phone
+
+    def pair_phone(self) -> dict:
+        """Turn phone access on and make a fresh single-use QR code."""
+        phone = self._need_phone()
+        try:
+            pairing = phone.new_pairing()
+        except OSError as error:
+            raise ValueError(phone.error or str(error)) from error
+        self.config.set("phoneAccess", True)
+        log("phone pairing code issued")
+        return {**pairing, "phone": phone.status()}
+
+    def toggle_phone_access(self, on: bool) -> dict:
+        phone = self._need_phone()
+        if on:
+            try:
+                phone.start()
+            except OSError as error:
+                raise ValueError(phone.error or str(error)) from error
+        else:
+            phone.stop()
+        self.config.set("phoneAccess", on)
+        return {"phoneAccess": on, "phone": phone.status()}
+
+    def unpair_phones(self) -> dict:
+        phone = self._need_phone()
+        phone.unpair_all()
+        log("unpaired all phones")
+        return {"phone": phone.status()}
+
     def toggle_auto_update(self, on: bool) -> dict:
         self.config.set("autoUpdate", on)
         return {"autoUpdate": on}
@@ -529,6 +571,7 @@ def ensure_dependencies() -> None:
     try:
         import pystray  # noqa: F401
         import webview  # noqa: F401
+        import segno  # noqa: F401
         from PIL import Image  # noqa: F401
     except ImportError:
         log("installing " + " ".join(DEPENDENCIES))
@@ -689,6 +732,14 @@ class DesktopApp:
                 pass
         return False
 
+    def pair_phone(self, *_):
+        """Tray: bring the window up with the QR code showing."""
+        self.show_window()
+        try:
+            self.window.evaluate_js("window.cairn && window.cairn.pairPhone && window.cairn.pairPhone()")
+        except Exception as error:
+            log(f"could not open phone pairing: {error}")
+
     def pick_folder(self):
         import webview
 
@@ -712,6 +763,7 @@ class DesktopApp:
         image = Image.open(icon_file) if icon_file.exists() else Image.new("RGB", (64, 64), "#d4572a")
         menu = pystray.Menu(
             pystray.MenuItem("Open Cairn", self.show_window, default=True),
+            pystray.MenuItem("Pair a phone\u2026", self.pair_phone),
             pystray.MenuItem("Sync now", lambda *_: threading.Thread(target=self.sync_once, args=(True,), daemon=True).start()),
             pystray.MenuItem(
                 "Start with Windows",
@@ -902,6 +954,12 @@ class DesktopApp:
         self.hooks.pick_folder = self.pick_folder
         self.hooks.request_restart = self.restart
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.hooks.phone = PhoneAccess(self.server, config_dir() / "devices.json")
+        if self.config.get("phoneAccess"):
+            try:
+                self.hooks.phone.start()
+            except OSError as error:
+                log(f"phone access not started: {error}")
         url = f"http://127.0.0.1:{self.server.server_address[1]}/"
 
         self.window = webview.create_window(
@@ -924,6 +982,8 @@ class DesktopApp:
         except Exception:
             pass
         self.autopilot.shutdown()
+        if self.hooks.phone is not None:
+            self.hooks.phone.stop()
         self.server.shutdown()
         self.server.server_close()
         log("restarting" if self.restart_requested else "quit")

@@ -340,6 +340,38 @@ def cmd_desktop(brain: Brain, args) -> int:
     return desktop.main(["--hidden"] if args.hidden else [])
 
 
+def cmd_pair(brain: Brain, args) -> int:
+    """Like `opencode pair`: ask the running desktop app for a QR code and print it here."""
+    import http.client
+
+    from .desktop import PORT
+
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=15)
+        conn.request("POST", "/api/desktop", body=json.dumps({"action": "phone-pair"}),
+                     headers={"X-Cairn": "1", "Content-Type": "application/json", "Host": f"127.0.0.1:{PORT}"})
+        response = conn.getresponse()
+        result = json.loads(response.read() or b"{}")
+        conn.close()
+    except (OSError, ValueError):
+        print("Cairn isn't running. Start the desktop app (cairn desktop) and try again.", file=sys.stderr)
+        return 1
+    if response.status != 200:
+        print(f"Couldn't make a pairing code: {result.get('error', response.status)}", file=sys.stderr)
+        return 1
+    try:
+        import segno
+
+        segno.make(result["url"], error="m").terminal(compact=True)
+    except ImportError:
+        pass  # no QR library: the link below works too
+    print(f"Scan with your phone, or open: {result['url']}")
+    for other in result.get("others", []):
+        print(f"  other address: {other}")
+    print("The code works once and expires in 5 minutes. Phone and PC need the same Wi-Fi (or Tailscale).")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cairn",
@@ -355,6 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--no-browser", action="store_true")
     desktop_parser = sub.add_parser("desktop", help="open Cairn as a desktop app (own window, lives in the tray)")
     desktop_parser.add_argument("--hidden", action="store_true", help="start in the tray")
+    sub.add_parser("pair", help="pair a phone: show a QR code to watch Cairn from your phone (desktop app must run)")
     sub.add_parser("init", help="create the brain/ folder layout")
     add_parser = sub.add_parser("add", help='capture: cairn add "todo: ship v1 #release"')
     add_parser.add_argument("text", nargs="+")
@@ -599,6 +632,7 @@ def main(argv: list[str] | None = None) -> int:
         "autopilot": cmd_autopilot,
         "serve": cmd_serve,
         "desktop": cmd_desktop,
+        "pair": cmd_pair,
         None: cmd_serve,
     }
     if args.command is None:
