@@ -8,6 +8,7 @@ import { escapeHtml as esc } from "./md.js";
 import { $, $$, ask, icon, pageHead, plural, statusPill, toast, today } from "./ui.js";
 import { createNote, fileByPath, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { renderNav, renderView } from "./app.js";
+import { estimateEffort, estimateProgress, formatMinutes } from "./progress.js";
 
 const POLL_MS = 3000;
 const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped", done: "Done" };
@@ -381,6 +382,135 @@ export function copyAgentHook() {
   );
 }
 
+// ============================================================ live progress: percent, time left, effort
+
+const SAME_AGENT_SAMPLES = 10;
+const EFFORT_LABEL = { light: "Light", medium: "Medium", heavy: "Heavy" };
+const EFFORT_MEANING = {
+  light: "A small, quick change so far.",
+  medium: "A solid chunk of work: some time, some code.",
+  heavy: "Big or bumpy: long running, lots of changes or failing checks.",
+};
+
+const agentOf = (note) => String(note.meta.agent || note.meta.source || "").toLowerCase();
+
+// Minutes of finished sessions to compare a live one with: the same agent's when there are enough, else all of them.
+function pastDurations(live) {
+  const finished = state.notes.filter((n) => n.type === "session" && n.status !== "live");
+  const minutes = (notes) => notes.map((n) => core.sessionMinutes(n)).filter((m) => m > 0 && m < 1440);
+  const agent = agentOf(live);
+  const same = agent ? minutes(finished.filter((n) => agentOf(n) === agent)) : [];
+  if (same.length >= SAME_AGENT_SAMPLES) return { durations: same, agent };
+  return { durations: minutes(finished), agent: "" };
+}
+
+function clockIn(minutes) {
+  const at = new Date(Date.now() + minutes * 60000);
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+}
+
+function liveEstimate(live, newest) {
+  const log = core.sessionLog(live.body);
+  const elapsed = elapsedMinutes(live);
+  const { durations, agent } = pastDurations(live);
+  const startedClock = String(live.meta.started || "").slice(11, 16);
+  const progress = estimateProgress({ log, elapsed, startedClock, durations });
+  // Git figures cover the whole repo since the newest session started, so only that card uses them.
+  const git = newest && state.vibeGit?.available ? state.vibeGit : null;
+  const effort = estimateEffort({ elapsed, log, git, durations });
+  return { progress, effort, agent, elapsed, git };
+}
+
+function timeLeftText(progress) {
+  if (progress.pct === 100) return "wrapping up";
+  if (progress.remaining !== null) return `~${formatMinutes(progress.remaining)} left · done around ${clockIn(progress.remaining)}`;
+  if (progress.basis === "long") return "running longer than almost all your past sessions";
+  return "no finished sessions yet to estimate from";
+}
+
+function basisText(progress, agent) {
+  if (progress.basis === "reported") {
+    const step = progress.step ? `: “${esc(progress.step)}”` : "";
+    return `Reported by the agent${step}`;
+  }
+  if (progress.basis === "history") {
+    return `Estimated from ${progress.sample} past ${agent ? `${esc(agent)} ` : ""}sessions that ran this long`;
+  }
+  return "Agents can report exact progress by logging <code>[40%] step</code> or <code>step 3/7</code>";
+}
+
+// The bar, the time left and the effort badge for one live session. Re-rendered every poll tick.
+function progressPanel(live, newest) {
+  const { progress, effort, agent, git } = liveEstimate(live, newest);
+  const known = progress.pct !== null;
+  const pctLabel = known ? `${progress.pct}%` : "—";
+  const valueAttrs = known ? ` aria-valuenow="${progress.pct}" aria-valuetext="${progress.pct}%, ${esc(timeLeftText(progress))}"` : ` aria-valuetext="unknown"`;
+  const open = state.vibeEffortOpen?.[live.path] ? " open" : "";
+  const factors = effort.factors
+    .map((f) => `<li><span class="effort-points" aria-label="${f.points} of 2">${"●".repeat(f.points)}${"○".repeat(2 - f.points)}</span>${esc(f.text)}</li>`)
+    .join("");
+  const longer = effort.longerThan !== null ? `<p class="muted small">Already longer than ${effort.longerThan}% of your finished sessions.</p>` : "";
+  const gitNote = git
+    ? ""
+    : `<p class="muted small">${newest ? "No git figures here, so code size is not counted yet." : "Code changes count only for the newest live session."}</p>`;
+  return `<div class="vibe-progress${known ? "" : " unknown"}${progress.basis === "reported" ? " reported" : ""}" data-path="${esc(live.path)}" data-newest="${newest ? "1" : ""}">
+    <div class="vibe-progress-head">
+      <strong class="vibe-pct">${pctLabel}</strong>
+      <span class="vibe-left">${esc(timeLeftText(progress))}</span>
+      <span class="effort effort-${effort.level}" title="${esc(EFFORT_MEANING[effort.level])}">${EFFORT_LABEL[effort.level]} effort</span>
+    </div>
+    <div class="vibe-bar" role="progressbar" aria-label="Progress of ${esc(live.title)}" aria-valuemin="0" aria-valuemax="100"${valueAttrs}>
+      <span style="width:${known ? progress.pct : 100}%"></span>
+    </div>
+    <p class="vibe-basis muted small">${basisText(progress, agent)}</p>
+    <details class="vibe-effort" data-effort="${esc(live.path)}"${open}>
+      <summary>Why ${EFFORT_LABEL[effort.level].toLowerCase()}?</summary>
+      <p class="small">${EFFORT_MEANING[effort.level]} Score ${effort.score} (medium from 2, heavy from 5).</p>
+      <ul class="effort-factors">${factors}</ul>
+      ${longer}${gitNote}
+    </details>
+  </div>`;
+}
+
+// One line under a lane in the overview: a thin bar, the percent, the time left and the effort.
+function laneProgress(live) {
+  const newest = liveSessions()[0]?.path === live.path;
+  const { progress, effort } = liveEstimate(live, newest);
+  const known = progress.pct !== null;
+  const left = progress.remaining !== null && progress.pct !== 100 ? `~${formatMinutes(progress.remaining)} left` : progress.basis === "long" ? "longer than usual" : "";
+  return `<div class="ov-progress${known ? "" : " unknown"}" data-path="${esc(live.path)}">
+    <span class="vibe-bar ov-bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100"${known ? ` aria-valuenow="${progress.pct}"` : ""}><span style="width:${known ? progress.pct : 100}%"></span></span>
+    <span class="ov-pct">${known ? `${progress.pct}%` : "—"}</span>
+    ${left ? `<span class="ov-left">${esc(left)}</span>` : ""}
+    <span class="effort effort-${effort.level}">${EFFORT_LABEL[effort.level]}</span>
+  </div>`;
+}
+
+// Live tick: refresh every bar in place, keeping an opened "why" block open.
+function refreshProgress() {
+  for (const panel of $$(".vibe-progress")) {
+    const note = noteByPath(panel.dataset.path);
+    if (note) panel.outerHTML = progressPanel(note, panel.dataset.newest === "1");
+  }
+  for (const row of $$(".ov-progress")) {
+    const note = noteByPath(row.dataset.path);
+    if (note) row.outerHTML = laneProgress(note);
+  }
+}
+
+// Remember an opened "why" block across live re-renders (recorded on click, see the vibe-fold note in wireVibe).
+let effortClicksWired = false;
+function wireEffortBlocks() {
+  if (effortClicksWired) return;
+  effortClicksWired = true;
+  document.addEventListener("click", (event) => {
+    const summary = event.target.closest?.(".vibe-effort > summary");
+    if (!summary) return;
+    const block = summary.parentElement;
+    state.vibeEffortOpen = { ...(state.vibeEffortOpen || {}), [block.dataset.effort]: !block.open };
+  });
+}
+
 // ============================================================ live updates (local app)
 
 function pollMs() {
@@ -426,10 +556,12 @@ async function poll() {
       const note = noteByPath(clockEl.dataset.path);
       if (note) clockEl.textContent = duration(elapsedMinutes(note));
     }
+    refreshProgress();
   }
 }
 
 export function wireVibe() {
+  wireEffortBlocks();
   if (canPoll() && !pollTimer) {
     pollTimer = setInterval(poll, pollMs());
     poll();
@@ -580,6 +712,7 @@ function liveCard(live, newest = true, total = 1) {
       </div>
       ${controls}
     </header>
+    ${progressPanel(live, newest)}
     <div class="${newest ? "vibe-live-grid" : ""}">
       <div>
         <h3>Progress</h3>
@@ -657,6 +790,7 @@ function lane(note) {
         ${checks}
         <span class="sr-only">running for </span><span class="ov-clock" data-started="${esc(String(note.meta.started || ""))}" title="Time since it started">${clockText(liveSeconds(note.meta.started))}</span>
       </div>
+      ${laneProgress(note)}
       <button type="button" class="ov-lane-log" data-action="vibe-lane" data-path="${esc(note.path)}" title="Jump to this session's log">
         <span class="ov-track" aria-hidden="true">${log.slice(-TRACK).map((e) => `<i class="k-${e.kind}" title="${esc(e.time)} ${e.kind}"></i>`).join("")}</span>
         ${step}

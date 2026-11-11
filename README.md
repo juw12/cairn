@@ -160,6 +160,7 @@ steps; feedback lives in `brain/feedback/` with an optional 1-5 rating.
 ```sh
 cairn vibe start "add dark mode" --agent claude   # opens a live session
 cairn vibe log "asked for a theme toggle" --kind prompt
+cairn vibe log --progress 40 "wiring the toggle"     # how far along it is: drives the live bar and time left
 cairn vibe skill /refine "6.5 -> 8.7"              # skill runs: /refine, /council, /ambitious-founder, /precedent...
 cairn vibe check -- python -m pytest               # runs your tests, logs pass/fail with the summary line
 cairn vibe end --result shipped "toggle works"     # records commits and +/- lines since the start
@@ -170,6 +171,10 @@ cairn vibe status                                  # the same stats in the termi
 Paste the instructions from the Vibe page into `AGENTS.md` or `CLAUDE.md` and your assistant reports its own
 progress. Any logged step that starts with a slash command counts as a skill run, and the page tallies them.
 
+- **Progress, time left, effort:** every live session gets a percentage bar, an estimated time left and a
+  Light / Medium / Heavy effort badge with the reasons (time so far, lines and files changed, checks and failures).
+  The percent comes from what the agent logs (`--progress 40`, `[40%] ...`, `step 3/7`); without that, Cairn
+  estimates it from your own finished sessions (same agent when there are 10+), and says so on the card.
 - **Parallel agents:** run several sessions at once (one per terminal or git worktree). `start` prints the
   session's slug; set `CAIRN_SESSION` to it in that terminal (or pass `--session`) and every command goes there.
 - **Live everywhere:** the local app updates within seconds, with commits and changed files counted since the

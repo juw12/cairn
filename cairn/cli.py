@@ -293,6 +293,12 @@ def cmd_vibe(brain: Brain, args) -> int:
         elif args.action in ("log", "skill"):
             text = " ".join(args.text)
             kind = "skill" if args.action == "skill" else args.kind
+            if args.progress is not None:
+                if not 0 <= args.progress <= 100:
+                    print("--progress takes a percentage from 0 to 100", file=sys.stderr)
+                    return 2
+                # The app reads "[40%] ..." as the agent's own progress and paces the time left from it.
+                text = f"[{args.progress}%] {text}".strip()
             vibe.log(brain, text, kind=kind, session=args.session or "")
             print("Logged.")
         elif args.action == "check":
@@ -436,6 +442,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch"])
     vibe_parser.add_argument("text", nargs="*", help="goal / log text / end summary; for check, the command after --")
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
+    vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
     vibe_parser.add_argument("--task", help="start: link a task, e.g. ship-v1")
     vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor")
     vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest)")

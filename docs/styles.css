@@ -1465,6 +1465,32 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 @keyframes live-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 80%, 100% { box-shadow: 0 0 0 8px transparent; } }
 .vibe-end { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .vibe-live-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 32px; }
+/* Live progress: percent, time left and effort for a running session. */
+.vibe-progress { margin: 14px 0 4px; max-width: 720px; }
+.vibe-progress-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.vibe-pct { font-family: var(--mono); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+.vibe-left { font-size: 13px; color: var(--ink-2); }
+.vibe-bar { position: relative; height: 10px; border-radius: 999px; background: var(--sunken); border: 1px solid var(--line); overflow: hidden; }
+.vibe-bar > span { display: block; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--accent) 70%, var(--surface)); transition: width 0.6s ease; }
+.vibe-progress.reported .vibe-bar > span { background: var(--accent); }
+.vibe-progress.unknown .vibe-bar > span, .ov-progress.unknown .vibe-bar > span { background: repeating-linear-gradient(45deg, var(--line-strong) 0 8px, transparent 8px 16px); background-size: 200% 100%; animation: vibe-bar-wait 3s linear infinite; }
+@keyframes vibe-bar-wait { to { background-position: -45px 0; } }
+.vibe-basis { margin: 6px 0 0; }
+.effort { margin-left: auto; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
+.effort-light { color: var(--journal-ink); background: var(--journal-soft); border-color: color-mix(in srgb, var(--journal) 30%, transparent); }
+.effort-medium { color: var(--idea-ink); background: var(--idea-soft); border-color: color-mix(in srgb, var(--idea) 30%, transparent); }
+.effort-heavy { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+.vibe-effort { margin-top: 6px; font-size: 13px; }
+.vibe-effort > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; width: fit-content; }
+.vibe-effort > summary:hover { color: var(--ink); }
+.vibe-effort p { margin: 6px 0; }
+.effort-factors { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 3px; }
+.effort-factors li { display: flex; gap: 8px; align-items: baseline; }
+.ov-progress { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px 18px; font-size: 12px; color: var(--ink-2); }
+.ov-progress .ov-bar { flex: 1 1 auto; max-width: 320px; height: 6px; }
+.ov-pct { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); min-width: 3ch; }
+.ov-progress .effort { margin-left: 0; padding: 0 7px; font-size: 11px; }
+.effort-points { font-size: 10px; letter-spacing: 1px; color: var(--accent); min-width: 22px; }
 .vibe-log { list-style: none; margin: 0 0 10px; padding: 0; max-height: 300px; overflow: auto; }
 .log-row { display: grid; grid-template-columns: 44px 64px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .log-row .t { font-family: var(--mono); font-size: 12px; color: var(--muted); }
@@ -1546,7 +1572,7 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
   .session-row .meta { grid-column: 2 / -1; white-space: normal; }
   .fb-title { display: inline-block; padding: 6px 0; margin: -6px 0; }
 }
-@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .live-dot, .vibe-progress.unknown .vibe-bar > span, .ov-progress.unknown .vibe-bar > span { animation: none; } .vibe-bar > span { transition: none; } }
 
 .vibe-live.also { padding-top: 14px; }
 .vibe-live.also h2 { font-size: 22px; }
