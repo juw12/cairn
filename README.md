@@ -220,8 +220,12 @@ Pair a phone the way `opencode pair` does: in the desktop app open **Settings > 
 *Pair a phone...*, or run `cairn pair` in a terminal) and scan the QR code. The phone opens straight on the Vibe page
 and stays paired, so a home-screen bookmark keeps working: live sessions, autopilot jobs and notes, from the couch.
 
-- Phone and PC need the same Wi-Fi. To watch from anywhere, put both on [Tailscale](https://tailscale.com); Cairn
-  puts the Tailscale address in the QR code first when it finds one.
+- **Any network:** put both on [Tailscale](https://tailscale.com) (same account). *Settings > Set up Tailscale* installs
+  it on the PC, opens the phone port to Tailscale devices only and turns on *Run unattended*. The QR code then uses the
+  PC's Tailscale name (`my-pc.tail1234.ts.net`), so the paired phone works on mobile data or any Wi-Fi. Without
+  Tailscale, phone and PC need the same Wi-Fi.
+- **Always connected:** Cairn starts with Windows, re-opens the phone port every minute if it dropped, and (by default)
+  keeps the PC from sleeping on its own while phone access is on. Closing a laptop lid still sleeps it.
 - Each QR code works once and expires after 5 minutes. A paired phone gets a random device cookie (only its hash is
   stored); *Unpair all phones* in Settings cuts every phone off at once, and unticking *Let paired phones connect*
   closes the port.

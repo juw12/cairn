@@ -37,7 +37,7 @@ from pathlib import Path
 
 from . import __version__, watch
 from .brain import NO_WINDOW, Brain, SyncError, clone_repo, repo_folder_name
-from .phone import PhoneAccess
+from .phone import PHONE_PORT, PhoneAccess
 from .server import attach_autopilot, make_server, switch_brain
 from .winshell import AUMID, stamp_shortcut, start_menu_shortcut
 
@@ -48,6 +48,7 @@ SYNC_EVERY_SECONDS = 10 * 60
 UPDATE_FIRST_SECONDS = 60
 UPDATE_EVERY_SECONDS = 20 * 60
 VIBE_WATCH_FIRST_SECONDS = 20
+PHONE_CHECK_SECONDS = 60  # bring phone access back if its port dropped (sleep, network change)
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE = "Cairn"
 MAX_RECENT = 8
@@ -336,6 +337,53 @@ def vibe_watch_pass(brain: Brain, config: Config, owner: str, **overrides) -> li
 
 # ============================================================ what the web app can ask for
 
+class KeepAwake:
+    """Stop Windows from going to sleep on its own while phones are paired, so they can always connect.
+
+    Uses SetThreadExecutionState from a thread that holds the request until it's released: no admin
+    rights, nothing changed in power settings, gone the moment Cairn quits. Closing a laptop lid or a
+    sleep forced by IT policy still wins. The screen can still turn off.
+    """
+
+    ES_CONTINUOUS = 0x80000000
+    ES_SYSTEM_REQUIRED = 0x00000001
+
+    def __init__(self, set_state=None):
+        self._set_state = set_state
+        self._stop: threading.Event | None = None
+        self._thread: threading.Thread | None = None
+
+    @property
+    def active(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def set(self, on: bool) -> None:
+        if on and not self.active:
+            setter = self._set_state or self._windows_setter()
+            if setter is None:
+                return
+            self._stop = threading.Event()
+            self._thread = threading.Thread(target=self._hold, args=(setter, self._stop), daemon=True)
+            self._thread.start()
+        elif not on and self.active:
+            self._stop.set()
+            self._thread.join(2)
+            self._thread = None
+
+    def _hold(self, setter, stop: threading.Event) -> None:
+        setter(self.ES_CONTINUOUS | self.ES_SYSTEM_REQUIRED)
+        stop.wait()
+        setter(self.ES_CONTINUOUS)
+
+    @staticmethod
+    def _windows_setter():
+        if sys.platform != "win32":
+            return None
+        import ctypes
+
+        return ctypes.windll.kernel32.SetThreadExecutionState
+
+
 class DesktopHooks:
     """Backs GET/POST /api/desktop. The GUI parts (window, restart) are injected by the app."""
 
@@ -345,6 +393,7 @@ class DesktopHooks:
         self.pick_folder = None  # set by the app: () -> str | None (native folder dialog)
         self.request_restart = None  # set by the app: () -> None
         self.phone: PhoneAccess | None = None  # set by the app: the opt-in listener for paired phones
+        self.keep_awake = KeepAwake()
         self.loaded_head = app_head()  # the build whose Python code is running
         self.page_head = self.loaded_head  # the build whose web app the window has loaded
 
@@ -373,6 +422,8 @@ class DesktopHooks:
             "autoSync": self.config.get("autoSync", True),
             "vibeWatch": bool(self.config.get("vibeWatch", True)),
             "phoneAccess": bool(self.config.get("phoneAccess", False)),
+            "phoneKeepAwake": bool(self.config.get("phoneKeepAwake", True)),
+            "awake": self.keep_awake.active,
             "phone": self.phone.status() if self.phone is not None else None,
             "folder": str(current) if current is not None else self.config.get("folder"),
             "places": places[:MAX_RECENT],
@@ -397,6 +448,8 @@ class DesktopHooks:
             "phone-pair": self.pair_phone,
             "phone-access": lambda: self.toggle_phone_access(bool(payload.get("on"))),
             "phone-unpair": self.unpair_phones,
+            "phone-keep-awake": lambda: self.toggle_keep_awake(bool(payload.get("on"))),
+            "tailscale-setup": self.setup_tailscale,
         }
         if action not in handlers:
             raise ValueError(f"unknown desktop action: {action}")
@@ -484,6 +537,7 @@ class DesktopHooks:
         except OSError as error:
             raise ValueError(phone.error or str(error)) from error
         self.config.set("phoneAccess", True)
+        self.sync_phone()
         log("phone pairing code issued")
         return {**pairing, "phone": phone.status()}
 
@@ -494,10 +548,43 @@ class DesktopHooks:
                 phone.start()
             except OSError as error:
                 raise ValueError(phone.error or str(error)) from error
-        else:
-            phone.stop()
         self.config.set("phoneAccess", on)
+        self.sync_phone()
         return {"phoneAccess": on, "phone": phone.status()}
+
+    def toggle_keep_awake(self, on: bool) -> dict:
+        self.config.set("phoneKeepAwake", on)
+        self.sync_phone()
+        return {"phoneKeepAwake": on, "awake": self.keep_awake.active}
+
+    def sync_phone(self) -> None:
+        """Make the phone listener and keep-awake match the settings. Runs at start, after every phone
+        setting change and every minute, so a port lost to sleep or a network change comes back."""
+        phone = self.phone
+        if phone is None:
+            return
+        wanted = bool(self.config.get("phoneAccess"))
+        if wanted and not phone.running:
+            try:
+                phone.start()
+                log("phone access listening")
+            except OSError as error:
+                log(f"phone access not started: {error}")
+        elif not wanted and phone.running:
+            phone.stop()
+        self.keep_awake.set(wanted and phone.running and bool(self.config.get("phoneKeepAwake", True)))
+
+    def setup_tailscale(self) -> dict:
+        """Open the Tailscale setup in a console window: install, allow the phone port, sign in."""
+        if sys.platform != "win32":
+            raise ValueError("Install Tailscale from tailscale.com/download, then pair again.")
+        script = APP_ROOT / "scripts" / "setup-tailscale.ps1"
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Port", str(PHONE_PORT)],
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+        )
+        log("tailscale setup started")
+        return {"started": True}
 
     def unpair_phones(self) -> dict:
         phone = self._need_phone()
@@ -850,6 +937,13 @@ class DesktopApp:
         if held is not None:
             watch.release_watch(held, owner)
 
+    def phone_loop(self):
+        while not self.stopping.wait(PHONE_CHECK_SECONDS):
+            try:
+                self.hooks.sync_phone()
+            except Exception as error:  # never let a background check take the app down
+                log(f"phone check failed: {error}")
+
     def publish_once(self) -> None:
         try:
             result = self.hooks.maybe_publish()
@@ -955,11 +1049,7 @@ class DesktopApp:
         self.hooks.request_restart = self.restart
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.hooks.phone = PhoneAccess(self.server, config_dir() / "devices.json")
-        if self.config.get("phoneAccess"):
-            try:
-                self.hooks.phone.start()
-            except OSError as error:
-                log(f"phone access not started: {error}")
+        self.hooks.sync_phone()
         url = f"http://127.0.0.1:{self.server.server_address[1]}/"
 
         self.window = webview.create_window(
@@ -970,7 +1060,7 @@ class DesktopApp:
         self.window.events.shown += self.set_icon
         self.tray = self.build_tray()
         self.tray.run_detached()
-        for loop in (self.watch_show_requests, self.sync_loop, self.update_loop, self.vibe_watch_loop):
+        for loop in (self.watch_show_requests, self.sync_loop, self.update_loop, self.vibe_watch_loop, self.phone_loop):
             threading.Thread(target=loop, daemon=True).start()
         log(f"running {self.hooks.loaded_head or __version__} on {folder} ({'tray' if self.start_hidden else 'window'})")
 
@@ -982,6 +1072,7 @@ class DesktopApp:
         except Exception:
             pass
         self.autopilot.shutdown()
+        self.hooks.keep_awake.set(False)
         if self.hooks.phone is not None:
             self.hooks.phone.stop()
         self.server.shutdown()

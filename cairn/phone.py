@@ -14,6 +14,10 @@ and lasts 5 minutes; it sits in the URL fragment, so it never reaches a log or p
 posts it back and gets a random device cookie (400 days, renewed while used). Only a hash of each
 device token is stored, in devices.json next to the app's settings. "Unpair all" deletes them.
 
+From any network: with Tailscale on this PC and the phone, the QR code uses this PC's Tailscale name
+(MagicDNS, e.g. my-pc.tail1234.ts.net), which follows the PC across networks, so a paired phone keeps
+working on mobile data or any Wi-Fi. scripts/setup-tailscale.ps1 installs and signs in Tailscale.
+
 Plain HTTP: on your own Wi-Fi or a Tailscale network that is fine, on a public network it is not.
 """
 
@@ -25,7 +29,9 @@ import hmac
 import ipaddress
 import json
 import secrets
+import shutil
 import socket
+import subprocess
 import threading
 import time
 from http import HTTPStatus
@@ -33,11 +39,15 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .brain import NO_WINDOW
+
 PHONE_PORT = 47778
 CODE_SECONDS = 5 * 60
 COOKIE = "cairn_device"
 COOKIE_MAX_AGE = 400 * 24 * 3600  # the longest a browser keeps a cookie; renewed on every page load
 SEEN_WRITE_SECONDS = 3600  # write "last seen" at most hourly
+TAILSCALE_CACHE_SECONDS = 30  # Settings polls while the QR code is open; don't spawn tailscale.exe each time
+TAILSCALE_EXE = Path(r"C:\Program Files\Tailscale\tailscale.exe")
 
 
 def _hash(token: str) -> str:
@@ -143,6 +153,42 @@ def lan_addresses() -> list[str]:
     return sorted(usable, key=rank)
 
 
+def tailscale_exe() -> str | None:
+    found = shutil.which("tailscale")
+    if found:
+        return found
+    return str(TAILSCALE_EXE) if TAILSCALE_EXE.exists() else None
+
+
+def tailscale_info(run=subprocess.run) -> dict:
+    """Is this PC on a tailnet? {"installed", "running", "state", "ip", "dns", "name"} from `tailscale status`."""
+    exe = tailscale_exe()
+    if not exe:
+        return {"installed": False, "running": False, "state": "", "ip": "", "dns": "", "name": ""}
+    try:
+        result = run(
+            [exe, "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=NO_WINDOW,
+        )
+        data = json.loads(result.stdout or "{}")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        data = {}
+    me = data.get("Self") or {}
+    ips = [ip for ip in (me.get("TailscaleIPs") or data.get("TailscaleIPs") or []) if "." in ip]
+    state = data.get("BackendState", "")
+    return {
+        "installed": True,
+        "running": state == "Running",
+        "state": state,
+        "ip": ips[0] if ips else "",
+        "dns": (me.get("DNSName") or "").rstrip("."),
+        "name": me.get("HostName", ""),
+    }
+
+
 def qr_svg(text: str) -> str | None:
     """An SVG QR code, or None when the `segno` library isn't installed."""
     try:
@@ -192,6 +238,7 @@ class PhoneAccess:
         self.error = ""
         self._codes: dict[str, float] = {}  # hash of a pairing code -> expiry (monotonic)
         self._lock = threading.Lock()
+        self._tailscale: tuple[float, dict] | None = None
 
     # -------------------------------------------------- listener
     @property
@@ -218,12 +265,27 @@ class PhoneAccess:
             listener.server_close()
 
     # -------------------------------------------------- pairing
+    def tailscale(self, fresh: bool = False) -> dict:
+        now = time.monotonic()
+        if fresh or self._tailscale is None or now - self._tailscale[0] > TAILSCALE_CACHE_SECONDS:
+            self._tailscale = (now, tailscale_info())
+        return self._tailscale[1]
+
     def addresses(self) -> list[str]:
-        return [f"http://{ip}:{self.port}" for ip in lan_addresses()]
+        """Best first: the Tailscale name (works on any network), its IP, then this PC's local addresses."""
+        hosts: list[str] = []
+        ts = self.tailscale()
+        if ts.get("running"):
+            hosts += [host for host in (ts.get("dns"), ts.get("ip")) if host]
+        for host in hosts + lan_addresses():
+            if host not in hosts:
+                hosts.append(host)
+        return [f"http://{host}:{self.port}" for host in hosts]
 
     def new_pairing(self) -> dict:
         """A fresh single-use code; returns the URL to put in the QR code and the code's lifetime."""
         self.start()
+        self.tailscale(fresh=True)
         code = secrets.token_urlsafe(16)
         with self._lock:
             now = time.monotonic()
@@ -233,6 +295,7 @@ class PhoneAccess:
         url = f"{bases[0]}/pair#{code}"
         return {
             "url": url,
+            "anywhere": bool(self.tailscale().get("running")),
             "qr": qr_svg(url),
             "others": [f"{base}/pair#{code}" for base in bases[1:]],
             "expiresIn": CODE_SECONDS,
@@ -258,6 +321,7 @@ class PhoneAccess:
             "addresses": self.addresses() if self.running else [],
             "devices": self.store.devices(),
             "error": self.error,
+            "tailscale": self.tailscale(),
         }
 
 

@@ -285,6 +285,14 @@ function phoneStatus(info) {
   return `${paired} \u00b7 ${phone.addresses[0] || `port ${phone.port}`}`;
 }
 
+// Where a phone can reach this PC from: any network (Tailscale) or only the same Wi-Fi.
+function reachStatus(phone) {
+  const ts = phone?.tailscale || {};
+  if (ts.running) return { anywhere: true, text: `From any network through Tailscale (${ts.dns || ts.ip}).` };
+  if (ts.installed) return { anywhere: false, text: "Same Wi-Fi only: Tailscale is installed but not signed in." };
+  return { anywhere: false, text: "Same Wi-Fi only. Add Tailscale to reach this PC from mobile data or any Wi-Fi." };
+}
+
 // The QR code a phone scans to pair (Settings > Pair a phone, or the tray icon).
 export async function openPairPhone() {
   document.querySelector(".modal-wrap .pair-phone")?.closest(".modal-wrap")?.remove();
@@ -294,7 +302,9 @@ export async function openPairPhone() {
   modal(`
     <div class="modal pair-phone" role="dialog" aria-modal="true" aria-labelledby="pair-title">
       <h2 id="pair-title">Pair a phone</h2>
-      <p>Scan this with your phone's camera. Your phone and this PC need to be on the same Wi-Fi (or the same Tailscale network).</p>
+      <p>Scan this with your phone's camera. ${result.anywhere
+        ? "It works from any network while Tailscale is on in your phone (same account as this PC)."
+        : "Your phone and this PC need to be on the same Wi-Fi. For any network, set up Tailscale in Settings first."}</p>
       ${result.qr ? `<div class="pair-qr">${result.qr}</div>` : `<p class="muted">Open this address on your phone:</p>`}
       <p class="pair-url"><code>${esc(result.url)}</code> <button type="button" class="btn sm ghost" data-copy-url>${icon("copy", "sm")} Copy</button></p>
       ${result.others.length ? `<details class="pair-others"><summary>Phone can't connect? Try another address</summary>${result.others.map((url) => `<p><code>${esc(url)}</code></p>`).join("")}</details>` : ""}
@@ -355,11 +365,14 @@ export async function openSettings() {
       ${info.phone ? `<fieldset class="settings-publish settings-phone">
         <legend>Phone</legend>
         <small class="muted" data-phone-status>${esc(phoneStatus(info))}</small>
+        <small class="muted phone-reach">${esc(reachStatus(info.phone).text)}</small>
         <div class="publish-row">
           <button class="btn sm primary" data-settings="phone-pair">${icon("link", "sm")} Pair a phone</button>
+          ${reachStatus(info.phone).anywhere ? "" : `<button class="btn sm" data-settings="tailscale-setup">${icon("external", "sm")} Set up Tailscale</button>`}
           ${info.phone.devices.length ? `<button class="btn sm ghost" data-settings="phone-unpair">Unpair all phones</button>` : ""}
         </div>
-        <label class="check"><input type="checkbox" data-settings="phone-access" ${info.phoneAccess ? "checked" : ""}> Let paired phones connect <span class="muted">(same Wi-Fi or Tailscale; turning it off keeps them paired)</span></label>
+        <label class="check"><input type="checkbox" data-settings="phone-access" ${info.phoneAccess ? "checked" : ""}> Let paired phones connect <span class="muted">(turning it off keeps them paired)</span></label>
+        <label class="check"><input type="checkbox" data-settings="phone-keep-awake" ${info.phoneKeepAwake ? "checked" : ""}> Keep this PC awake so phones can always connect <span class="muted">(only while phone access is on; closing a laptop lid still sleeps)</span></label>
       </fieldset>` : ""}
       <div class="settings-update">
         <span>Cairn ${esc(info.version)}${info.build ? ` <span class="muted">· ${esc(info.build)}</span>` : ""}</span>
@@ -395,6 +408,11 @@ export async function openSettings() {
       if (button.dataset.settings === "phone-pair") {
         close();
         return openPairPhone();
+      }
+      if (button.dataset.settings === "tailscale-setup") {
+        const result = await desktopAction("tailscale-setup", {});
+        if (result?.started) toast("Tailscale setup opened in a new window. When it's done, pair your phone again.");
+        return;
       }
       if (button.dataset.settings === "phone-unpair") {
         const sure = await ask({

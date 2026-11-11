@@ -1041,6 +1041,8 @@ details.callout[open] > summary::after { transform: rotate(90deg); }
 .settings-publish .publish-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 /* Pair a phone: the QR code stays black on white in both themes so every camera reads it. */
 .pair-phone { max-width: 420px; }
+.settings-phone small { display: block; }
+.settings-phone .phone-reach { margin-top: 2px; }
 .pair-qr { display: grid; place-items: center; margin: 14px auto 6px; padding: 10px; width: max-content; background: #fff; border-radius: 12px; }
 .pair-qr svg { display: block; width: 232px; height: auto; }
 .pair-qr.expired { opacity: .2; }

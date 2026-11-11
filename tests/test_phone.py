@@ -3,6 +3,8 @@
 import http.client
 import json
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -14,8 +16,15 @@ from cairn.brain import Brain
 from cairn.server import make_server, switch_brain
 
 
+NO_TAILSCALE = {"installed": False, "running": False, "state": "", "ip": "", "dns": "", "name": ""}
+ON_TAILSCALE = {"installed": True, "running": True, "state": "Running", "ip": "100.101.102.103", "dns": "my-pc.tail1234.ts.net", "name": "my-pc"}
+
+
 class PhoneTests(unittest.TestCase):
     def setUp(self):
+        patcher = mock.patch.object(phone, "tailscale_info", return_value=dict(NO_TAILSCALE))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.folder = self.tmp / "brain one"
@@ -145,6 +154,10 @@ class PhoneTests(unittest.TestCase):
 
 class DesktopPhoneTests(unittest.TestCase):
     def setUp(self):
+        patcher = mock.patch.object(phone, "tailscale_info", return_value=dict(NO_TAILSCALE))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.awake_calls = []
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         folder = self.tmp / "vault"
@@ -156,7 +169,9 @@ class DesktopPhoneTests(unittest.TestCase):
         self.server = make_server(brain, port=0, desktop=self.hooks)
         self.hooks.server = self.server
         self.hooks.phone = phone.PhoneAccess(self.server, self.tmp / "devices.json", port=0, host="127.0.0.1")
+        self.hooks.keep_awake = desktop.KeepAwake(set_state=self.awake_calls.append)
         self.addCleanup(self.hooks.phone.stop)
+        self.addCleanup(self.hooks.keep_awake.set, False)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
@@ -193,6 +208,68 @@ class DesktopPhoneTests(unittest.TestCase):
         self.assertFalse(self.config.get("phoneAccess"))
         status, result = self.act("phone-unpair")
         self.assertEqual((status, result["phone"]["devices"]), (200, []))
+
+    def test_listener_comes_back_and_keeps_the_pc_awake(self):
+        self.act("phone-pair")
+        self.assertTrue(self.hooks.keep_awake.active, "phone access on: the PC stays awake")
+        self.hooks.phone.stop()  # e.g. the port died while the PC slept
+        self.hooks.sync_phone()
+        self.assertTrue(self.hooks.phone.running, "the minute check brings the listener back")
+        status, result = self.act("phone-keep-awake", on=False)
+        self.assertEqual((status, result["awake"]), (200, False))
+        self.assertEqual(self.awake_calls[0], desktop.KeepAwake.ES_CONTINUOUS | desktop.KeepAwake.ES_SYSTEM_REQUIRED)
+        self.assertEqual(self.awake_calls[-1], desktop.KeepAwake.ES_CONTINUOUS, "released, not left on")
+        self.act("phone-keep-awake", on=True)
+        self.act("phone-access", on=False)
+        self.assertFalse(self.hooks.keep_awake.active, "no phone access, no keeping awake")
+
+    @unittest.skipUnless(sys.platform == "win32", "the setup script is for Windows")
+    def test_tailscale_setup_opens_the_script(self):
+        with mock.patch.object(desktop.subprocess, "Popen") as popen:
+            status, result = self.act("tailscale-setup")
+        self.assertEqual((status, result), (200, {"started": True}))
+        command = popen.call_args[0][0]
+        self.assertTrue(command[-3].endswith("setup-tailscale.ps1"))
+        self.assertEqual(command[-2:], ["-Port", str(phone.PHONE_PORT)])
+        self.assertTrue((desktop.APP_ROOT / "scripts" / "setup-tailscale.ps1").exists())
+
+
+class TailscaleTests(unittest.TestCase):
+    def fake_run(self, payload):
+        def run(*args, **kwargs):
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps(payload), stderr="")
+        return run
+
+    def test_reads_name_and_address(self):
+        payload = {
+            "BackendState": "Running",
+            "Self": {"HostName": "my-pc", "DNSName": "my-pc.tail1234.ts.net.", "TailscaleIPs": ["100.101.102.103", "fd7a::1"]},
+        }
+        with mock.patch.object(phone, "tailscale_exe", return_value="tailscale"):
+            info = phone.tailscale_info(run=self.fake_run(payload))
+        self.assertEqual(info, ON_TAILSCALE)
+
+    def test_installed_but_signed_out(self):
+        with mock.patch.object(phone, "tailscale_exe", return_value="tailscale"):
+            info = phone.tailscale_info(run=self.fake_run({"BackendState": "NeedsLogin", "Self": {}}))
+        self.assertEqual((info["installed"], info["running"], info["dns"]), (True, False, ""))
+
+    def test_not_installed(self):
+        with mock.patch.object(phone, "tailscale_exe", return_value=None):
+            self.assertEqual(phone.tailscale_info(), NO_TAILSCALE)
+
+    def test_qr_code_uses_the_tailscale_name_first(self):
+        server = mock.Mock()
+        access = phone.PhoneAccess(server, Path(tempfile.mkdtemp()) / "devices.json", port=0, host="127.0.0.1")
+        access.port = 47778
+        with mock.patch.object(phone, "tailscale_info", return_value=dict(ON_TAILSCALE)), \
+                mock.patch.object(phone, "lan_addresses", return_value=["100.101.102.103", "192.168.1.20"]):
+            self.assertEqual(access.addresses(), [
+                "http://my-pc.tail1234.ts.net:47778",
+                "http://100.101.102.103:47778",
+                "http://192.168.1.20:47778",
+            ])
+            self.assertTrue(access.status()["tailscale"]["running"])
 
 
 if __name__ == "__main__":
