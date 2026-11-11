@@ -16,6 +16,7 @@ import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessi
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
+import { startLiveSync } from "./live.js";
 import { showShortcuts } from "./shortcuts.js";
 import { initVoiceLog, journalView, openLogSheet, syncLogFab, wireJournal } from "./voicelog.js";
 import { showWelcome } from "./welcome.js";
@@ -640,6 +641,7 @@ export async function start(store) {
   refreshTodos();
   refreshGit();
   initObsidian();
+  startLiveSync();
   if (resumeAfterUpdate) {
     const note = resumeAfterUpdate;
     resumeAfterUpdate = null;

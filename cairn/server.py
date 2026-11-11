@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import secrets
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -31,6 +32,39 @@ from .obsidian import SyncError as ObsidianSyncError
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_CANDIDATES = [PACKAGE_DIR / "web", PACKAGE_DIR.parent / "docs"]
 MAX_BODY = 5_000_000
+
+
+class ChangeFeed:
+    """Which notes changed through this server, so every open page (PC window, paired phones) can pick up
+    the others' edits within seconds. Each page sends a random X-Cairn-Client id and is not told about
+    its own edits. In memory only: a restart or a brain switch tells pages to reload everything."""
+
+    KEEP = 500
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.epoch = secrets.token_hex(4)  # changes when the server restarts or switches brain
+        self.revision = 0
+        self.entries: list[tuple[int, str, str]] = []  # (revision, path, client)
+
+    def record(self, path: str, client: str) -> None:
+        with self.lock:
+            self.revision += 1
+            self.entries.append((self.revision, path, client))
+            del self.entries[:-self.KEEP]
+
+    def reset(self) -> None:
+        with self.lock:
+            self.epoch = secrets.token_hex(4)
+            self.revision = 0
+            self.entries.clear()
+
+    def since(self, revision: int, epoch: str, client: str) -> dict:
+        with self.lock:
+            oldest = self.entries[0][0] if self.entries else self.revision + 1
+            stale = epoch != self.epoch or revision > self.revision or revision < oldest - 1
+            paths = sorted({p for r, p, c in self.entries if r > revision and c != client}) if not stale else []
+            return {"epoch": self.epoch, "revision": self.revision, "paths": paths, "reset": bool(stale and epoch)}
 
 
 def find_web_dir() -> Path:
@@ -88,6 +122,9 @@ class Handler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.FORBIDDEN, "missing X-Cairn header")
             return False
         return True
+
+    def _client(self) -> str:
+        return (self.headers.get("X-Cairn-Client") or "")[:64]
 
     def _query_path(self) -> str:
         return (parse_qs(urlparse(self.path).query).get("path") or [""])[0]
@@ -148,6 +185,13 @@ class Handler(BaseHTTPRequestHandler):
                 })
             elif route == "/api/files":
                 self._send_json({"files": brain.files()})
+            elif route == "/api/changes":
+                query = parse_qs(urlparse(self.path).query)
+                try:
+                    since = int(query.get("since", ["0"])[0] or 0)
+                except ValueError:
+                    since = 0
+                self._send_json(self.changes.since(since, query.get("epoch", [""])[0], self._client()))
             elif route == "/api/todos":
                 self._send_json({"items": brain.scan_code()})
             elif route == "/api/git":
@@ -187,6 +231,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = self._body()
             mtime = self.brain.write(self._query_path(), str(body.get("text", "")), body.get("mtime"))
+            self.changes.record(self._query_path(), self._client())
             self._send_json({"path": self._query_path(), "mtime": mtime})
         except PathError as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
@@ -202,6 +247,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             self.brain.delete(self._query_path())
+            self.changes.record(self._query_path(), self._client())
             self._send_json({"ok": True})
         except PathError as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
@@ -323,6 +369,7 @@ def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop
     handler.sync_lock = threading.Lock()
     handler.desktop = desktop
     handler.autopilot = None
+    handler.changes = ChangeFeed()
     handler.web_dir = find_web_dir().resolve()
     server = ThreadingHTTPServer((host, port), handler)
     actual_port = server.server_address[1]
@@ -342,6 +389,7 @@ def switch_brain(server: ThreadingHTTPServer, brain: Brain) -> None:
     """Serve a different folder from now on (the desktop app's "Open a brain")."""
     server.RequestHandlerClass.brain = brain
     server.RequestHandlerClass.obsidian = ObsidianSync(brain)
+    server.RequestHandlerClass.changes.reset()
     if server.RequestHandlerClass.autopilot is not None:
         server.RequestHandlerClass.autopilot.brain = brain
 

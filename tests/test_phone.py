@@ -272,5 +272,58 @@ class TailscaleTests(unittest.TestCase):
             self.assertTrue(access.status()["tailscale"]["running"])
 
 
+class LiveSyncTests(unittest.TestCase):
+    """An edit on the phone shows up on the PC window (and back) through the change feed."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        folder = self.tmp / "brain"
+        folder.mkdir()
+        Brain(folder).init()
+        self.server = make_server(Brain(folder), port=0)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.port = self.server.server_address[1]
+
+    def call(self, method, path, client, body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        conn.request(method, path, body=json.dumps(body) if body is not None else None,
+                     headers={"X-Cairn": "1", "X-Cairn-Client": client, "Content-Type": "application/json"})
+        response = conn.getresponse()
+        data = json.loads(response.read() or b"{}")
+        conn.close()
+        return response.status, data
+
+    def test_other_pages_see_an_edit_but_not_their_own(self):
+        _, pc = self.call("GET", "/api/changes?since=0", "pc")
+        _, ph = self.call("GET", "/api/changes?since=0", "phone")
+        status, _ = self.call("PUT", "/api/files?path=ideas/from-phone.md", "phone", {"text": "---\ntitle: Hi\n---\n"})
+        self.assertEqual(status, 200)
+        _, seen = self.call("GET", f"/api/changes?since={pc['revision']}&epoch={pc['epoch']}", "pc")
+        self.assertEqual((seen["paths"], seen["reset"]), (["ideas/from-phone.md"], False))
+        _, own = self.call("GET", f"/api/changes?since={ph['revision']}&epoch={ph['epoch']}", "phone")
+        self.assertEqual(own["paths"], [], "a page isn't told about its own edit")
+        self.call("DELETE", "/api/files?path=ideas/from-phone.md", "pc")
+        _, gone = self.call("GET", f"/api/changes?since={own['revision']}&epoch={own['epoch']}", "phone")
+        self.assertEqual(gone["paths"], ["ideas/from-phone.md"])
+
+    def test_restart_or_brain_switch_asks_pages_to_reload(self):
+        _, before = self.call("GET", "/api/changes?since=0", "pc")
+        other = self.tmp / "other"
+        other.mkdir()
+        switch_brain(self.server, Brain(other))
+        _, after = self.call("GET", f"/api/changes?since={before['revision']}&epoch={before['epoch']}", "pc")
+        self.assertTrue(after["reset"])
+        self.assertNotEqual(after["epoch"], before["epoch"])
+
+    def test_phone_listener_shares_the_feed(self):
+        access = phone.PhoneAccess(self.server, self.tmp / "devices.json", port=0, host="127.0.0.1")
+        self.addCleanup(access.stop)
+        self.assertIs(phone.make_phone_handler(self.server.RequestHandlerClass, access).changes,
+                      self.server.RequestHandlerClass.changes)
+
+
 if __name__ == "__main__":
     unittest.main()

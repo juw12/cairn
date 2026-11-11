@@ -214,12 +214,16 @@ stand by and take over within five minutes of it stopping.
   as one hour, so it can never exceed the length of the day. The summed agent time is shown next to it as
   "N× in parallel".
 
-### Watch it from your phone
+### Watch and control it from your phone
 
 Pair a phone the way `opencode pair` does: in the desktop app open **Settings > Pair a phone** (or the tray icon's
 *Pair a phone...*, or run `cairn pair` in a terminal) and scan the QR code. The phone opens straight on the Vibe page
 and stays paired, so a home-screen bookmark keeps working: live sessions, autopilot jobs and notes, from the couch.
 
+- **Control, not just watch:** the phone gets the full app (capture, edit notes, move tasks, start, comment on or stop
+  autopilot jobs), minus the desktop-only controls such as Settings and updates.
+- **Live sync:** a change on the phone shows up in the open PC window within a few seconds without a reload, and back
+  the other way. A note you are typing in is left alone until you pause.
 - **Any network:** put both on [Tailscale](https://tailscale.com) (same account). *Settings > Set up Tailscale* installs
   it on the PC, opens the phone port to Tailscale devices only and turns on *Run unattended*. The QR code then uses the
   PC's Tailscale name (`my-pc.tail1234.ts.net`), so the paired phone works on mobile data or any Wi-Fi. Without

@@ -24,6 +24,9 @@ export class ConflictError extends Error {
 
 // ------------------------------------------------------------ local Python server
 
+// Tells the server which page made an edit, so the live feed doesn't echo a page's own edits back.
+export const CLIENT_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
 export class ServerStore {
   constructor(info) {
     this.meta = info;
@@ -45,7 +48,7 @@ export class ServerStore {
   async request(method, url, body) {
     const response = await fetch(url, {
       method,
-      headers: { "X-Cairn": "1", "Content-Type": "application/json" },
+      headers: { "X-Cairn": "1", "X-Cairn-Client": CLIENT_ID, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
     });
@@ -129,6 +132,11 @@ export class ServerStore {
 
   async precedentBrief(goal = "") {
     return this.request("GET", `api/precedent/brief?goal=${encodeURIComponent(goal)}`);
+  }
+
+  // Live sync: notes other pages (your phone, the PC window) changed since `revision`.
+  async changes(revision, epoch) {
+    return this.request("GET", `api/changes?since=${revision}&epoch=${encodeURIComponent(epoch || "")}`);
   }
 
   async desktopAction(action, payload = {}) {
