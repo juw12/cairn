@@ -378,6 +378,30 @@ def cmd_pair(brain: Brain, args) -> int:
     return 0
 
 
+def cmd_relay(brain: Brain, args) -> int:
+    """Chat from anywhere through a private GitHub repo (see cairn/relay.py)."""
+    from . import relay
+
+    try:
+        if args.relay_action == "setup":
+            config = relay.setup(args.repo or "", args.proxy or "")
+            print(f"Relay ready: https://github.com/{config['repo']} (private).")
+            print("The desktop app answers from it on its next start; or run `cairn relay run` now.")
+            print(f"On your phone: open Cairn, sign in with a token that can read and write {config['repo']}, open Chat.")
+            return 0
+        if args.relay_action == "run":
+            relay.Relay(relay.connect()).run()
+            return 0
+        config = relay.load_config()
+        print(f"Relay: {config['repo']}" if config else "Relay isn't set up. Run `cairn relay setup`.")
+        return 0
+    except relay.RelayError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cairn",
@@ -394,6 +418,14 @@ def build_parser() -> argparse.ArgumentParser:
     desktop_parser = sub.add_parser("desktop", help="open Cairn as a desktop app (own window, lives in the tray)")
     desktop_parser.add_argument("--hidden", action="store_true", help="start in the tray")
     sub.add_parser("pair", help="pair a phone: show a QR code to watch Cairn from your phone (desktop app must run)")
+    relay_parser = sub.add_parser(
+        "relay",
+        help="chat from your phone anywhere, through a private GitHub repo",
+        description="setup: create the private relay repo and remember it | run: answer chats in this terminal | status",
+    )
+    relay_parser.add_argument("relay_action", nargs="?", choices=["setup", "run", "status"], default="status")
+    relay_parser.add_argument("--repo", help="owner/name of the relay repo (default: <you>/cairn-relay)")
+    relay_parser.add_argument("--proxy", help="HTTP proxy for GitHub, e.g. http://proxy:80")
     sub.add_parser("init", help="create the brain/ folder layout")
     add_parser = sub.add_parser("add", help='capture: cairn add "todo: ship v1 #release"')
     add_parser.add_argument("text", nargs="+")
@@ -640,6 +672,7 @@ def main(argv: list[str] | None = None) -> int:
         "serve": cmd_serve,
         "desktop": cmd_desktop,
         "pair": cmd_pair,
+        "relay": cmd_relay,
         None: cmd_serve,
     }
     if args.command is None:

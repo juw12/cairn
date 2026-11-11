@@ -5,15 +5,23 @@
 import { escapeHtml as esc, renderMarkdown } from "./md.js";
 import { $, icon, toast } from "./ui.js";
 import { state } from "./state.js";
+import { session } from "./auth.js";
+import { relayRepo, relayStore, setRelayRepo, TOKEN_URL } from "./relay.js";
 
 export const GLOW_URL = "https://juw12.github.io/projects/glow/app.html";
 const MODEL_KEY = "cairn.chatModel";
-const POLL_MS = 1000;
+const STALE_PC_S = 20 * 60;
 
 let pollTimer = null;
 
-const canChat = () => typeof state.store?.chat === "function";
-const chatState = () => state.chat || (state.chat = { list: null, models: [], available: true, current: "", thread: null, showList: false });
+// Direct: this page is served by (or paired with) the PC. Otherwise, signed in: chat through the
+// private GitHub relay repo, which works from anywhere (see relay.js).
+const direct = () => typeof state.store?.chat === "function";
+const api = () => (direct() ? state.store : relayStore);
+const canChat = () => direct() || Boolean(session());
+const pollMs = () => (direct() ? 1000 : 4000);
+const chatState = () =>
+  state.chat || (state.chat = { list: null, models: [], available: true, current: "", thread: null, showList: false, pcSeen: 0, relayError: "" });
 
 function savedModel(models) {
   const saved = localStorage.getItem(MODEL_KEY) || "";
@@ -38,7 +46,7 @@ function messageHtml(message) {
   }
   const body = message.text
     ? renderMarkdown(message.text, () => null)
-    : `<p class="muted">Thinking…</p>`;
+    : `<p class="muted">${message.waiting ? "Sent. Waiting for your PC to pick it up…" : "Thinking…"}</p>`;
   const model = message.model ? `<span class="chat-model-tag">${esc(message.model.split("/").pop())}</span>` : "";
   return `<div class="chat-msg assistant${message.pending ? " pending" : ""}"><div class="bubble prose">${body}</div>${model}</div>`;
 }
@@ -62,20 +70,43 @@ function listHtml(c) {
   return items.join("") || `<p class="muted chat-none">No chats yet.</p>`;
 }
 
+// Relay mode only: where the messages go, whether the PC is listening, and how to fix access.
+function noticeHtml(c) {
+  if (direct()) {
+    return c.available ? "" : `<div class="chat-notice">OpenCode isn't installed on this PC, so there's no model to talk to yet.</div>`;
+  }
+  if (c.relayError) {
+    return `<div class="chat-notice chat-relay-setup">
+      <p>${esc(c.relayError)}</p>
+      <ol>
+        <li>On your PC: <code>cairn relay setup</code> (creates the private repo <strong>${esc(relayRepo() || "you/cairn-relay")}</strong>), then restart Cairn.</li>
+        <li><a href="${TOKEN_URL}" target="_blank" rel="noopener">Make a fine-grained token</a>: only that repo, <em>Contents: Read and write</em>.</li>
+        <li>Sign out here and sign in again with that token.</li>
+      </ol>
+      <form class="chat-relay-form" data-chat-form="relay"><label>Relay repo <input name="repo" value="${esc(relayRepo())}" placeholder="owner/cairn-relay" autocomplete="off"></label>
+        <button type="submit" class="btn sm">Use this repo</button></form>
+    </div>`;
+  }
+  if (!c.pcSeen) return "";
+  const age = Date.now() / 1000 - c.pcSeen;
+  const where = `Through GitHub (${esc(relayRepo())}) · PC checked in ${timeAgo(c.pcSeen)}`;
+  return age > STALE_PC_S
+    ? `<div class="chat-notice">${where}. It looks off or asleep, so answers wait until Cairn runs again.</div>`
+    : `<div class="chat-relay-status muted">${where}</div>`;
+}
+
 export function chatView() {
   const c = chatState();
   if (!canChat()) {
-    return `<div class="chat-unavailable"><h1>Chat</h1><p class="muted">Chat runs the AI models on your PC, so it needs the Cairn desktop app (or a phone paired to it).</p>
-      <p><a class="btn" data-go="glow" href="#/glow">${icon("sparkle", "sm")} Open Glow instead</a></p></div>`;
+    return `<div class="chat-unavailable"><h1>Chat</h1><p class="muted">Chat runs the AI models on your PC. Open Cairn on the PC, pair this phone on the same Wi-Fi, or sign in with GitHub to chat from anywhere through your private relay repo.</p>
+      <p><button type="button" class="btn primary" data-action="sign-in">${icon("github", "sm")} Sign in</button>
+      <a class="btn" data-go="glow" href="#/glow">${icon("sparkle", "sm")} Open Glow instead</a></p></div>`;
   }
   if (c.list === null) refreshList();
   const models = c.models;
   const model = savedModel(models);
   const running = c.thread?.status === "running";
   const options = models.map((m) => `<option value="${esc(m)}"${m === model ? " selected" : ""}>${esc(m)}</option>`).join("");
-  const notice = c.available
-    ? ""
-    : `<div class="chat-notice">OpenCode isn't installed on this PC, so there's no model to talk to yet.</div>`;
   return `
     <div class="chat-page${c.showList ? " show-list" : ""}">
       <aside class="chat-list" aria-label="Chats">
@@ -89,7 +120,7 @@ export function chatView() {
           <select id="chat-model" class="chat-model" aria-label="Model" ${models.length ? "" : "disabled"}>${options || "<option>No models</option>"}</select>
           ${c.thread ? `<button type="button" class="btn sm ghost" data-chat="delete" aria-label="Delete chat" title="Delete chat">${icon("trash", "sm")}</button>` : ""}
         </header>
-        ${notice}
+        <div id="chat-notices">${noticeHtml(c)}</div>
         <div class="chat-log" id="chat-log">${logHtml(c.thread)}</div>
         <form class="chat-form" id="chat-form">
           <textarea id="chat-input" rows="1" placeholder="Message ${esc(model.split("/").pop() || "OpenCode")}…" ${c.available ? "" : "disabled"}></textarea>
@@ -124,6 +155,8 @@ function paint() {
   if (items) items.innerHTML = listHtml(c);
   const title = $(".chat-title");
   if (title) title.textContent = c.thread?.title || "New chat";
+  const notices = $("#chat-notices");
+  if (notices && !notices.contains(document.activeElement)) notices.innerHTML = noticeHtml(c);
   const form = $("#chat-form");
   const running = c.thread?.status === "running";
   const button = form?.querySelector("button");
@@ -139,10 +172,12 @@ function paint() {
 async function refreshList() {
   const c = chatState();
   try {
-    const data = await state.store.chat();
+    const data = await api().chat();
     c.list = data.chats;
     c.models = data.models;
     c.available = data.available;
+    c.pcSeen = data.pcSeen || 0;
+    c.relayError = "";
     if (state.view === "chat") {
       const select = $("#chat-model");
       if (select && select.options.length !== data.models.length) {
@@ -154,7 +189,9 @@ async function refreshList() {
     }
   } catch (error) {
     c.list = c.list || [];
-    toast(error.message);
+    if (direct()) toast(error.message);
+    else c.relayError = error.message;
+    if (state.view === "chat") paint();
   }
 }
 
@@ -164,7 +201,7 @@ async function openChat(id) {
   c.showList = false;
   $(".chat-page")?.classList.remove("show-list");
   try {
-    c.thread = await state.store.chatThread(id);
+    c.thread = await api().chatThread(id);
   } catch (error) {
     toast(error.message);
     c.thread = null;
@@ -194,7 +231,7 @@ async function sendMessage() {
   input.value = "";
   autoGrow(input);
   try {
-    c.thread = await state.store.chatAction("send", { id: c.current, text, model });
+    c.thread = await api().chatAction("send", { id: c.current, text, model });
     c.current = c.thread.id;
     paint();
     const log = $("#chat-log");
@@ -214,7 +251,7 @@ function schedulePoll() {
   pollTimer = setTimeout(async () => {
     if (state.view !== "chat" || !c.current) return;
     try {
-      const thread = await state.store.chatThread(c.current);
+      const thread = await api().chatThread(c.current);
       if (thread.id !== c.current) return;
       const finished = c.thread?.status === "running" && thread.status !== "running";
       c.thread = thread;
@@ -224,7 +261,7 @@ function schedulePoll() {
       /* the PC may be asleep for a moment; try again */
     }
     schedulePoll();
-  }, POLL_MS);
+  }, pollMs());
 }
 
 function autoGrow(input) {
@@ -249,14 +286,27 @@ export function wireChat() {
       return;
     }
     if (action === "stop" && c.current) {
-      await state.store.chatAction("stop", { id: c.current }).catch((error) => toast(error.message));
+      await api().chatAction("stop", { id: c.current }).catch((error) => toast(error.message));
       return;
     }
     if (action === "delete" && c.current) {
       if (!confirm("Delete this chat?")) return;
-      await state.store.chatAction("delete", { id: c.current }).catch((error) => toast(error.message));
+      await api().chatAction("delete", { id: c.current }).catch((error) => toast(error.message));
       newChat();
       refreshList();
+    }
+  });
+  page.addEventListener("submit", (event) => {
+    const form = event.target.closest("[data-chat-form='relay']");
+    if (!form) return;
+    event.preventDefault();
+    try {
+      setRelayRepo(form.elements.repo.value);
+      c.relayError = "";
+      c.list = null;
+      refreshList();
+    } catch (error) {
+      toast(error.message);
     }
   });
   $("#chat-form").addEventListener("submit", (event) => {

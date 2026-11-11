@@ -230,6 +230,14 @@ and stays paired, so a home-screen bookmark keeps working: live sessions, autopi
 - **Chat:** the *Chat* page is a plain chat with the AI models of the OpenCode on your PC (company builds such as
   PEGAAi OpenCode included): pick a model, type, send, and the answer appears on whichever device you are on. Chats
   keep their context and live in `~/.cairn/chats`. The *Glow* tab next to it opens your Glow app (Chat, Council, Arena).
+- **Chat from anywhere (GitHub relay):** when the phone can't reach the PC at all (outside the office network,
+  no Tailscale), Chat goes through a private GitHub repo instead. On the PC run `cairn relay setup` once: it creates
+  the private repo `<you>/cairn-relay` and saves your GitHub token encrypted for your Windows user in
+  `~/.cairn/relay.json`; the desktop app then answers from it. On the phone open
+  [Cairn](https://juw12.github.io/cairn/), sign in with a fine-grained token limited to that repo (*Contents: read and
+  write*) and open *Chat*: messages land in `requests/`, the PC runs them and streams the answer into `threads/`, and
+  the page shows when the PC last checked in. Expect roughly 5-15 s before the reply starts. Keep the repo private:
+  anyone who can push to it can make your PC run OpenCode prompts, and your chats are stored there.
 - **Live sync:** a change on the phone shows up in the open PC window within a few seconds without a reload, and back
   the other way. A note you are typing in is left alone until you pause.
 - **Any network:** put both on [Tailscale](https://tailscale.com) (same account). *Settings > Set up Tailscale* installs

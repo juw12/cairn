@@ -1062,6 +1062,9 @@ class DesktopApp:
         self.tray.run_detached()
         for loop in (self.watch_show_requests, self.sync_loop, self.update_loop, self.vibe_watch_loop, self.phone_loop):
             threading.Thread(target=loop, daemon=True).start()
+        from . import relay
+
+        relay.start_in_background(self.stopping, log)  # chat from anywhere, once `cairn relay setup` was run
         log(f"running {self.hooks.loaded_head or __version__} on {folder} ({'tray' if self.start_hidden else 'window'})")
 
         webview.start(private_mode=False, storage_path=str(config_dir() / "webview"))

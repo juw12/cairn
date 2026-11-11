@@ -131,8 +131,10 @@ def send(chat_id: str, text: str, model: str = "") -> dict:
     with _lock:
         chat = load(chat_id) if chat_id else None
         if chat is None:
+            # A device that can't reach this PC directly (the GitHub relay) names new chats itself.
+            new_id = chat_id if chat_id and _path(chat_id) else f"{time.strftime('%Y%m%d')}-{secrets.token_hex(4)}"
             chat = {
-                "id": f"{time.strftime('%Y%m%d')}-{secrets.token_hex(4)}",
+                "id": new_id,
                 "title": text.splitlines()[0][:60],
                 "model": model,
                 "session": "",
