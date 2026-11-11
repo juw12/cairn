@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, mcp, precedent, vibe
+from . import __version__, autopilot, chat, mcp, precedent, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -201,6 +201,18 @@ class Handler(BaseHTTPRequestHandler):
                 since = query.get("since", [""])[0]
                 base = query.get("base", [""])[0]
                 self._send_json({"files": vibe.vibe_files(brain), "git": vibe.git_activity(brain, since, base)})
+            elif route == "/api/chat":
+                self._send_json(chat.summary())
+            elif route == "/api/chat/thread":
+                query = parse_qs(urlparse(self.path).query)
+                try:
+                    thread = chat.load(query.get("id", [""])[0])
+                except ValueError:
+                    thread = None
+                if thread is None:
+                    self._error(HTTPStatus.NOT_FOUND, "no such chat")
+                else:
+                    self._send_json(thread)
             elif route == "/api/autopilot":
                 self._send_json(autopilot.state(self.autopilot))
             elif route == "/api/autopilot/log":
@@ -260,6 +272,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"created": self.brain.init()})
         if route.startswith("/api/obsidian/"):
             return self._obsidian(route.rsplit("/", 1)[-1])
+        if route.startswith("/api/chat/"):
+            return self._chat(route.rsplit("/", 1)[-1])
         if route.startswith("/api/autopilot/"):
             return self._autopilot(route.rsplit("/", 1)[-1])
         if route == "/api/git/commit":
@@ -282,6 +296,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(HTTPStatus.BAD_REQUEST, str(error))
         self._drain()
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+
+    def _chat(self, action: str):
+        """Plain chat with your OpenCode models: send, stop, delete, refresh the model list."""
+        try:
+            body = self._body()
+            chat_id = str(body.get("id", ""))
+            if action == "send":
+                return self._send_json(chat.send(chat_id, str(body.get("text", "")), str(body.get("model", ""))))
+            if action == "stop":
+                chat.stop(chat_id)
+                return self._send_json({"ok": True})
+            if action == "delete":
+                chat.delete(chat_id)
+                return self._send_json({"ok": True})
+            if action == "models":
+                return self._send_json({"models": chat.models(force=True)})
+            return self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+        except (ValueError, TypeError, OSError) as error:
+            return self._error(HTTPStatus.BAD_REQUEST, str(error))
 
     def _autopilot(self, action: str):
         """Goals, comments, stop/resume/delete and settings for the autopilot (state lives in ~/.cairn)."""

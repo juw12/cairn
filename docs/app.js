@@ -17,6 +17,7 @@ import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createM
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { startLiveSync } from "./live.js";
+import { chatView, glowView, wireChat } from "./chat.js";
 import { showShortcuts } from "./shortcuts.js";
 import { initVoiceLog, journalView, openLogSheet, syncLogFab, wireJournal } from "./voicelog.js";
 import { showWelcome } from "./welcome.js";
@@ -41,6 +42,8 @@ function counts() {
   const by = (type, statuses) => state.notes.filter((n) => n.type === type && (!statuses || statuses.includes(n.status))).length;
   return {
     home: "",
+    chat: "",
+    glow: "",
     ideas: by("idea", ["raw", "exploring", "ready"]),
     board: by("task", ["todo", "doing"]),
     decisions: by("decision", ["proposed"]) || "",
@@ -187,7 +190,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, founder: founderView, projects: projectsView };
+  const renderers = { home, chat: chatView, glow: glowView, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, founder: founderView, projects: projectsView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -232,6 +235,7 @@ function afterRender() {
   if (state.view === "vibe") wireVibe();
   else leaveVibe();
   if (state.view === "autopilot") wireAutopilot();
+  if (state.view === "chat") wireChat();
   if (state.view === "founder") wireFounder();
   else syncFounderStage();
 }

@@ -222,6 +222,9 @@ and stays paired, so a home-screen bookmark keeps working: live sessions, autopi
 
 - **Control, not just watch:** the phone gets the full app (capture, edit notes, move tasks, start, comment on or stop
   autopilot jobs), minus the desktop-only controls such as Settings and updates.
+- **Chat:** the *Chat* page is a plain chat with the AI models of the OpenCode on your PC (company builds such as
+  PEGAAi OpenCode included): pick a model, type, send, and the answer appears on whichever device you are on. Chats
+  keep their context and live in `~/.cairn/chats`. The *Glow* tab next to it opens your Glow app (Chat, Council, Arena).
 - **Live sync:** a change on the phone shows up in the open PC window within a few seconds without a reload, and back
   the other way. A note you are typing in is left alone until you pause.
 - **Any network:** put both on [Tailscale](https://tailscale.com) (same account). *Settings > Set up Tailscale* installs

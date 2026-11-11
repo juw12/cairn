@@ -126,6 +126,19 @@ export class ServerStore {
     return this.request("GET", `api/autopilot/log?id=${encodeURIComponent(id)}&since=${since}`);
   }
 
+  // Plain chat with the OpenCode models on the PC (only the local server can run them).
+  async chat() {
+    return this.request("GET", "api/chat");
+  }
+
+  async chatThread(id) {
+    return this.request("GET", `api/chat/thread?id=${encodeURIComponent(id)}`);
+  }
+
+  async chatAction(action, body = {}) {
+    return this.request("POST", `api/chat/${action}`, body);
+  }
+
   async autopilotAction(action, body = {}) {
     return this.request("POST", `api/autopilot/${action}`, body);
   }

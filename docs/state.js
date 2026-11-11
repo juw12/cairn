@@ -9,6 +9,8 @@ import { render, renderNav, renderSidebarFoot, renderView } from "./app.js";
 
 export const VIEWS = [
   { id: "home", label: "Today", icon: "home", group: "Think & do" },
+  { id: "chat", label: "Chat", icon: "chat", group: "Think & do" },
+  { id: "glow", label: "Glow", icon: "sparkle", group: "Think & do" },
   { id: "ideas", label: "Ideas", icon: "idea", group: "Think & do" },
   { id: "board", label: "Board", icon: "board", group: "Think & do" },
   { id: "decisions", label: "Decisions", icon: "decision", group: "Think & do" },
@@ -32,6 +34,7 @@ export const VIEWS = [
 // the first page is the one it opens on a fresh browser, and `count` names the page whose count the entry shows.
 export const HUBS = [
   { id: "today", label: "Today", icon: "home", views: ["home"] },
+  { id: "chat", label: "Chat", icon: "chat", views: ["chat", "glow"] },
   { id: "plan", label: "Plan", icon: "board", views: ["board", "ideas", "decisions"], count: "board" },
   { id: "notes", label: "Notes", icon: "note", views: ["notes", "journal"], count: "notes" },
   { id: "map", label: "Map", icon: "map", views: ["map", "canvas"] },
