@@ -171,9 +171,14 @@ export async function loadBrainFiles(owner, repo, branch) {
     .filter((item) => item.path.startsWith(root) && /\.(md|canvas)$/i.test(item.path) && !hidden(item.path))
     .slice(0, MAX_FILES);
   const signedIn = Boolean(session());
+  // Signed in: fetch notes 100 at a time over GraphQL (a 1,500-note vault is 15 requests, not 1,500,
+  // which would also burn most of the hourly REST limit). Anything it can't return falls back to REST.
+  const batched = signedIn ? await blobTexts(owner, repo, wanted.map((item) => item.sha)) : new Map();
   const files = await mapLimited(wanted, 8, async (item) => {
     let text;
-    if (signedIn) {
+    if (batched.has(item.sha)) {
+      text = batched.get(item.sha);
+    } else if (signedIn) {
       const blob = await (await request(`${API}/repos/${owner}/${repo}/git/blobs/${item.sha}`)).json();
       text = decodeBase64(blob.content);
     } else {
@@ -184,6 +189,36 @@ export async function loadBrainFiles(owner, repo, branch) {
     return { path: item.path.slice(root.length), text, mtime: 0, sha: item.sha || null };
   });
   return { root, files: files.filter(Boolean) };
+}
+
+// Texts of many blobs in a few GraphQL calls: sha -> text. Binary, truncated or failed batches are left
+// out, so the caller fetches those one by one.
+async function blobTexts(owner, repo, shas) {
+  const unique = [...new Set(shas.filter((sha) => /^[0-9a-f]{40}$/.test(sha)))];
+  const batches = [];
+  for (let i = 0; i < unique.length; i += 100) batches.push(unique.slice(i, i + 100));
+  const texts = new Map();
+  await mapLimited(batches, 3, async (batch) => {
+    const fields = batch
+      .map((sha, i) => `b${i}: object(oid: "${sha}") { ... on Blob { text isBinary isTruncated } }`)
+      .join(" ");
+    const query = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`;
+    try {
+      const response = await request(`${API}/graphql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables: { owner, name: repo } }),
+      });
+      const found = (await response.json())?.data?.repository || {};
+      batch.forEach((sha, i) => {
+        const blob = found[`b${i}`];
+        if (blob && typeof blob.text === "string" && !blob.isBinary && !blob.isTruncated) texts.set(sha, blob.text);
+      });
+    } catch {
+      // Leave this batch to the one-by-one REST fallback.
+    }
+  });
+  return texts;
 }
 
 // Run `task` over `items` with at most `limit` requests in flight (a vault has hundreds of notes).
