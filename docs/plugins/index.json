@@ -31,6 +31,14 @@
       "version": "1.0.0",
       "description": "Remembers the notes you open and lists them newest first, with a command to jump back to the last one.",
       "main": "plugins/recent-files.js"
+    },
+    {
+      "id": "kilat",
+      "name": "Kilat",
+      "author": "Juwen Lie",
+      "version": "0.2.0",
+      "description": "Runs kilat code blocks in your notes: calculations with units, checked before they run.",
+      "repo": "juw12/kilat"
     }
   ]
 }
