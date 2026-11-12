@@ -9,7 +9,7 @@ description = "A second brain that lives inside your repo: ideas, tasks, decisio
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Juwen Lie" }]
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = []
 keywords = ["second-brain", "notes", "markdown", "kanban", "adr", "obsidian", "git"]
 classifiers = [
