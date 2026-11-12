@@ -686,7 +686,11 @@ async function boot() {
   await signInFromLink();
 
   const params = new URLSearchParams(location.search);
-  const brainParam = params.get("brain");
+  // A signed-in browser with no ?brain= goes back to the brain it last opened, so the phone,
+  // a second laptop and this PC all show the same Map, Live and notes without a special link.
+  const lastBrain = auth.signedIn() && !params.has("u") && !params.has("demo") && !params.has("empty")
+    && !["demo", "folder"].includes(localStorage.getItem("cairn.mode")) ? localStorage.getItem(LAST_BRAIN_KEY) : null;
+  const brainParam = params.get("brain") || (location.protocol === "https:" ? lastBrain : null);
   if (brainParam) {
     const parsed = gh.parseGithubInput(brainParam);
     try {
