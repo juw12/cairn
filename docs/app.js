@@ -656,6 +656,21 @@ export async function start(store) {
   }
 }
 
+// Sign in by QR: the PC shows a QR code of .../#/chat?signin=<token>. The token sits in the
+// fragment (never sent to a server) and is removed from the address bar before anything
+// else runs, so it doesn't stay in history, bookmarks or the home-screen shortcut.
+async function signInFromLink() {
+  const match = location.hash.match(/^#\/([\w-]*)\?signin=([^&]+)/);
+  if (!match) return;
+  history.replaceState(null, "", `${location.pathname}${location.search}#/${match[1] || "chat"}`);
+  try {
+    const who = await auth.signInWithToken(decodeURIComponent(match[2]), { remember: true });
+    toast(`Signed in as ${who.login}. This device stays signed in.`);
+  } catch (error) {
+    toast(error.message || "Couldn't sign in with that link.", { error: true });
+  }
+}
+
 async function boot() {
   $("#brand").innerHTML = `${LOGO}<span>Cairn</span>`;
   $("#menu-btn").innerHTML = icon("menu");
@@ -668,6 +683,7 @@ async function boot() {
   initHoverPreview();
   initRichContent();
   initDatabases();
+  await signInFromLink();
 
   const params = new URLSearchParams(location.search);
   const brainParam = params.get("brain");
