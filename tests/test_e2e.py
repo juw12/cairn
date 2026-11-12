@@ -21,6 +21,7 @@ VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canv
 # The sidebar has one entry per hub; a hub with several pages shows them as tabs (docs/state.js HUBS).
 HUBS = {
     "today": ["home"],
+    "chat": ["chat", "glow"],
     "plan": ["board", "ideas", "decisions"],
     "notes": ["notes", "journal"],
     "map": ["map", "canvas"],
@@ -185,10 +186,10 @@ class EndToEndTests(unittest.TestCase):
             tab: document.querySelector('.hub-tabs [aria-current="page"]')?.dataset.go ?? null,
         })""")
 
-    def test_sidebar_has_eight_entries_and_no_group_labels(self):
+    def test_sidebar_has_nine_entries_and_no_group_labels(self):
         page = self.open()
         entries = page.eval_on_selector_all("#nav button", "els => els.map((e) => e.querySelector('span').textContent)")
-        self.assertEqual(entries, ["Today", "Plan", "Notes", "Map", "Build", "Founder Studio", "Integrations", "People"])
+        self.assertEqual(entries, ["Today", "Chat", "Plan", "Notes", "Map", "Build", "Founder Studio", "Integrations", "People"])
         self.assertEqual(page.locator("#nav .nav-label").count(), 0)
         self.assertEqual(page.eval_on_selector_all("#nav button", "els => els.map((e) => e.dataset.hub)"), list(HUBS))
         self.assertEqual(self.errors, [])
@@ -203,7 +204,7 @@ class EndToEndTests(unittest.TestCase):
                 expected = {"view": view, "hubs": [hub], "tabs": tabs, "tab": view if tabs else None}
                 self.assertEqual(self.nav_state(page), expected)
                 self.assertTrue(page.inner_text("#view").strip(), view)
-        self.assertEqual(sum(len(views) for views in HUBS.values()), 18)
+        self.assertEqual(sum(len(views) for views in HUBS.values()), 20)
         self.assertEqual(self.errors, [])
 
     def test_a_sidebar_entry_reopens_the_tab_used_last(self):
@@ -235,7 +236,7 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_function("() => window.cairn.state.view === 'notes'")
         self.assertEqual(page.evaluate("() => document.activeElement.dataset.hub"), "notes")
         reachable = page.eval_on_selector_all("#nav button, .hub-tabs .hub-tab", "els => els.map((e) => e.tagName === 'BUTTON' && e.tabIndex === 0)")
-        self.assertEqual(reachable, [True] * 10)
+        self.assertEqual(reachable, [True] * 11)
         self.assertEqual(self.errors, [])
 
     def test_tabs_fit_a_phone_and_the_drawer_closes_after_a_choice(self):
