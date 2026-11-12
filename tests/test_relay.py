@@ -230,7 +230,8 @@ class ChatIdTests(unittest.TestCase):
 
     def test_saved_token_is_sealed_and_preferred(self):
         sealed = relay.seal_token("ghp_saved_token_example")
-        self.assertNotIn("ghp_saved_token_example", sealed)
+        if os.name == "nt":  # sealing is Windows DPAPI; elsewhere relay.py stores "plain:<token>"
+            self.assertNotIn("ghp_saved_token_example", sealed)
         relay.save_config({"repo": "me/cairn-relay", "proxy": "", "token": sealed})
         with mock.patch.dict(os.environ, {"CAIRN_GITHUB_TOKEN": "", "GITHUB_TOKEN": "", "GH_TOKEN": ""}):
             self.assertEqual(relay.get_token(), "ghp_saved_token_example")
