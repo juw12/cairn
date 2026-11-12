@@ -4,7 +4,7 @@
 #   irm https://juw12.github.io/cairn/install.ps1 | iex
 #
 # What it does, skipping anything already there:
-#   1. Python 3.10+ (per-user, via winget or python.org)   2. Git (winget, or a portable MinGit)
+#   1. Python 3.13+ (per-user, via winget or python.org)   2. Git (winget, or a portable MinGit)
 #   3. Cairn itself into %LOCALAPPDATA%\Programs\Cairn\app (a git checkout, so it can update itself)
 #   4. The window + tray libraries (pywebview, pystray, pillow)
 #   5. A Start menu entry, then opens Cairn. Cairn starts with Windows from then on (switch it off
@@ -60,7 +60,7 @@ function Find-Python {
     $candidates += Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe", "$env:ProgramFiles\Python3*\python.exe" -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending | ForEach-Object { $_.FullName }
     foreach ($candidate in $candidates) {
-        $ok = & $candidate -c "import sys; print(int(sys.version_info >= (3, 10)))" 2>$null
+        $ok = & $candidate -c "import sys; print(int(sys.version_info >= (3, 13)))" 2>$null
         if ($ok -eq "1") { return $candidate }
     }
     return $null
@@ -70,15 +70,15 @@ Step "Python"
 $Python = Find-Python
 if (-not $Python) {
     if (Has-Winget) {
-        Say "Installing Python 3.12 (just for you, no admin)..."
-        winget install -e --id Python.Python.3.12 --scope user --silent --accept-package-agreements --accept-source-agreements | Out-Null
+        Say "Installing Python 3.13 (just for you, no admin)..."
+        winget install -e --id Python.Python.3.13 --scope user --silent --accept-package-agreements --accept-source-agreements | Out-Null
         Refresh-Path
         $Python = Find-Python
     }
     if (-not $Python) {
         Say "Downloading Python from python.org..."
-        $setup = Join-Path $env:TEMP "python-3.12.7-amd64.exe"
-        Get-WebFile "https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe" $setup
+        $setup = Join-Path $env:TEMP "python-3.13.17-amd64.exe"
+        Get-WebFile "https://www.python.org/ftp/python/3.13.17/python-3.13.17-amd64.exe" $setup
         Start-Process $setup -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_test=0" -Wait
         Refresh-Path
         $Python = Find-Python

@@ -135,7 +135,7 @@ Cairn in its own window. After that, everything happens inside the app:
   changes to its engine restart Cairn quietly while it's in the tray, or after a couple of idle minutes,
   and bring the window back where you were. **Settings** turns each of these on or off.
 
-**1. Local app from the terminal.** Python 3.10+, no dependencies:
+**1. Local app from the terminal.** Python 3.13+, no dependencies:
 
 ```bash
 git clone https://github.com/juw12/cairn
