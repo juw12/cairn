@@ -235,9 +235,12 @@ and stays paired, so a home-screen bookmark keeps working: live sessions, autopi
   the private repo `<you>/cairn-relay` and saves your GitHub token encrypted for your Windows user in
   `~/.cairn/relay.json`; the desktop app then answers from it. On the phone open
   [Cairn](https://juw12.github.io/cairn/), sign in with a fine-grained token limited to that repo (*Contents: read and
-  write*) and open *Chat*: messages land in `requests/`, the PC runs them and streams the answer into `threads/`, and
-  the page shows when the PC last checked in. Expect roughly 5-15 s before the reply starts. Keep the repo private:
-  anyone who can push to it can make your PC run OpenCode prompts, and your chats are stored there.
+  write*) and open *Chat*: messages land in `devices/<pc>/requests/`, that PC runs them and streams the answer into
+  `devices/<pc>/threads/`, and the page shows when the PC last checked in. Expect roughly 5-15 s before the reply
+  starts. **Several PCs:** run `cairn relay setup` (optionally `--name "Home PC"`) on every PC signed in to the same
+  GitHub account; each gets its own folder in the repo and the phone shows a *Talk to* picker to choose which one
+  answers, with each PC's own chats and models. Keep the repo private: anyone who can push to it can make your PCs run
+  OpenCode prompts, and your chats are stored there.
 - **Live sync:** a change on the phone shows up in the open PC window within a few seconds without a reload, and back
   the other way. A note you are typing in is left alone until you pause.
 - **Any network:** put both on [Tailscale](https://tailscale.com) (same account). *Settings > Set up Tailscale* installs

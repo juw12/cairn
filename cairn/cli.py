@@ -384,16 +384,24 @@ def cmd_relay(brain: Brain, args) -> int:
 
     try:
         if args.relay_action == "setup":
-            config = relay.setup(args.repo or "", args.proxy or "")
+            config = relay.setup(args.repo or "", args.proxy or "", args.name or "")
             print(f"Relay ready: https://github.com/{config['repo']} (private).")
+            print(f"This PC shows on your phone as \"{config['device']['name']}\".")
             print("The desktop app answers from it on its next start; or run `cairn relay run` now.")
             print(f"On your phone: open Cairn, sign in with a token that can read and write {config['repo']}, open Chat.")
+            print("Another PC on the same GitHub account: run `cairn relay setup` there too; your phone lists both.")
             return 0
         if args.relay_action == "run":
-            relay.Relay(relay.connect()).run()
+            config = relay.load_config()
+            relay.Relay(relay.connect(config), device=relay.device_of(config or {})).run()
             return 0
         config = relay.load_config()
-        print(f"Relay: {config['repo']}" if config else "Relay isn't set up. Run `cairn relay setup`.")
+        if not config:
+            print("Relay isn't set up. Run `cairn relay setup`.")
+            return 0
+        device = relay.device_of(config)
+        print(f"Relay: {config['repo']}")
+        print(f"This PC: {device['name']} ({device['id']})")
         return 0
     except relay.RelayError as error:
         print(str(error), file=sys.stderr)
@@ -421,11 +429,12 @@ def build_parser() -> argparse.ArgumentParser:
     relay_parser = sub.add_parser(
         "relay",
         help="chat from your phone anywhere, through a private GitHub repo",
-        description="setup: create the private relay repo and remember it | run: answer chats in this terminal | status",
+        description="setup: create (or join) the private relay repo and name this PC | run: answer chats in this terminal | status",
     )
     relay_parser.add_argument("relay_action", nargs="?", choices=["setup", "run", "status"], default="status")
     relay_parser.add_argument("--repo", help="owner/name of the relay repo (default: <you>/cairn-relay)")
     relay_parser.add_argument("--proxy", help="HTTP proxy for GitHub, e.g. http://proxy:80")
+    relay_parser.add_argument("--name", help='how this PC shows on your phone, e.g. "Work laptop" (default: computer name)')
     sub.add_parser("init", help="create the brain/ folder layout")
     add_parser = sub.add_parser("add", help='capture: cairn add "todo: ship v1 #release"')
     add_parser.add_argument("text", nargs="+")

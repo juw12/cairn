@@ -1,8 +1,10 @@
 // Chat from anywhere. When this device can't reach your PC directly (you're outside the office
-// network), chat goes through a private GitHub repo, <you>/cairn-relay by default:
-//   requests/<id>.json   this device writes one per message, stop or delete
-//   threads/<chat>.json  your PC answers here as the reply streams in ("request" = last one it handled)
-//   index.json           your PC's chat list, models and when it last checked in ("pcSeen")
+// network), chat goes through a private GitHub repo, <you>/cairn-relay by default. Every PC signed in
+// to the same GitHub account has its own folder there, and you pick which one you talk to:
+//   devices/<pc>/requests/<id>.json   this device writes one per message, stop or delete
+//   devices/<pc>/threads/<chat>.json  that PC answers here as the reply streams in ("request" = last one it handled)
+//   devices/<pc>/index.json           that PC's name, chat list, models and when it last checked in ("pcSeen")
+// A relay made before PCs had folders keeps requests/, threads/ and index.json at the top; that still works.
 // Your PC runs the other half (cairn/relay.py) inside the desktop app after `cairn relay setup`.
 // Reads use ETags, so polling while you wait for an answer costs almost nothing against GitHub's limits.
 
@@ -11,6 +13,7 @@ import { decodeBase64, encodeBase64 } from "./github.js";
 
 const API = "https://api.github.com";
 const REPO_KEY = "cairn.relayRepo";
+const DEVICE_KEY = "cairn.relayDevice";
 const REPO_RE = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 export const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new";
 
@@ -18,6 +21,17 @@ const fetched = new Map(); // url -> { etag, data }
 const waiting = new Map(); // chat id -> { request, thread } until the PC has picked the message up
 
 export class RelayError extends Error {}
+
+// The PC this phone is talking to ("" = a relay from before PCs had their own folders).
+let activeDevice = localStorage.getItem(DEVICE_KEY) || "";
+const base = () => (activeDevice ? `devices/${activeDevice}/` : "");
+
+export function setRelayDevice(id) {
+  activeDevice = String(id || "");
+  if (activeDevice) localStorage.setItem(DEVICE_KEY, activeDevice);
+  else localStorage.removeItem(DEVICE_KEY);
+  waiting.clear();
+}
 
 export function relayRepo() {
   const saved = localStorage.getItem(REPO_KEY) || "";
@@ -52,8 +66,9 @@ export function newChatId(date = new Date()) {
 
 const contentsUrl = (path) => `${API}/repos/${relayRepo()}/contents/${path}`;
 
-// One JSON file from the relay repo, or null if it isn't there. Unchanged files cost a free 304.
-async function readJson(path) {
+// One GitHub contents answer (a file or a folder listing), or null if it isn't there.
+// Unchanged answers cost a free 304, so listing every PC on each refresh stays cheap.
+async function readContents(path, parse) {
   if (!relayRepo()) throw new RelayError("Sign in with GitHub to chat through your relay repo.");
   const url = contentsUrl(path);
   const known = fetched.get(url);
@@ -70,7 +85,7 @@ async function readJson(path) {
   const body = await response.json();
   let data = null;
   try {
-    data = JSON.parse(decodeBase64(body.content));
+    data = parse(body);
   } catch {
     data = null;
   }
@@ -78,10 +93,24 @@ async function readJson(path) {
   return data;
 }
 
+const readJson = (path) => readContents(path, (body) => JSON.parse(decodeBase64(body.content)));
+const readFolder = (path) => readContents(path, (body) => (Array.isArray(body) ? body : null));
+
+// Every PC that has joined the relay, most recently seen first.
+async function listDevices() {
+  const items = await readFolder("devices");
+  const folders = (items || []).filter((item) => item.type === "dir");
+  const found = await Promise.all(folders.map(async (folder) => {
+    const index = await readJson(`devices/${folder.name}/index.json`).catch(() => null);
+    return index ? { ...index, id: folder.name, name: index.device?.name || folder.name } : null;
+  }));
+  return found.filter(Boolean).sort((a, b) => (b.pcSeen || 0) - (a.pcSeen || 0));
+}
+
 async function postRequest(request) {
   let response;
   try {
-    response = await authFetch(contentsUrl(`requests/${request.id}.json`), {
+    response = await authFetch(contentsUrl(`${base()}requests/${request.id}.json`), {
       method: "PUT",
       body: JSON.stringify({ message: `cairn: ${request.action} ${request.thread}`, content: encodeBase64(JSON.stringify(request)) }),
     });
@@ -101,18 +130,29 @@ export const relayStore = {
   repo: relayRepo,
 
   async chat() {
-    const index = await readJson("index.json");
+    const devices = await listDevices();
+    let index;
+    if (devices.length) {
+      const chosen = devices.find((d) => d.id === activeDevice) || devices[0];
+      if (chosen.id !== activeDevice) setRelayDevice(chosen.id);
+      index = chosen;
+    } else {
+      if (activeDevice) setRelayDevice("");
+      index = await readJson("index.json");
+    }
     if (!index) throw new RelayError(accessHelp());
     return {
       available: index.available !== false,
       models: index.models || [],
       chats: index.chats || [],
       pcSeen: index.pcSeen || 0,
+      device: activeDevice,
+      devices: devices.map(({ id, name, pcSeen }) => ({ id, name, pcSeen: pcSeen || 0 })),
     };
   },
 
   async chatThread(id) {
-    const remote = await readJson(`threads/${id}.json`);
+    const remote = await readJson(`${base()}threads/${id}.json`);
     const pending = waiting.get(id);
     if (pending) {
       if (remote && remote.request === pending.request) {
@@ -131,17 +171,17 @@ export const relayStore = {
       const text = String(body.text || "").trim();
       const request = makeRequest("send", id, { text, model: body.model || "" });
       await postRequest(request);
-      const base = waiting.get(id)?.thread || fetched.get(contentsUrl(`threads/${id}.json`))?.data || {
+      const known = waiting.get(id)?.thread || fetched.get(contentsUrl(`${base()}threads/${id}.json`))?.data || {
         id, title: text.split("\n")[0].slice(0, 60), model: body.model || "", messages: [],
       };
       const now = Date.now() / 1000;
       const thread = {
-        ...base,
+        ...known,
         status: "running",
         messages: [
-          ...(base.messages || []),
+          ...(known.messages || []),
           { role: "user", text, at: now },
-          { role: "assistant", text: "", at: now, model: body.model || base.model || "", pending: true, waiting: true },
+          { role: "assistant", text: "", at: now, model: body.model || known.model || "", pending: true, waiting: true },
         ],
       };
       waiting.set(id, { request: request.id, thread });

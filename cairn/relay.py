@@ -1,27 +1,32 @@
 """Chat from anywhere: a private GitHub repo carries chat between your phone and this PC.
 
-The phone can't reach the PC from outside the office network, but both can reach GitHub. So:
+The phone can't reach the PC from outside the office network, but both can reach GitHub. Several PCs
+signed in to the same GitHub account can share one relay repo; each works in its own folder, so the
+phone can see every PC and choose which one it talks to:
 
-    requests/<id>.json   written by the phone: {"id", "action": send|stop|delete, "thread", "text", "model", "at"}
-    threads/<chat>.json  written by this PC: the chat (as in ~/.cairn/chats) plus "request", the last
-                         request id it handled, so the phone knows its message arrived
-    index.json           written by this PC: {"updated", "pcSeen", "available", "models", "chats": [...]}
+    devices/<pc>/requests/<id>.json   written by the phone: {"id", "action": send|stop|delete, "thread", "text", "model", "at"}
+    devices/<pc>/threads/<chat>.json  written by that PC: the chat (as in ~/.cairn/chats) plus "request", the
+                                      last request id it handled, so the phone knows its message arrived
+    devices/<pc>/index.json           written by that PC: {"device": {"id", "name"}, "updated", "pcSeen",
+                                      "available", "models", "chats": [...]}
 
 This worker polls requests/ with an ETag (a 304 answer is free against the rate limit), runs each
 request through cairn.chat exactly like the local Chat page does, deletes the request, and uploads
 the chat as the answer streams in. Anyone who can push to the relay repo can make this PC run
 OpenCode prompts, so keep the repo private and the token to yourself.
 
-    cairn relay setup [--repo owner/name] [--proxy URL]   create the private repo, remember it
-    cairn relay run                                       run the worker in this terminal
+    cairn relay setup [--repo owner/name] [--proxy URL] [--name "Work PC"]   create or join the repo
+    cairn relay run                                                          run the worker in this terminal
 The desktop app runs the worker on its own once setup has been done.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -42,10 +47,12 @@ HEARTBEAT_S = 10 * 60
 MAX_REQUEST_AGE_S = 60 * 60
 CHAT_ID_RE = re.compile(r"^[A-Za-z0-9-]{4,40}$")
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9-]{4,60}$")
+DEVICE_ID_RE = re.compile(r"^[a-z0-9-]{1,48}$")
 README = """# Cairn relay
 
 Private mailbox between Cairn on your phone and Cairn on your PC (see `cairn relay --help`).
-Your phone writes `requests/`; your PC answers in `threads/` and `index.json`.
+Each PC has a folder in `devices/`: your phone writes its `requests/`, the PC answers in its
+`threads/` and `index.json`.
 Keep this repo private: anyone who can push here can make your PC run OpenCode prompts.
 """
 
@@ -72,6 +79,26 @@ def load_config() -> dict | None:
 def save_config(config: dict) -> None:
     config_path().parent.mkdir(parents=True, exist_ok=True)
     config_path().write_text(json.dumps(config, indent=1), encoding="utf-8")
+
+
+def make_device(name: str = "") -> dict:
+    """This PC's identity in the relay repo: a readable, stable id plus a name you can change."""
+    host = platform.node() or os.environ.get("COMPUTERNAME", "") or "pc"
+    slug = re.sub(r"[^a-z0-9]+", "-", host.lower()).strip("-")[:30] or "pc"
+    user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+    suffix = hashlib.sha1(f"{host}|{user}".encode()).hexdigest()[:4]
+    return {"id": f"{slug}-{suffix}", "name": (name or host).strip()[:60]}
+
+
+def device_of(config: dict) -> dict:
+    """The device saved in relay.json, created (and saved) the first time it is needed."""
+    device = config.get("device") if isinstance(config.get("device"), dict) else {}
+    if not DEVICE_ID_RE.match(str(device.get("id") or "")):
+        device = make_device(str(device.get("name") or ""))
+        config["device"] = device
+        if config.get("repo"):
+            save_config(config)
+    return {"id": device["id"], "name": str(device.get("name") or device["id"])}
 
 
 def find_gh() -> str:
@@ -270,8 +297,10 @@ class GitHub:
 
 
 class Relay:
-    def __init__(self, github: GitHub, chats=chat, clock=time.time) -> None:
+    def __init__(self, github: GitHub, chats=chat, clock=time.time, device: dict | None = None) -> None:
         self.gh = github
+        self.device = device
+        self.prefix = f"devices/{device['id']}/" if device else ""
         self.chats = chats
         self.clock = clock
         self.requests_etag = ""
@@ -282,19 +311,22 @@ class Relay:
         self.index_signature = ""
         self.index_at = 0.0
 
+    def path(self, name: str) -> str:
+        return self.prefix + name
+
     # ---------------------------------------------------- requests from the phone
     def poll_requests(self) -> int:
-        status, items, etag = self.gh.list_dir("requests", self.requests_etag)
+        status, items, etag = self.gh.list_dir(self.path("requests"), self.requests_etag)
         if status == 304:
             return 0
         if status == 404:
-            self.gh.write("requests/.keep", "", "cairn relay: requests folder")
+            self.gh.write(self.path("requests/.keep"), "", "cairn relay: requests folder")
             self.requests_etag = ""
             return 0
         self.requests_etag = etag
         files = sorted(item["name"] for item in items if item["type"] == "file" and item["name"].endswith(".json"))
         for name in files:
-            self.take(f"requests/{name}")
+            self.take(self.path(f"requests/{name}"))
         return len(files)
 
     def take(self, path: str) -> None:
@@ -337,7 +369,7 @@ class Relay:
             self.chats.delete(thread)
             self.answered.pop(thread, None)
             self.uploaded.pop(thread, None)
-            self.gh.delete(f"threads/{thread}.json", f"cairn relay: delete {thread}")
+            self.gh.delete(self.path(f"threads/{thread}.json"), f"cairn relay: delete {thread}")
             self.index_signature = ""
 
     # ---------------------------------------------------- answers to the phone
@@ -374,7 +406,7 @@ class Relay:
             payload = self.thread_payload(chat_id)
             if payload is None:
                 continue
-            self.gh.write(f"threads/{chat_id}.json", json.dumps(payload, ensure_ascii=False), f"cairn relay: {chat_id}")
+            self.gh.write(self.path(f"threads/{chat_id}.json"), json.dumps(payload, ensure_ascii=False), f"cairn relay: {chat_id}")
             self.uploaded[chat_id] = updated
             self.uploaded_at[chat_id] = now
             if self.answered.get(chat_id, {}).get("error"):
@@ -385,12 +417,14 @@ class Relay:
     def push_index(self) -> bool:
         info = self.chats.summary()
         body = {"available": info["available"], "models": info["models"], "chats": info["chats"]}
+        if self.device:
+            body["device"] = self.device
         signature = json.dumps(body, sort_keys=True)
         now = self.clock()
         if signature == self.index_signature and now - self.index_at < HEARTBEAT_S:
             return False
         body.update(updated=now, pcSeen=now)
-        self.gh.write("index.json", json.dumps(body, ensure_ascii=False), "cairn relay: index")
+        self.gh.write(self.path("index.json"), json.dumps(body, ensure_ascii=False), "cairn relay: index")
         self.index_signature = signature
         self.index_at = now
         return True
@@ -402,7 +436,8 @@ class Relay:
 
     def run(self, stop: threading.Event | None = None, log=print) -> None:
         stop = stop or threading.Event()
-        log(f"relay: watching {self.gh.repo}")
+        where = f" as {self.device['name']} ({self.device['id']})" if self.device else ""
+        log(f"relay: watching {self.gh.repo}{where}")
         failures = 0
         while not stop.is_set():
             try:
@@ -428,8 +463,8 @@ def connect(config: dict | None = None) -> GitHub:
     return GitHub(config["repo"], get_token(), proxy)
 
 
-def setup(repo: str = "", proxy: str = "") -> dict:
-    """Create the private relay repo if needed and remember it in ~/.cairn/relay.json."""
+def setup(repo: str = "", proxy: str = "", name: str = "") -> dict:
+    """Create the private relay repo if needed (or join it from another PC) and remember it in ~/.cairn/relay.json."""
     token = get_token(use_saved=False)
     probe = GitHub("", token, proxy or os.environ.get("HTTPS_PROXY", ""))
     status, user, _ = probe.call("GET", "/user")
@@ -455,7 +490,11 @@ def setup(repo: str = "", proxy: str = "") -> dict:
     probe.write("README.md", README, "cairn relay: readme")
     if probe.list_dir("requests")[0] == 404:
         probe.write("requests/.keep", "", "cairn relay: requests folder")
-    config = {"repo": repo, "proxy": proxy, "token": seal_token(token)}
+    previous = load_config() or {}
+    device = make_device(name) if not previous.get("device") else dict(previous["device"])
+    if name:
+        device["name"] = name.strip()[:60]
+    config = {"repo": repo, "proxy": proxy, "token": seal_token(token), "device": device}
     save_config(config)
     if os.name != "nt":
         config_path().chmod(0o600)
@@ -472,7 +511,7 @@ def start_in_background(stop: threading.Event, log=print) -> threading.Thread | 
         # Keep trying: at sign-in the network or the token store may not be ready yet.
         while not stop.is_set():
             try:
-                Relay(connect(config)).run(stop, log)
+                Relay(connect(config), device=device_of(config)).run(stop, log)
                 return
             except (RelayError, OSError) as error:
                 log(f"relay: {error} (retrying in a minute)")

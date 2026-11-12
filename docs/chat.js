@@ -6,7 +6,7 @@ import { escapeHtml as esc, renderMarkdown } from "./md.js";
 import { $, icon, toast } from "./ui.js";
 import { state } from "./state.js";
 import { session } from "./auth.js";
-import { relayRepo, relayStore, setRelayRepo, TOKEN_URL } from "./relay.js";
+import { relayRepo, relayStore, setRelayDevice, setRelayRepo, TOKEN_URL } from "./relay.js";
 
 export const GLOW_URL = "https://juw12.github.io/projects/glow/app.html";
 const MODEL_KEY = "cairn.chatModel";
@@ -21,7 +21,7 @@ const api = () => (direct() ? state.store : relayStore);
 const canChat = () => direct() || Boolean(session());
 const pollMs = () => (direct() ? 1000 : 4000);
 const chatState = () =>
-  state.chat || (state.chat = { list: null, models: [], available: true, current: "", thread: null, showList: false, pcSeen: 0, relayError: "" });
+  state.chat || (state.chat = { list: null, models: [], available: true, current: "", thread: null, showList: false, pcSeen: 0, relayError: "", device: "", devices: [] });
 
 function savedModel(models) {
   const saved = localStorage.getItem(MODEL_KEY) || "";
@@ -80,6 +80,7 @@ function noticeHtml(c) {
       <p>${esc(c.relayError)}</p>
       <ol>
         <li>On your PC: <code>cairn relay setup</code> (creates the private repo <strong>${esc(relayRepo() || "you/cairn-relay")}</strong>), then restart Cairn.</li>
+        <li>More PCs: run <code>cairn relay setup</code> on each one. This phone lists them all and you pick which one answers.</li>
         <li><a href="${TOKEN_URL}" target="_blank" rel="noopener">Make a fine-grained token</a>: only that repo, <em>Contents: Read and write</em>.</li>
         <li>Sign out here and sign in again with that token.</li>
       </ol>
@@ -89,10 +90,18 @@ function noticeHtml(c) {
   }
   if (!c.pcSeen) return "";
   const age = Date.now() / 1000 - c.pcSeen;
-  const where = `Through GitHub (${esc(relayRepo())}) · PC checked in ${timeAgo(c.pcSeen)}`;
-  return age > STALE_PC_S
+  const pc = c.devices.find((d) => d.id === c.device);
+  const pcName = pc ? esc(pc.name) : "PC";
+  const where = `Through GitHub (${esc(relayRepo())}) · ${pcName} checked in ${timeAgo(c.pcSeen)}`;
+  const picker = c.devices.length > 1
+    ? `<label class="chat-device">Talk to <select data-chat-device aria-label="Which PC">${c.devices.map((d) => {
+      const on = Date.now() / 1000 - d.pcSeen <= STALE_PC_S;
+      return `<option value="${esc(d.id)}"${d.id === c.device ? " selected" : ""}>${esc(d.name)} · ${on ? "online" : "off"}</option>`;
+    }).join("")}</select></label>`
+    : "";
+  return picker + (age > STALE_PC_S
     ? `<div class="chat-notice">${where}. It looks off or asleep, so answers wait until Cairn runs again.</div>`
-    : `<div class="chat-relay-status muted">${where}</div>`;
+    : `<div class="chat-relay-status muted">${where}</div>`);
 }
 
 export function chatView() {
@@ -177,6 +186,8 @@ async function refreshList() {
     c.models = data.models;
     c.available = data.available;
     c.pcSeen = data.pcSeen || 0;
+    c.device = data.device || "";
+    c.devices = data.devices || [];
     c.relayError = "";
     if (state.view === "chat") {
       const select = $("#chat-model");
@@ -295,6 +306,15 @@ export function wireChat() {
       newChat();
       refreshList();
     }
+  });
+  page.addEventListener("change", (event) => {
+    const picker = event.target.closest("[data-chat-device]");
+    if (!picker) return;
+    setRelayDevice(picker.value);
+    c.device = picker.value;
+    c.list = null;
+    newChat();
+    refreshList();
   });
   page.addEventListener("submit", (event) => {
     const form = event.target.closest("[data-chat-form='relay']");

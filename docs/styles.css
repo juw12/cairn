@@ -2173,3 +2173,6 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
   .chat-form { padding: 8px 10px 10px; }
   .chat-form textarea { font-size: 16px; }
 }
+
+.chat-device { display: flex; align-items: center; gap: .5rem; margin: .25rem 0 .35rem; font-size: .85rem; color: var(--muted, #888); }
+.chat-device select { font: inherit; padding: .2rem .4rem; border-radius: 6px; max-width: 70%; }

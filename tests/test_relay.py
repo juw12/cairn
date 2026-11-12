@@ -138,6 +138,34 @@ class RelayTests(unittest.TestCase):
         self.assertEqual([c["id"] for c in index["chats"]], ["20261111-abcd1234"])
         self.assertGreater(index["pcSeen"], 0)
 
+    def test_each_pc_answers_only_its_own_folder(self):
+        work = relay.Relay(self.gh, device={"id": "work-pc-1a2b", "name": "Work PC"})
+        home = relay.Relay(self.gh, device={"id": "home-pc-3c4d", "name": "Home PC"})
+        self.gh.put_file(
+            "devices/work-pc-1a2b/requests/1700000000009-aa09.json",
+            json.dumps({"action": "send", "thread": "20261112-00000009", "text": "hi work", "at": time.time() * 1000}),
+        )
+        home.step()
+        self.assertIsNotNone(self.gh.text("devices/work-pc-1a2b/requests/1700000000009-aa09.json"),
+                             "another PC leaves the request alone")
+        work.step()
+        self.assertIsNone(self.gh.text("devices/work-pc-1a2b/requests/1700000000009-aa09.json"))
+        self.wait_idle("20261112-00000009")
+        work.step()
+        thread = json.loads(self.gh.text("devices/work-pc-1a2b/threads/20261112-00000009.json"))
+        self.assertEqual(thread["messages"][1]["text"], "Hi from the PC")
+        work_index = json.loads(self.gh.text("devices/work-pc-1a2b/index.json"))
+        home_index = json.loads(self.gh.text("devices/home-pc-3c4d/index.json"))
+        self.assertEqual(work_index["device"], {"id": "work-pc-1a2b", "name": "Work PC"})
+        self.assertEqual(home_index["device"]["name"], "Home PC")
+        self.assertIsNone(self.gh.text("index.json"), "devices don't overwrite a shared index")
+
+    def test_device_id_is_stable_and_saved(self):
+        config = {"repo": "me/cairn-relay"}
+        first = relay.device_of(config)
+        self.assertRegex(first["id"], relay.DEVICE_ID_RE)
+        self.assertEqual(relay.device_of(relay.load_config()), first, "saved in relay.json and reused")
+
     def test_quiet_polls_cost_one_cheap_request(self):
         self.relay.step()
         before = len(self.gh.calls)
