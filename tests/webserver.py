@@ -9,6 +9,7 @@ import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import re
 from urllib.parse import unquote, urlparse
 
 DOCS = Path(__file__).resolve().parents[1] / "docs"
@@ -132,7 +133,9 @@ class GitHubMock:
         self.repos[repo]["files"][path] = text
 
     def writes(self):
-        return [r for r in self.requests if r["method"] in ("PUT", "POST", "DELETE")]
+        # A GraphQL query is a POST that only reads, so it is not a write.
+        changing = [r for r in self.requests if r["method"] in ("PUT", "POST", "DELETE")]
+        return [r for r in changing if urlparse(r["url"]).path != "/graphql"]
 
     # ---- routing
     def install(self, context) -> "GitHubMock":
@@ -200,6 +203,20 @@ class GitHubMock:
                 return self.reply(route, self.repo_payload(name, login), 201)
             mine = [self.repo_payload(n, login) for n in self.repos if n.startswith(f"{login}/")]
             return self.reply(route, mine)
+        if path == "/graphql" and request.method == "POST":
+            # The app reads notes 100 per call: `b0: object(oid: "<sha>") { ... on Blob { text ... } }`.
+            if not login:
+                return self.reply(route, {"message": "Requires authentication"}, 401)
+            body = json.loads(request.post_data or "{}")
+            variables = body.get("variables") or {}
+            repo = self.repos.get(f"{variables.get('owner')}/{variables.get('name')}")
+            if repo is None:
+                return self.reply(route, {"data": {"repository": None}})
+            texts = {git_sha(text): text for text in repo["files"].values()}
+            found = {}
+            for alias, oid in re.findall(r'(\w+): object\(oid: "([0-9a-f]{40})"\)', body.get("query", "")):
+                found[alias] = {"text": texts[oid], "isBinary": False, "isTruncated": False} if oid in texts else None
+            return self.reply(route, {"data": {"repository": found}})
 
         parts = path.strip("/").split("/")
         if len(parts) >= 3 and parts[0] == "repos":
