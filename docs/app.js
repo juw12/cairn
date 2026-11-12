@@ -21,6 +21,7 @@ import { chatView, glowView, wireChat } from "./chat.js";
 import { showShortcuts } from "./shortcuts.js";
 import { initVoiceLog, journalView, openLogSheet, syncLogFab, wireJournal } from "./voicelog.js";
 import { showWelcome } from "./welcome.js";
+import { openSignIn as showSignInDialog } from "./signin.js";
 import { maybeStartTour, startTour } from "./tour.js";
 import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
@@ -693,6 +694,14 @@ async function boot() {
   const brainParam = params.get("brain") || (location.protocol === "https:" ? lastBrain : null);
   if (brainParam) {
     const parsed = gh.parseGithubInput(brainParam);
+    // A big vault takes a few seconds over a phone connection: say so instead of a blank page.
+    const loading = $("#welcome");
+    loading.innerHTML = `
+      <div class="welcome-loading" role="status">
+        <p>Opening <strong>${esc(brainParam)}</strong>…</p>
+        <p class="muted">Loading your notes from GitHub. A big vault takes a few seconds.</p>
+      </div>`;
+    loading.hidden = false;
     try {
       if (!parsed || !parsed.repo) throw new Error("Use owner/repo, for example juw12/cairn.");
       const repo = await gh.fetchRepo(parsed.owner, parsed.repo);
@@ -701,6 +710,14 @@ async function boot() {
       if (writable) localStorage.setItem(LAST_BRAIN_KEY, repo.fullName);
       return start(new GitHubStore(repo, loaded, { writable }));
     } catch (error) {
+      loading.hidden = true;
+      if (!auth.signedIn()) {
+        // Private brains look "not found" to a signed-out browser: ask to sign in, then reopen it.
+        toast(`Sign in with GitHub to open ${brainParam}. Private brains need your sign-in on this device.`, { error: true });
+        await start(new VisitorStore());
+        setView("people");
+        return showSignInDialog({ icon, onSignedIn: () => location.reload() });
+      }
       toast(error.message || "Couldn't open that brain.", { error: true });
       await start(new VisitorStore());
       return setView("people");
