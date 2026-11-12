@@ -27,6 +27,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -61,6 +62,22 @@ def config_dir() -> Path:
     if sys.platform == "win32":
         return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Cairn"
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cairn"
+
+
+WEB_APP = "https://juw12.github.io/cairn/"
+
+
+def github_repo_of(folder: Path) -> str:
+    """owner/repo of the folder's GitHub remote ("origin"), or "" when it has none."""
+    try:
+        url = subprocess.run(
+            ["git", "-C", str(folder), "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    match = re.search(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", url)
+    return f"{match.group(1)}/{match.group(2)}" if match else ""
 
 
 def log(message: str) -> None:
@@ -446,6 +463,7 @@ class DesktopHooks:
             "publish-settings": lambda: self.publish_settings(str(payload.get("to", "")), bool(payload.get("auto"))),
             "publish": self.publish,
             "phone-pair": self.pair_phone,
+            "phone-signin": self.phone_signin,
             "phone-access": lambda: self.toggle_phone_access(bool(payload.get("on"))),
             "phone-unpair": self.unpair_phones,
             "phone-keep-awake": lambda: self.toggle_keep_awake(bool(payload.get("on"))),
@@ -540,6 +558,23 @@ class DesktopHooks:
         self.sync_phone()
         log("phone pairing code issued")
         return {**pairing, "phone": phone.status()}
+
+    def phone_signin(self) -> dict:
+        """A QR code that signs a phone (or any browser) in to the web app with this PC's GitHub
+        sign-in and opens this brain. Works from any network: the phone talks to GitHub, not this PC."""
+        from . import relay
+        from .phone import qr_svg
+
+        token = relay.open_token((relay.load_config() or {}).get("token", ""))
+        if not token:
+            raise ValueError("Set up Chat from anywhere first: run `cairn relay setup` once. The phone gets that GitHub sign-in.")
+        root = self.server.RequestHandlerClass.brain.root if self.server is not None else None
+        repo = github_repo_of(root) if root is not None else ""
+        if not repo:
+            raise ValueError("This brain isn't on GitHub yet. Link it to a GitHub repo and Sync once, then try again.")
+        url = f"{WEB_APP}?brain={repo}#/map?signin={token}"
+        log(f"phone sign-in code shown for {repo}")
+        return {"url": url, "qr": qr_svg(url), "repo": repo}
 
     def toggle_phone_access(self, on: bool) -> dict:
         phone = self._need_phone()

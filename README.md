@@ -241,6 +241,10 @@ and stays paired, so a home-screen bookmark keeps working: live sessions, autopi
   GitHub account; each gets its own folder in the repo and the phone shows a *Talk to* picker to choose which one
   answers, with each PC's own chats and models. Keep the repo private: anyone who can push to it can make your PCs run
   OpenCode prompts, and your chats are stored there.
+- **Sign in a phone from any network:** *Settings > Sign in a phone (any network)* shows a QR code that signs the phone's
+  browser in to [Cairn](https://juw12.github.io/cairn/) with this PC's GitHub sign-in (the one `cairn relay setup` saved)
+  and opens this brain from its GitHub repo. *Copy link* does the same for another browser. Show it only to your own
+  devices; revoke the sign-in on GitHub to cut a device off.
 - **Live sync:** a change on the phone shows up in the open PC window within a few seconds without a reload, and back
   the other way. A note you are typing in is left alone until you pause.
 - **Any network:** put both on [Tailscale](https://tailscale.com) (same account). *Settings > Set up Tailscale* installs

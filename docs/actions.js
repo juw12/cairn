@@ -334,6 +334,29 @@ export async function openPairPhone() {
   });
 }
 
+// A QR that signs a phone (or another browser) in to juw12.github.io/cairn with this PC's GitHub sign-in
+// and opens this brain. Unlike pairing it works from any network, because the phone reads GitHub directly.
+export async function openPhoneSignin() {
+  const result = await desktopAction("phone-signin", {});
+  if (!result) return;
+  modal(`
+    <div class="modal pair-phone" role="dialog" aria-modal="true" aria-labelledby="signin-title">
+      <h2 id="signin-title">Sign in a phone</h2>
+      <p>Scan with the phone's camera and open it in your normal browser. It signs in to GitHub and opens
+        <strong>${esc(result.repo)}</strong> on the Map, from any network. The browser remembers it.</p>
+      ${result.qr ? `<div class="pair-qr">${result.qr}</div>` : ""}
+      <p class="pair-url"><button type="button" class="btn sm ghost" data-copy-signin>${icon("copy", "sm")} Copy link for another browser</button></p>
+      <p class="hint">This code carries this PC's GitHub sign-in: show it only to your own devices. To cut a device off,
+        revoke the sign-in on GitHub (Settings &gt; Applications).</p>
+      <div class="actions"><button type="button" class="btn ghost" data-cancel>Done</button></div>
+    </div>`, (wrap) => {
+    wrap.addEventListener("click", (e) => {
+      if (!e.target.closest("[data-copy-signin]")) return;
+      navigator.clipboard.writeText(result.url).then(() => toast("Link copied. Paste it only into your own browser."), () => toast("Couldn't copy.", { error: true }));
+    });
+  });
+}
+
 export async function openSettings() {
   let info;
   try {
@@ -368,6 +391,7 @@ export async function openSettings() {
         <small class="muted phone-reach">${esc(reachStatus(info.phone).text)}</small>
         <div class="publish-row">
           <button class="btn sm primary" data-settings="phone-pair">${icon("link", "sm")} Pair a phone</button>
+          <button class="btn sm" data-settings="phone-signin">${icon("github", "sm")} Sign in a phone (any network)</button>
           ${reachStatus(info.phone).anywhere ? "" : `<button class="btn sm" data-settings="tailscale-setup">${icon("external", "sm")} Set up Tailscale</button>`}
           ${info.phone.devices.length ? `<button class="btn sm ghost" data-settings="phone-unpair">Unpair all phones</button>` : ""}
         </div>
@@ -408,6 +432,10 @@ export async function openSettings() {
       if (button.dataset.settings === "phone-pair") {
         close();
         return openPairPhone();
+      }
+      if (button.dataset.settings === "phone-signin") {
+        close();
+        return openPhoneSignin();
       }
       if (button.dataset.settings === "tailscale-setup") {
         const result = await desktopAction("tailscale-setup", {});
