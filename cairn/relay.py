@@ -473,6 +473,7 @@ def setup(repo: str = "", proxy: str = "", name: str = "") -> dict:
     repo = repo or f"{user['login']}/{DEFAULT_NAME}"
     probe.repo = repo
     status, data, _ = probe.call("GET", f"/repos/{repo}")
+    created = status == 404
     if status == 404:
         owner, name = repo.split("/", 1)
         path = "/user/repos" if owner.lower() == user["login"].lower() else f"/orgs/{owner}/repos"
@@ -487,7 +488,8 @@ def setup(repo: str = "", proxy: str = "", name: str = "") -> dict:
         raise RelayError(f"Couldn't open {repo} ({status}).")
     if not data.get("private"):
         raise RelayError(f"{repo} is public. The relay repo must be private.")
-    probe.write("README.md", README, "cairn relay: readme")
+    if created:  # never overwrite a README you have edited (e.g. your own setup notes)
+        probe.write("README.md", README, "cairn relay: readme")
     if probe.list_dir("requests")[0] == 404:
         probe.write("requests/.keep", "", "cairn relay: requests folder")
     previous = load_config() or {}
