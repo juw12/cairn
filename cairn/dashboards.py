@@ -52,7 +52,7 @@ def state_path() -> Path:
 
 def _read_json(path: Path, default):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))  # tolerate a BOM from Notepad/PowerShell
     except (OSError, ValueError):
         return default
 
