@@ -464,6 +464,7 @@ class DesktopHooks:
             "publish": self.publish,
             "phone-pair": self.pair_phone,
             "phone-signin": self.phone_signin,
+            "phone-dashboards": self.phone_dashboards,
             "phone-access": lambda: self.toggle_phone_access(bool(payload.get("on"))),
             "phone-unpair": self.unpair_phones,
             "phone-keep-awake": lambda: self.toggle_keep_awake(bool(payload.get("on"))),
@@ -575,6 +576,20 @@ class DesktopHooks:
         url = f"{WEB_APP}?brain={repo}#/map?signin={token}"
         log(f"phone sign-in code shown for {repo}")
         return {"url": url, "qr": qr_svg(url), "repo": repo}
+
+    def phone_dashboards(self) -> dict:
+        """A QR code that opens your local dashboards (cairn dashboards) on a phone, signed in with this
+        PC's GitHub sign-in. Works from any network: the phone reads the private relay repo on GitHub."""
+        from . import dashboards
+        from .phone import qr_svg
+
+        try:
+            url, repo = dashboards.phone_link()
+        except Exception as error:  # relay not set up, or its sign-in can't be opened
+            raise ValueError(str(error)) from error
+        pages = [page.get("title") or page["id"] for page in dashboards.load_pages()]
+        log(f"phone dashboards code shown for {repo}")
+        return {"url": url, "qr": qr_svg(url), "repo": repo, "pages": pages}
 
     def toggle_phone_access(self, on: bool) -> dict:
         phone = self._need_phone()

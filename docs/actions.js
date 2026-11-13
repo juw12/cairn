@@ -357,6 +357,28 @@ export async function openPhoneSignin() {
   });
 }
 
+// A QR that opens the dashboards this PC publishes (`cairn dashboards`) on a phone, from any network.
+export async function openPhoneDashboards() {
+  const result = await desktopAction("phone-dashboards", {});
+  if (!result) return;
+  const pages = result.pages?.length ? result.pages.map(esc).join(", ") : "none yet (run <code>cairn dashboards add</code>)";
+  modal(`
+    <div class="modal pair-phone" role="dialog" aria-modal="true" aria-labelledby="dash-title">
+      <h2 id="dash-title">Dashboards on phone</h2>
+      <p>Scan with the phone's camera and open it in your normal browser. It shows <strong>${pages}</strong>
+        and keeps them up to date, from any network. Bookmark it or add it to the home screen.</p>
+      ${result.qr ? `<div class="pair-qr">${result.qr}</div>` : ""}
+      <p class="pair-url"><button type="button" class="btn sm ghost" data-copy-dash>${icon("copy", "sm")} Copy link for another browser</button></p>
+      <p class="hint">This code carries this PC's GitHub sign-in: show it only to your own devices.</p>
+      <div class="actions"><button type="button" class="btn ghost" data-cancel>Done</button></div>
+    </div>`, (wrap) => {
+    wrap.addEventListener("click", (e) => {
+      if (!e.target.closest("[data-copy-dash]")) return;
+      navigator.clipboard.writeText(result.url).then(() => toast("Link copied. Paste it only into your own browser."), () => toast("Couldn't copy.", { error: true }));
+    });
+  });
+}
+
 export async function openSettings() {
   let info;
   try {
@@ -392,6 +414,7 @@ export async function openSettings() {
         <div class="publish-row">
           <button class="btn sm primary" data-settings="phone-pair">${icon("link", "sm")} Pair a phone</button>
           <button class="btn sm" data-settings="phone-signin">${icon("github", "sm")} Sign in a phone (any network)</button>
+          <button class="btn sm" data-settings="phone-dashboards">${icon("link", "sm")} Dashboards on phone</button>
           ${reachStatus(info.phone).anywhere ? "" : `<button class="btn sm" data-settings="tailscale-setup">${icon("external", "sm")} Set up Tailscale</button>`}
           ${info.phone.devices.length ? `<button class="btn sm ghost" data-settings="phone-unpair">Unpair all phones</button>` : ""}
         </div>
@@ -436,6 +459,10 @@ export async function openSettings() {
       if (button.dataset.settings === "phone-signin") {
         close();
         return openPhoneSignin();
+      }
+      if (button.dataset.settings === "phone-dashboards") {
+        close();
+        return openPhoneDashboards();
       }
       if (button.dataset.settings === "tailscale-setup") {
         const result = await desktopAction("tailscale-setup", {});

@@ -410,6 +410,56 @@ def cmd_relay(brain: Brain, args) -> int:
         return 0
 
 
+def cmd_dashboards(brain: Brain, args) -> int:
+    """Local dashboards on your phone from any network (see cairn/dashboards.py)."""
+    from . import dashboards, relay
+
+    action = args.dashboards_action
+    try:
+        if action == "add":
+            if not args.page_id or not args.file:
+                print("Usage: cairn dashboards add <id> <file> [--title T] [--build \"command\"]", file=sys.stderr)
+                return 2
+            page = dashboards.add_page(args.page_id, args.file, args.title or "", args.build or "")
+            print(f"Added {page['title']} ({page['id']}): {page['file']}")
+            return 0
+        if action == "remove":
+            print("Removed." if dashboards.remove_page(args.page_id or "") else "No dashboard with that id.")
+            return 0
+        if action == "publish":
+            result, entries = dashboards.publish(force=args.force)
+            for entry in entries:
+                note = f"  ({entry['error']})" if entry.get("error") else ""
+                print(f"{entry['title']}: {entry.get('updated', 'no page')}{note}")
+            print("Published to your phone." if result == "published" else "Nothing new to publish.")
+            return 0
+        if action == "schedule":
+            name = dashboards.schedule(args.minutes)
+            print(f"Task \"{name}\" publishes every {args.minutes} minutes.")
+            return 0
+        if action == "link":
+            url, repo = dashboards.phone_link()
+            try:
+                import segno
+
+                segno.make(url, error="m").terminal(compact=True)
+            except ImportError:
+                pass
+            print(f"Scan with your phone (reads {repo}; works from any network).")
+            print("This code carries this PC's GitHub sign-in: show it only to your own devices.")
+            return 0
+        pages = dashboards.load_pages()
+        if not pages:
+            print("No dashboards yet. Add one with `cairn dashboards add <id> <file>`.")
+        for page in pages:
+            build = f"  build: {' '.join(page['build'])}" if page.get("build") else ""
+            print(f"{page['id']}: {page['title']} <- {page['file']}{build}")
+        return 0
+    except (relay.RelayError, ValueError, OSError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cairn",
@@ -435,6 +485,19 @@ def build_parser() -> argparse.ArgumentParser:
     relay_parser.add_argument("--repo", help="owner/name of the relay repo (default: <you>/cairn-relay)")
     relay_parser.add_argument("--proxy", help="HTTP proxy for GitHub, e.g. http://proxy:80")
     relay_parser.add_argument("--name", help='how this PC shows on your phone, e.g. "Work laptop" (default: computer name)')
+    dash_parser = sub.add_parser(
+        "dashboards",
+        help="see local dashboards (HTML pages on this PC) live on your phone, from any network",
+        description="list | add <id> <file> | remove <id> | publish | schedule | link (QR for the phone)",
+    )
+    dash_parser.add_argument("dashboards_action", nargs="?", default="list",
+                             choices=["list", "add", "remove", "publish", "schedule", "link"])
+    dash_parser.add_argument("page_id", nargs="?")
+    dash_parser.add_argument("file", nargs="?")
+    dash_parser.add_argument("--title", help="name on the phone tab (default: from the id)")
+    dash_parser.add_argument("--build", help='command that rebuilds the page first, e.g. "python make_page.py"')
+    dash_parser.add_argument("--force", action="store_true", help="publish even if nothing changed")
+    dash_parser.add_argument("--minutes", type=int, default=5, help="schedule: how often to publish (default 5)")
     sub.add_parser("init", help="create the brain/ folder layout")
     add_parser = sub.add_parser("add", help='capture: cairn add "todo: ship v1 #release"')
     add_parser.add_argument("text", nargs="+")
@@ -682,6 +745,7 @@ def main(argv: list[str] | None = None) -> int:
         "desktop": cmd_desktop,
         "pair": cmd_pair,
         "relay": cmd_relay,
+        "dashboards": cmd_dashboards,
         None: cmd_serve,
     }
     if args.command is None:
