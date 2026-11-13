@@ -122,6 +122,7 @@ class GitHubMock:
         self.revoked = False
         self.requests: list[dict] = []
         self.listings: list[dict] = []
+        self.trees: list[dict] = []
         # Extra canned API answers by path, e.g. {"/repos/a/b/pulls/7": {...}} (pull requests, commits, releases).
         self.extra: dict[str, dict] = {}
 
@@ -232,7 +233,13 @@ class GitHubMock:
                 return self.reply(route, {"names": repo["meta"]["topics"]})
             if rest[:2] == ["git", "trees"]:
                 tree = [{"path": p, "type": "blob", "sha": git_sha(t)} for p, t in sorted(repo["files"].items())]
-                return self.reply(route, {"tree": tree})
+                # Like GitHub: an ETag per tree, and 304 Not Modified when the caller already has it.
+                etag = '"' + hashlib.sha1(json.dumps(tree).encode("utf-8")).hexdigest() + '"'
+                conditional = bool(request.headers.get("if-none-match"))
+                self.trees.append({"conditional": conditional, "unchanged": request.headers.get("if-none-match") == etag})
+                if request.headers.get("if-none-match") == etag:
+                    return route.fulfill(status=304, body="", headers={**CORS, "ETag": etag})
+                return self.reply(route, {"tree": tree}, headers={"ETag": etag})
             if rest[:2] == ["git", "blobs"]:
                 for text in repo["files"].values():
                     if git_sha(text) == rest[2]:

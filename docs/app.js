@@ -5,6 +5,7 @@ import { escapeHtml as esc } from "./md.js";
 import { ServerStore, FolderStore, DemoStore, GitHubStore } from "./store.js";
 import * as gh from "./github.js";
 import * as auth from "./auth.js";
+import { brainKey, readBrain } from "./brain-cache.js";
 import { $, LOGO, SPARKS, TYPE_META, ask, icon, plural, toast, today } from "./ui.js";
 import { GUIDE_KEY, HUBS, LAST_BRAIN_KEY, REPO_URL, VIEWS, createNote, deleteNote, guide, hubOf, loadAll, markGuide, noteByPath, readOnly, refreshGit, refreshTodos, state } from "./state.js";
 import { board, codeView, contextView, decisions, home, ideas, mcpSnippet, moveNote, notesView, showMoreNotes, wireBoard } from "./views.js";
@@ -694,6 +695,15 @@ async function boot() {
   const brainParam = params.get("brain") || (location.protocol === "https:" ? lastBrain : null);
   if (brainParam) {
     const parsed = gh.parseGithubInput(brainParam);
+    // Opened before on this device (browser tab or home-screen app): show that copy at once; live sync
+    // fetches whatever changed on GitHub since, in the background.
+    const login = auth.session()?.login;
+    const cacheKey = login && parsed?.repo ? brainKey(login, `${parsed.owner}/${parsed.repo}`) : "";
+    const cached = cacheKey ? await readBrain(cacheKey) : null;
+    if (cached?.files) {
+      const loaded = { root: cached.root, files: cached.files.map((file) => ({ ...file, mtime: 0 })), etag: cached.etag, cached: true };
+      return start(new GitHubStore(cached.repo, loaded, { writable: cached.writable, cacheKey }));
+    }
     // A big vault takes a few seconds over a phone connection: say so instead of a blank page.
     const loading = $("#welcome");
     loading.innerHTML = `
@@ -708,7 +718,8 @@ async function boot() {
       const loaded = await gh.loadBrainFiles(repo.owner, repo.name, repo.branch);
       const writable = auth.signedIn() && repo.canPush;
       if (writable) localStorage.setItem(LAST_BRAIN_KEY, repo.fullName);
-      return start(new GitHubStore(repo, loaded, { writable }));
+      // Only your own (writable) brains are kept on the device, the ones Cairn reopens by itself.
+      return start(new GitHubStore(repo, loaded, { writable, cacheKey: writable ? cacheKey : "" }));
     } catch (error) {
       loading.hidden = true;
       if (!auth.signedIn()) {

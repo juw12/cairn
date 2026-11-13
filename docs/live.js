@@ -1,5 +1,6 @@
 // Live sync between open pages: an edit on your phone shows up on the PC window (and the other way
-// round) within a few seconds. Polls the server's change feed (GET api/changes); a page is never told
+// round) within a few seconds. Polls the store's change feed (the PC's GET api/changes, or the GitHub tree
+// for a brain opened from GitHub, e.g. the phone's home-screen app); a page is never told
 // about its own edits. A note you are typing in is left alone until you click out of it.
 
 import { loadAll, state } from "./state.js";
@@ -46,7 +47,8 @@ async function poll() {
     const first = !epoch;
     revision = result.revision;
     epoch = result.epoch;
-    if (first) return;
+    // The first answer only sets the starting point, unless the page opened from a device copy and must catch up.
+    if (first && !result.catchUp) return;
     const paths = [...new Set([...result.paths, ...waiting])];
     const everything = Boolean(result.reset) || waitingAll;
     if (!paths.length && !everything) return;
@@ -62,7 +64,7 @@ async function poll() {
 
 export function startLiveSync() {
   if (timer || typeof state.store?.changes !== "function") return;
-  timer = setInterval(poll, window.CAIRN_TEST_LIVE_MS || POLL_MS);
+  timer = setInterval(poll, window.CAIRN_TEST_LIVE_MS || state.store.livePollMs || POLL_MS);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) poll();
   });

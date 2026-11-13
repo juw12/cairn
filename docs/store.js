@@ -13,6 +13,7 @@ import { isBrainFile, scanTodos } from "./core.js";
 import { DEMO_FILES, DEMO_TODOS } from "./demo.js";
 import * as gh from "./github.js";
 import * as auth from "./auth.js";
+import { saveBrain } from "./brain-cache.js";
 
 export class ConflictError extends Error {
   constructor(text, mtime) {
@@ -471,13 +472,69 @@ export class DemoStore {
 export class GitHubStore {
   // repo: slim repo from github.js. loaded: { root: "brain/", files: [{ path, text, mtime, sha }] }.
   // Writable only when you are signed in AND GitHub says you may push to the repo.
-  constructor(repo, loaded, { writable = false } = {}) {
+  // cacheKey: keep a copy on this device (brain-cache.js). loaded.cached: it came from that copy, so live
+  // sync catches up with GitHub straight away.
+  constructor(repo, loaded, { writable = false, cacheKey = "" } = {}) {
     this.repo = repo;
     this.root = loaded.root ?? "brain/";
     this.files = loaded.files || [];
     this.writable = Boolean(writable);
     // The sha of the version we last saw for each file: GitHub refuses a save based on an older one.
     this.shas = new Map(this.files.map((file) => [file.path, file.sha || null]));
+    this.treeEtag = loaded.etag || "";
+    this.fromCache = Boolean(loaded.cached);
+    this.cacheKey = cacheKey;
+    if (cacheKey && !this.fromCache) this.persist();
+  }
+
+  // Save the device copy a moment after the last change, not on every keystroke-driven save.
+  persist() {
+    if (!this.cacheKey) return;
+    clearTimeout(this.persistTimer);
+    this.persistTimer = setTimeout(() => {
+      const files = this.files.map(({ path, text }) => ({ path, text, sha: this.shas.get(path) || null }));
+      saveBrain(this.cacheKey, { repo: this.repo, root: this.root, files, etag: this.treeEtag, writable: this.writable, savedAt: Date.now() });
+    }, 1000);
+  }
+
+  keepFile(path, text, sha) {
+    const existing = this.files.find((file) => file.path === path);
+    if (existing) existing.text = text;
+    else this.files.push({ path, text, mtime: Date.now() });
+    this.shas.set(path, sha);
+  }
+
+  // Live sync (live.js) for the phone and any browser: poll the brain's git tree with its ETag. Unchanged,
+  // GitHub answers 304 (free signed in); changed, only notes whose sha moved are fetched, the way git
+  // compares trees. Our own saves already carry their new sha, so they never come back as "updates".
+  // Signed out (60 requests an hour) there's no polling.
+  get livePollMs() {
+    return 5000;
+  }
+
+  async changes(revision, epoch) {
+    const quiet = { revision, epoch: "github", paths: [] };
+    const first = !epoch;
+    if (!auth.session() || (first && !this.fromCache)) return quiet;
+    const tree = await gh.brainTreeIfChanged(this.repo, this.root, this.treeEtag);
+    if (!tree) return quiet;
+    const present = new Set(tree.items.map((item) => item.path.slice(this.root.length)));
+    const moved = tree.items.filter((item) => this.shas.get(item.path.slice(this.root.length)) !== item.sha);
+    const fetched = (await gh.blobFiles(this.repo.owner, this.repo.name, this.repo.branch, this.root, moved)).filter(Boolean);
+    const paths = [];
+    for (const file of fetched) {
+      const before = this.files.find((existing) => existing.path === file.path)?.text;
+      this.keepFile(file.path, file.text, file.sha);
+      if (before !== file.text) paths.push(file.path);
+    }
+    for (const path of [...this.shas.keys()].filter((known) => !present.has(known))) {
+      this.files = this.files.filter((file) => file.path !== path);
+      this.shas.delete(path);
+      paths.push(path);
+    }
+    this.treeEtag = tree.etag;
+    this.persist();
+    return { revision: revision + 1, epoch: "github", paths, catchUp: first };
   }
 
   async info() {
@@ -558,7 +615,8 @@ export class GitHubStore {
     const sha = this.shas.get(path) || null;
     try {
       const next = await gh.writeFile(this.repo, fullPath, text, sha, `cairn: ${sha ? "update" : "add"} ${path}`);
-      this.shas.set(path, next);
+      this.keepFile(path, text, next);
+      this.persist();
       return { mtime: Date.now() };
     } catch (error) {
       if (!error.conflict) throw error;
@@ -570,7 +628,8 @@ export class GitHubStore {
       }
       // It was deleted on GitHub meanwhile: saving recreates it.
       const next = await gh.writeFile(this.repo, fullPath, text, null, `cairn: add ${path}`);
-      this.shas.set(path, next);
+      this.keepFile(path, text, next);
+      this.persist();
       return { mtime: Date.now() };
     }
   }
@@ -586,6 +645,8 @@ export class GitHubStore {
       throw new Error("This note changed on GitHub since you opened it, so it wasn't deleted. Reload to see the newer version.");
     }
     this.shas.delete(path);
+    this.files = this.files.filter((file) => file.path !== path);
+    this.persist();
   }
 
   async todos() {

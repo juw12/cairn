@@ -5,6 +5,7 @@ import { escapeHtml as esc } from "./md.js";
 import { ServerStore, FolderStore, GitHubStore } from "./store.js";
 import * as gh from "./github.js";
 import * as auth from "./auth.js";
+import { forgetBrains } from "./brain-cache.js";
 import { openSignIn as showSignInDialog } from "./signin.js";
 import { $, icon, pageHead, relativeTime, toast, today } from "./ui.js";
 import { LAST_BRAIN_KEY, readOnly, state } from "./state.js";
@@ -199,6 +200,9 @@ async function brainToOpen() {
 
 export async function afterSignOut() {
   state.mine = null;
+  // A private vault's device copy (brain-cache.js) goes with the sign-in.
+  if (state.store instanceof GitHubStore) state.store.cacheKey = "";
+  forgetBrains();
   if (state.store instanceof GitHubStore && state.store.writable) {
     // Keep what's on screen, but stop offering edits that can't be saved.
     await flushPending().catch(() => {});

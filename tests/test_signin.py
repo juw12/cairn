@@ -43,7 +43,7 @@ class SignInTests(unittest.TestCase):
         cls.pw.stop()
         cls.server.shutdown()
 
-    def open(self, query, *, session=None, push=True, wait="#nav button"):
+    def open(self, query, *, session=None, push=True, wait="#nav button", live_ms=None):
         context = self.browser.new_context(viewport={"width": 1280, "height": 860})
         self.addCleanup(context.close)
         self.mock = install_github_mock(context, push=push)
@@ -54,6 +54,8 @@ class SignInTests(unittest.TestCase):
         page.on("console", self.note_console)
         page.on("request", self.note_request)
         page.add_init_script("localStorage.setItem('cairn.theme', 'light'); window.CAIRN_TEST_POLL_MS = 50;")
+        if live_ms:
+            page.add_init_script(f"window.CAIRN_TEST_LIVE_MS = {live_ms};")
         if session:
             page.add_init_script(f"if (!sessionStorage.getItem('cairn.session')) sessionStorage.setItem('cairn.session', {json.dumps(session)});")
         page.goto(self.url + query)
@@ -403,6 +405,76 @@ class SignInTests(unittest.TestCase):
         self.assertNotIn("brain/Home.md", self.mock.repos["juw12/vault"]["files"])
         self.assertEqual(self.errors, [])
 
+
+    # ------------------------------------------------------------------ phone / home-screen app
+
+    def test_github_brain_syncs_live_without_reloading(self):
+        # The phone (or its home-screen app) opens the vault from GitHub; an edit made on the PC shows up
+        # by itself, the way the PC window follows the phone.
+        page = self.open(f"?brain={REPO}#/board", session=session_json(), live_ms=200)
+        page.wait_for_selector(".board")
+        path = "brain/ideas/edited-on-the-pc.md"
+        self.mock.set_text(REPO, path, "---\ntitle: Edited on the PC\ntype: idea\nstatus: raw\n---\nFrom the desktop.\n")
+        page.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'ideas/edited-on-the-pc.md')", timeout=8000)
+        page.wait_for_selector(".toast:has-text('updated from your other device')")
+        # Unchanged polls are conditional and answered 304, which costs no GitHub rate limit.
+        for _ in range(50):
+            if any(tree["unchanged"] for tree in self.mock.trees):
+                break
+            page.wait_for_timeout(100)
+        self.assertTrue(any(tree["unchanged"] for tree in self.mock.trees))
+
+        # Your own save from this page never comes back as an "update from another device".
+        page.evaluate("""async () => {
+            const { saveNote } = await import('./state.js');
+            await saveNote('ideas/edited-on-the-pc.md', { status: 'done' });
+        }""")
+        self.wait_for_remote(page, path, lambda text: "status: done" in (text or ""))
+        page.wait_for_timeout(800)
+        self.assertEqual(page.locator(".toast:has-text('updated from your other device')").count(), 1)
+
+        # A note deleted on the PC disappears here too.
+        del self.mock.repos[REPO]["files"][path]
+        page.wait_for_function("() => !window.cairn.state.files.some((f) => f.path === 'ideas/edited-on-the-pc.md')", timeout=8000)
+        self.assertEqual(self.errors, [])
+
+    def test_reopening_shows_the_device_copy_at_once_then_catches_up(self):
+        page = self.open(f"?brain={REPO}#/board", session=session_json())
+        page.wait_for_selector(".board")
+        page.wait_for_timeout(1500)  # the device copy is saved a moment after loading
+        # While the app is closed, the PC changes a note.
+        path = "brain/ideas/while-you-were-away.md"
+        self.mock.set_text(REPO, path, "---\ntitle: While you were away\ntype: idea\nstatus: raw\n---\nNew.\n")
+        self.mock.trees.clear()
+        graphql_before = sum(1 for r in self.mock.requests if r["url"].endswith("/graphql"))
+
+        context = page.context
+        page.close()  # the app is closed meanwhile
+        again = context.new_page()
+        again.on("pageerror", lambda e: self.errors.append(str(e)))
+        again.add_init_script(f"sessionStorage.setItem('cairn.session', {json.dumps(session_json())});")
+        again.goto(self.url + f"?brain={REPO}#/board")
+        again.wait_for_selector(".board")
+        self.assertFalse(again.is_visible(".welcome-loading"), "no loading screen when the vault is on the device")
+        # It catches up by itself: one conditional tree request, then only the changed note is fetched.
+        again.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'ideas/while-you-were-away.md')", timeout=8000)
+        self.assertTrue(self.mock.trees and self.mock.trees[0]["conditional"])
+        fetches = sum(1 for r in self.mock.requests if r["url"].endswith("/graphql")) - graphql_before
+        self.assertLessEqual(fetches, 1, "only the changed note is downloaded, not the whole vault")
+        self.assertEqual(self.errors, [])
+
+    def test_signing_out_forgets_the_device_copy(self):
+        page = self.open(f"?brain={REPO}#/board", session=session_json())
+        page.wait_for_selector(".board")
+        page.wait_for_function("""async () => {
+            const { readBrain, brainKey } = await import('./brain-cache.js');
+            return Boolean(await readBrain(brainKey('juw12', 'juw12/cairn')));
+        }""", timeout=8000)
+        page.evaluate("window.dispatchEvent(new CustomEvent('cairn:signed-out', { detail: {} }))")
+        page.wait_for_function("""async () => {
+            const { readBrain, brainKey } = await import('./brain-cache.js');
+            return !(await readBrain(brainKey('juw12', 'juw12/cairn')));
+        }""", timeout=8000)
 
 if __name__ == "__main__":
     unittest.main()

@@ -155,26 +155,54 @@ export function decodeBase64(data) {
 const encodePath = (path) => path.split("/").map(encodeURIComponent).join("/");
 
 // All Markdown files of a repo's brain folder:
-//   { root: "brain/", files: [{ path (relative to the brain), text, mtime, sha }] }
+//   { root: "brain/", files: [{ path (relative to the brain), text, mtime, sha }], etag }
 export async function loadBrainFiles(owner, repo, branch) {
   // Never cached: after an edit the tree must show the new shas.
-  const treeUrl = `${API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
-  const tree = await (await request(treeUrl, { cache: "no-store" })).json();
+  const response = await request(treeUrl(owner, repo, branch), { cache: "no-store" });
+  const { root, items } = brainItems(await response.json(), owner, repo);
+  const files = await blobFiles(owner, repo, branch, root, items);
+  return { root, files: files.filter(Boolean), etag: response.headers.get("etag") || "" };
+}
+
+const treeUrl = (owner, repo, branch) => `${API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
+
+// The note blobs of a tree under `root` (found from the tree when not given).
+function brainItems(tree, owner, repo, root) {
   const blobs = (tree.tree || []).filter((item) => item.type === "blob");
   const paths = blobs.map((item) => item.path);
-  let root = ["brain/", ".brain/"].find((prefix) => paths.some((p) => p.startsWith(prefix)));
+  root ??= ["brain/", ".brain/"].find((prefix) => paths.some((p) => p.startsWith(prefix)));
   // An Obsidian vault (or any repo of notes) is opened as it is: the repo root is the brain.
   if (!root && paths.some((p) => p.startsWith(".obsidian/") || p.endsWith(".md"))) root = "";
   if (root === undefined) throw new GitHubError(`${owner}/${repo} has no brain/ folder or notes yet.`);
   const hidden = (path) => path.split("/").some((part) => part.startsWith(".") && part !== ".brain");
-  const wanted = blobs
+  const items = blobs
     .filter((item) => item.path.startsWith(root) && /\.(md|canvas)$/i.test(item.path) && !hidden(item.path))
     .slice(0, MAX_FILES);
+  return { root, items };
+}
+
+// Live sync: the brain's note blobs, or null when the tree is unchanged since `etag`. Signed in, a 304
+// Not Modified doesn't count against the rate limit, so polling this every few seconds is free.
+export async function brainTreeIfChanged(repo, root, etag = "") {
+  let response;
+  try {
+    response = await authFetch(treeUrl(repo.owner, repo.name, repo.branch), { cache: "no-store", headers: etag ? { "If-None-Match": etag } : {} });
+  } catch (error) {
+    throw new GitHubError(error.message || "Can't reach GitHub.");
+  }
+  if (response.status === 304) return null;
+  if (!response.ok) throw new GitHubError(`GitHub answered ${response.status}.`);
+  const { items } = brainItems(await response.json(), repo.owner, repo.name, root);
+  return { etag: response.headers.get("etag") || "", items };
+}
+
+// Texts of tree items: [{ path (relative to the brain), text, mtime, sha } | null].
+export async function blobFiles(owner, repo, branch, root, items) {
   const signedIn = Boolean(session());
   // Signed in: fetch notes 100 at a time over GraphQL (a 1,500-note vault is 15 requests, not 1,500,
   // which would also burn most of the hourly REST limit). Anything it can't return falls back to REST.
-  const batched = signedIn ? await blobTexts(owner, repo, wanted.map((item) => item.sha)) : new Map();
-  const files = await mapLimited(wanted, 8, async (item) => {
+  const batched = signedIn ? await blobTexts(owner, repo, items.map((item) => item.sha)) : new Map();
+  return mapLimited(items, 8, async (item) => {
     let text;
     if (batched.has(item.sha)) {
       text = batched.get(item.sha);
@@ -188,7 +216,6 @@ export async function loadBrainFiles(owner, repo, branch) {
     }
     return { path: item.path.slice(root.length), text, mtime: 0, sha: item.sha || null };
   });
-  return { root, files: files.filter(Boolean) };
 }
 
 // Texts of many blobs in a few GraphQL calls: sha -> text. Binary, truncated or failed batches are left
