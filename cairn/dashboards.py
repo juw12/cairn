@@ -289,7 +289,7 @@ def phone_link() -> tuple[str, str]:
     token = relay.open_token(config.get("token", ""))
     if not token:
         raise relay.RelayError("The relay sign-in is missing. Run `cairn relay setup` again.")
-    return f"{WEB_PAGE}#signin={token}&repo={config['repo']}", config["repo"]
+    return f"{WEB_PAGE}?repo={config['repo']}#signin={token}&repo={config['repo']}", config["repo"]
 
 
 def schedule(minutes: int = 5) -> str:

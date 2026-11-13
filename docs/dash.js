@@ -2,7 +2,9 @@
 // dashboard on the `dashboards` branch of your private relay repo; this page reads it straight from
 // GitHub, so it works on any network. Opened from the QR code, the #fragment carries the PC's GitHub
 // sign-in (fragments never reach a server); it is stored like Cairn's own sign-in, then removed from
-// the address bar.
+// the address bar. The relay repo stays in the address (?repo=, not secret), so an iPhone home-screen
+// icon added from this page opens the right repo; its separate storage gets the sign-in from the cookie
+// auth.js mirrors (copied by iOS when you add the icon) or, failing that, a pasted sign-in link.
 //
 // Each dashboard runs in its own sandboxed frame without same-origin rights, so its scripts can
 // never read the sign-in. A tiny script added to each page reports its scroll position, so a live
@@ -16,6 +18,7 @@ const POLL_MS = 30_000;
 const REPO_KEY = "cairn.dash.repo";
 const TAB_KEY = "cairn.dash.tab";
 const PAGE_KEY = (id) => `cairn.dash.page.${id}`;
+const REPO_NAME = /^[\w.-]+\/[\w.-]+$/;
 
 const $ = (selector) => document.querySelector(selector);
 const tabsEl = $("[data-tabs]");
@@ -52,12 +55,53 @@ function message(html) {
   mainEl.innerHTML = `<div class="message">${html}</div>`;
 }
 
+const homeScreenApp = () => navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+
+// A pasted sign-in link (…dash.html?repo=…#signin=…&repo=…) or a bare token.
+export function readSignIn(text) {
+  const value = String(text || "").trim();
+  const at = value.indexOf("#");
+  const fragment = new URLSearchParams(at >= 0 ? value.slice(at + 1) : "");
+  const query = new URLSearchParams(value.includes("?") ? value.slice(value.indexOf("?") + 1, at >= 0 ? at : undefined) : "");
+  const found = fragment.get("signin");
+  const named = fragment.get("repo") || query.get("repo") || "";
+  return { token: found || (at >= 0 || value.includes("/") ? "" : value), repo: REPO_NAME.test(named) ? named : "" };
+}
+
 function signedOutView(reason = "") {
   message(`<h1>Dashboards on your phone</h1>
     ${reason ? `<p>${esc(reason)}</p>` : ""}
-    <p>Scan the QR code from your PC: Cairn &rsaquo; Settings &rsaquo; Phone &rsaquo; <strong>Dashboards on phone</strong>,
-      or run <code>cairn dashboards link</code>.</p>
+    ${homeScreenApp()
+      ? `<p>This home-screen app keeps its own storage, so it needs the sign-in once. Paste the sign-in link
+          (on your PC: <code>cairn dashboards link</code>), or open the QR code in Safari, then remove this icon and add it again.</p>`
+      : `<p>Scan the QR code from your PC: Cairn &rsaquo; Settings &rsaquo; Phone &rsaquo; <strong>Dashboards on phone</strong>,
+          or run <code>cairn dashboards link</code>.</p>`}
+    <form class="paste" data-paste>
+      <input name="link" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+        placeholder="Paste the sign-in link" aria-label="Sign-in link">
+      <button type="submit">Sign in</button>
+    </form>
     <p><a href="./">Open Cairn</a></p>`);
+  mainEl.querySelector("[data-paste]").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const { token, repo: named } = readSignIn(event.target.link.value);
+    if (!token) return signedOutView("That is not a sign-in link. On your PC run: cairn dashboards link");
+    try {
+      await signInWithToken(token, { remember: true });
+    } catch (error) {
+      return signedOutView(error.message);
+    }
+    if (named) keepRepo(named);
+    start();
+  });
+}
+
+// The repo lives in localStorage and in the address bar, so a home-screen icon added from here keeps it.
+function keepRepo(name) {
+  localStorage.setItem(REPO_KEY, name);
+  const query = new URLSearchParams(location.search);
+  query.set("repo", name);
+  history.replaceState(null, "", `${location.pathname}?${query.toString().replace(/%2F/gi, "/")}`);
 }
 
 // ------------------------------------------------------------ GitHub
@@ -240,14 +284,17 @@ async function start() {
     } catch (error) {
       return signedOutView(error.message);
     }
-    if (/^[\w.-]+\/[\w.-]+$/.test(params.get("repo") || "")) localStorage.setItem(REPO_KEY, params.get("repo"));
+    if (REPO_NAME.test(params.get("repo") || "")) keepRepo(params.get("repo"));
     if (params.get("page")) current = params.get("page");
   } else if (params.get("page")) {
     current = params.get("page");
   }
+  const named = new URLSearchParams(location.search).get("repo") || "";
+  if (REPO_NAME.test(named)) localStorage.setItem(REPO_KEY, named);
   const who = session();
   if (!who) return signedOutView();
   repo = localStorage.getItem(REPO_KEY) || `${who.login}/cairn-relay`;
+  if (!REPO_NAME.test(named)) keepRepo(repo);
   await check();
 }
 

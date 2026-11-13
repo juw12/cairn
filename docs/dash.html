@@ -9,6 +9,11 @@
 <title>Dashboards - Cairn</title>
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="dash.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dashboards">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
   :root {
     --bg: #f4f1ea; --surface: #fffdf8; --line: #e1dbcf; --ink: #1b1a17; --muted: #6c665d;
@@ -52,6 +57,11 @@
   .message p { color: var(--muted); margin: 0 0 12px; }
   .message code { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 1px 5px; }
   .message a { color: var(--accent); }
+  .paste { display: flex; gap: 6px; margin: 4px 0 14px; }
+  .paste input { flex: 1; min-width: 0; min-height: 42px; padding: 0 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; }
+  .paste button { min-height: 42px; padding: 0 16px; border-radius: 10px; border: 0;
+    background: var(--ink); color: var(--bg); font: inherit; font-weight: 600; }
 </style>
 </head>
 <body>

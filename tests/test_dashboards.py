@@ -183,7 +183,7 @@ class DashboardsTests(unittest.TestCase):
                 mock.patch.object(relay, "open_token", return_value="ghp_example"):
             url, repo = dashboards.phone_link()
         self.assertEqual(repo, "me/cairn-relay")
-        self.assertTrue(url.startswith(dashboards.WEB_PAGE + "#"))
+        self.assertTrue(url.startswith(dashboards.WEB_PAGE + "?repo="))
         self.assertIn("signin=ghp_example", url.split("#", 1)[1])
         self.assertIn("repo=me/cairn-relay", url)
 
@@ -204,6 +204,23 @@ class DashPageTests(unittest.TestCase):
         self.assertNotIn("allow-same-origin", sandbox[0])
         self.assertIn('from "./auth.js"', script)
         self.assertIn("history.replaceState", script)  # the token leaves the address bar
+
+    def test_page_installs_as_its_own_home_screen_app(self):
+        docs = Path(__file__).resolve().parent.parent / "docs"
+        page = (docs / "dash.html").read_text(encoding="utf-8")
+        self.assertIn('<link rel="manifest" href="dash.webmanifest">', page)
+        self.assertIn('name="apple-mobile-web-app-capable" content="yes"', page)
+        manifest = json.loads((docs / "dash.webmanifest").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["display"], "standalone")
+        self.assertNotIn("start_url", manifest)  # the icon reopens dash.html?repo=..., not Cairn's home
+        self.assertIn("dash.webmanifest", (docs / "sw.js").read_text(encoding="utf-8"))
+
+    def test_home_screen_app_can_sign_in_without_safari_storage(self):
+        script = (Path(__file__).resolve().parent.parent / "docs" / "dash.js").read_text(encoding="utf-8")
+        self.assertIn("data-paste", script)  # paste the sign-in link inside the home-screen app
+        self.assertIn("keepRepo", script)  # the repo stays in the address the icon is made from
+        auth = (Path(__file__).resolve().parent.parent / "docs" / "auth.js").read_text(encoding="utf-8")
+        self.assertIn("cairn_session", auth)  # remembered sign-in mirrored to a cookie iOS copies over
 
 
 class ScheduleTest(unittest.TestCase):
