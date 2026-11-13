@@ -1,0 +1,62 @@
+{
+  "manifest_version": "0.3",
+  "name": "cairn",
+  "display_name": "Cairn",
+  "version": "1.0.0",
+  "description": "A second brain kept as plain Markdown in your repo: search, notes, capture, journal and a task queue.",
+  "long_description": "Cairn keeps a project's ideas, tasks, decisions, notes and daily journal as plain Markdown under brain/ in the repo, readable in Obsidian or any editor. This bundle runs `cairn mcp` on the folder you choose. Standard library only, local, no network.",
+  "author": {
+    "name": "Juwen Lie",
+    "url": "https://github.com/juw12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/juw12/cairn.git"
+  },
+  "homepage": "https://github.com/juw12/cairn",
+  "support": "https://github.com/juw12/cairn/issues",
+  "server": {
+    "type": "python",
+    "entry_point": "server/cairn/__main__.py",
+    "mcp_config": {
+      "command": "python",
+      "args": [
+        "-m",
+        "cairn",
+        "--root",
+        "${user_config.project_folder}",
+        "mcp"
+      ],
+      "env": {
+        "PYTHONPATH": "${__dirname}/server"
+      }
+    }
+  },
+  "user_config": {
+    "project_folder": {
+      "type": "directory",
+      "title": "Project folder",
+      "description": "Folder whose brain/ notes Cairn reads and writes (created if missing).",
+      "required": true
+    }
+  },
+  "keywords": [
+    "notes",
+    "markdown",
+    "memory",
+    "second-brain",
+    "obsidian",
+    "tasks"
+  ],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "python": ">=3.13"
+    }
+  }
+}
