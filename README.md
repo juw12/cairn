@@ -28,7 +28,7 @@
 
 <div align="center">
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/juw12-cairn-3r8q5g?v=c8c86ea215b3b02f8bd6f8573ad54ffc)](https://m8ven.ai/mcp/juw12-cairn-3r8q5g?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/juw12-cairn-3r8q5g?v=c8c86ea215b3b02f8bd6f8573ad54ffc)](https://m8ven.ai/mcp/juw12-cairn-3r8q5g?s=readme) [![Glama score](https://glama.ai/mcp/servers/juw12/cairn/badges/score.svg)](https://glama.ai/mcp/servers/juw12/cairn)
 
 </div>
 
