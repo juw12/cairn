@@ -24,8 +24,13 @@
   <img src="https://img.shields.io/badge/Python_CLI-24292f" alt="Python CLI">
   <img src="https://img.shields.io/badge/zero_dependencies-24292f" alt="Zero dependencies">
   <img src="https://img.shields.io/badge/license-MIT-0f766e" alt="MIT license">
-  <a href="https://m8ven.ai/mcp/juw12-cairn-3r8q5g?s=readme"><img src="https://m8ven.ai/badge/mcp/juw12-cairn-3r8q5g?v=c8c86ea215b3b02f8bd6f8573ad54ffc" alt="M8ven Score"></a>
 </p>
+
+<div align="center">
+
+[![M8ven Score](https://m8ven.ai/badge/mcp/juw12-cairn-3r8q5g?v=c8c86ea215b3b02f8bd6f8573ad54ffc)](https://m8ven.ai/mcp/juw12-cairn-3r8q5g?s=readme)
+
+</div>
 
 <a id="highlights"></a>
 <table>
