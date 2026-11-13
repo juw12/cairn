@@ -410,6 +410,46 @@ def cmd_relay(brain: Brain, args) -> int:
         return 0
 
 
+def cmd_widget(brain: Brain, args) -> int:
+    """Cairn on the iPhone home-screen widget (see cairn/widget.py)."""
+    from . import widget
+
+    action = args.widget_action
+    try:
+        if action == "pair":
+            if not args.code:
+                print("Usage: cairn widget pair jw-...  (copy the code from https://juw12.github.io/widget/)", file=sys.stderr)
+                return 2
+            widget.pair(args.code)
+            result = widget.publish(brain, force=True)
+            print("Paired. The desktop app now sends Cairn's live sessions to the widget within seconds of a change.")
+            print("Sent the first update." if result.get("sent") else f"First update not sent yet: {result.get('why')}")
+            return 0
+        if action == "unpair":
+            print("Unpaired: nothing more is sent." if widget.unpair() else "This PC wasn't paired.")
+            return 0
+        if action == "send":
+            result = widget.publish(brain, force=True)
+            if result.get("sent"):
+                print(json.dumps(result["snapshot"], ensure_ascii=False, indent=1))
+                print(f"Sent ({result['count']} today).")
+                return 0
+            print(f"Not sent: {result.get('why')}", file=sys.stderr)
+            return 1
+        info = widget.status()
+        if not info["code"]:
+            print("Not paired. Make a code at https://juw12.github.io/widget/ and run: cairn widget pair jw-...")
+            return 0
+        print(f"Paired: {info['code'][:7]}…{info['code'][-4:]}")
+        if info["last"]:
+            print(f"Last sent: {dt.datetime.fromtimestamp(info['last']):%Y-%m-%d %H:%M:%S}")
+        print(f"Sent today: {info['today']} of {info['budget']}")
+        return 0
+    except widget.WidgetError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
 def cmd_dashboards(brain: Brain, args) -> int:
     """Local dashboards on your phone from any network (see cairn/dashboards.py)."""
     from . import dashboards, relay
@@ -499,6 +539,13 @@ def build_parser() -> argparse.ArgumentParser:
     dash_parser.add_argument("--cwd", help="folder the build command runs in")
     dash_parser.add_argument("--force", action="store_true", help="publish even if nothing changed")
     dash_parser.add_argument("--minutes", type=int, default=5, help="schedule: how often to publish (default 5)")
+    widget_parser = sub.add_parser(
+        "widget",
+        help="show live vibe sessions on the iPhone home-screen widget (with PocketDex, Haru, Cozy Island)",
+        description="pair <code> | send | status | unpair. Make the code at https://juw12.github.io/widget/",
+    )
+    widget_parser.add_argument("widget_action", nargs="?", default="status", choices=["pair", "send", "status", "unpair"])
+    widget_parser.add_argument("code", nargs="?")
     sub.add_parser("init", help="create the brain/ folder layout")
     add_parser = sub.add_parser("add", help='capture: cairn add "todo: ship v1 #release"')
     add_parser.add_argument("text", nargs="+")
@@ -747,6 +794,7 @@ def main(argv: list[str] | None = None) -> int:
         "pair": cmd_pair,
         "relay": cmd_relay,
         "dashboards": cmd_dashboards,
+        "widget": cmd_widget,
         None: cmd_serve,
     }
     if args.command is None:

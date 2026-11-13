@@ -1115,6 +1115,10 @@ class DesktopApp:
         from . import relay
 
         relay.start_in_background(self.stopping, log)  # chat from anywhere, once `cairn relay setup` was run
+        from . import widget
+
+        # iPhone widget: live sessions within seconds of a change, once `cairn widget pair` was run
+        widget.start_in_background(self.stopping, lambda: self.server.RequestHandlerClass.brain, log)
         log(f"running {self.hooks.loaded_head or __version__} on {folder} ({'tray' if self.start_hidden else 'window'})")
 
         webview.start(private_mode=False, storage_path=str(config_dir() / "webview"))
