@@ -359,7 +359,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "context",
-        "description": "One-page project brief: goals, open tasks, accepted decisions, active ideas and the recent log. Read this first.",
+        "description": "One-page project brief: goals, open tasks, accepted decisions, active ideas and the latest journal lines. Read this first.",
         "inputSchema": {"type": "object", "properties": {}},
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
         "handler": _tool_context,
