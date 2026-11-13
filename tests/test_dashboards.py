@@ -206,5 +206,20 @@ class DashPageTests(unittest.TestCase):
         self.assertIn("history.replaceState", script)  # the token leaves the address bar
 
 
+class ScheduleTest(unittest.TestCase):
+    def test_schedule_repeats_forever_and_restarts_at_sign_in(self):
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(dashboards.sys, "platform", "win32"), \
+                mock.patch.object(dashboards.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(dashboards.schedule(5), dashboards.TASK_NAME)
+        script = run.call_args.args[0][-1]
+        self.assertIn("-RepetitionInterval (New-TimeSpan -Minutes 5)", script)
+        self.assertIn("-AtLogOn", script)
+        self.assertIn("$logon.Repetition = $trigger.Repetition", script)
+        self.assertIn("-Trigger @($trigger, $logon)", script)
+        self.assertIn("-StartWhenAvailable", script)
+        self.assertIn("-DontStopIfGoingOnBatteries", script)
+
+
 if __name__ == "__main__":
     unittest.main()

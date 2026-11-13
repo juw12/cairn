@@ -293,8 +293,10 @@ def phone_link() -> tuple[str, str]:
 
 
 def schedule(minutes: int = 5) -> str:
-    """Publish every few minutes with Windows Task Scheduler. Runs pythonw straight from the app folder
-    (no cmd.exe), so no console window flashes up; a run still going makes the next one wait."""
+    """Publish every few minutes with Windows Task Scheduler, for good: it repeats with no end date, also
+    starts at every Windows sign-in (so a reboot never stops it), catches up after sleep and runs on
+    battery. Runs pythonw straight from the app folder (no cmd.exe), so no console window flashes up;
+    a run still going makes the next one wait."""
     if sys.platform != "win32":
         raise OSError("Scheduling is Windows-only; use cron with `cairn dashboards publish` elsewhere.")
     python = Path(sys.executable)
@@ -309,9 +311,11 @@ def schedule(minutes: int = 5) -> str:
         f"$action = New-ScheduledTaskAction -Execute {quote(exe)} -Argument '-m cairn dashboards publish' "
         f"-WorkingDirectory {quote(app)}; "
         f"$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes {int(minutes)}); "
+        "$logon = New-ScheduledTaskTrigger -AtLogOn -User \"$env:USERDOMAIN\\$env:USERNAME\"; "
+        "$logon.Repetition = $trigger.Repetition; "
         "$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable "
         "-ExecutionTimeLimit (New-TimeSpan -Minutes 15) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; "
-        f"Register-ScheduledTask -TaskName {quote(TASK_NAME)} -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null"
+        f"Register-ScheduledTask -TaskName {quote(TASK_NAME)} -Action $action -Trigger @($trigger, $logon) -Settings $settings -Force | Out-Null"
     )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
