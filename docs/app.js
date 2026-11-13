@@ -693,6 +693,12 @@ async function boot() {
   const lastBrain = auth.signedIn() && !params.has("u") && !params.has("demo") && !params.has("empty")
     && !["demo", "folder"].includes(localStorage.getItem("cairn.mode")) ? localStorage.getItem(LAST_BRAIN_KEY) : null;
   const brainParam = params.get("brain") || (location.protocol === "https:" ? lastBrain : null);
+  // Keep the brain in the address bar: "Add to Home Screen" saves this address, so the icon opens your
+  // brain instead of the landing page.
+  if (brainParam && !params.has("brain")) {
+    params.set("brain", brainParam);
+    history.replaceState(null, "", `${location.pathname}?${params}${location.hash}`);
+  }
   if (brainParam) {
     const parsed = gh.parseGithubInput(brainParam);
     // Opened before on this device (browser tab or home-screen app): show that copy at once; live sync

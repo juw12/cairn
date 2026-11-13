@@ -9,7 +9,7 @@
 //
 // Rules this module enforces (and tests check):
 //   - The token lives in sessionStorage (this tab) unless the user ticks "Remember on this device".
-//   - Signing out removes it from both storages.
+//   - Signing out removes it from both storages (and the home-screen cookie, see session()).
 //   - authFetch() only ever attaches the token to https://api.github.com/ URLs.
 //   - A 401 from GitHub ends the session and tells the app why.
 
@@ -30,9 +30,42 @@ function readStored(storage) {
   }
 }
 
-export function session() {
-  return readStored(sessionStorage) || readStored(localStorage);
+// iPhone home-screen apps get their own storage: localStorage from Safari is NOT carried over, but
+// cookies are copied once when you tap "Add to Home Screen". So a remembered sign-in is mirrored into a
+// cookie (sent only to this site, over https) and adopted by the home-screen app on its first start.
+// Safari keeps script-set cookies 7 days, so it is refreshed on every visit. Sign-out removes it.
+const COOKIE = "cairn_session";
+const cookiePath = () => new URL(".", location.href).pathname;
+
+function writeCookie(value, maxAge) {
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${COOKIE}=${value}; Path=${cookiePath()}; Max-Age=${maxAge}; SameSite=Strict${secure}`;
 }
+
+function readCookie() {
+  const raw = document.cookie.split("; ").find((part) => part.startsWith(`${COOKIE}=`));
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(decodeURIComponent(raw.slice(COOKIE.length + 1)));
+    return value && typeof value.token === "string" && value.token ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function mirror(value) {
+  if (value?.remember) writeCookie(encodeURIComponent(JSON.stringify(value)), 400 * 24 * 3600);
+}
+
+export function session() {
+  const stored = readStored(sessionStorage) || readStored(localStorage);
+  if (stored) return stored;
+  const carried = readCookie();
+  if (carried) localStorage.setItem(KEY, JSON.stringify({ ...carried, remember: true }));
+  return carried;
+}
+
+mirror(readStored(localStorage));
 
 export function signedIn() {
   return Boolean(session());
@@ -42,12 +75,15 @@ function store(value, remember) {
   sessionStorage.removeItem(KEY);
   localStorage.removeItem(KEY);
   (remember ? localStorage : sessionStorage).setItem(KEY, JSON.stringify({ ...value, remember: Boolean(remember) }));
+  if (remember) mirror({ ...value, remember: true });
+  else writeCookie("", 0);
 }
 
 export function signOut(reason = "") {
   const was = signedIn();
   sessionStorage.removeItem(KEY);
   localStorage.removeItem(KEY);
+  writeCookie("", 0);
   // Cached API answers may include private permission data; drop them with the session.
   for (const storage of [sessionStorage]) {
     for (let i = storage.length - 1; i >= 0; i -= 1) {

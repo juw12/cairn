@@ -204,11 +204,13 @@ class SignInTests(unittest.TestCase):
         stored = self.storage(page)
         self.assertIsNone(stored["session"])
         self.assertIsNotNone(stored["local"])
+        self.assertIn("cairn_session=", page.evaluate("document.cookie"), "remembered sign-in is mirrored for the home-screen app")
         page.click('[data-action="sign-out"]')
         page.wait_for_selector(".ro-banner")
         stored = self.storage(page)
         self.assertIsNone(stored["session"])
         self.assertIsNone(stored["local"])
+        self.assertNotIn("cairn_session=", page.evaluate("document.cookie"), "signing out removes the home-screen copy too")
         self.assertTrue(page.locator('#sidebar-foot [data-action="sign-in"]').is_visible())
         self.assertTrue(page.locator("#capture-form").is_hidden())
         self.assertEqual(self.errors, [])
@@ -475,6 +477,31 @@ class SignInTests(unittest.TestCase):
             const { readBrain, brainKey } = await import('./brain-cache.js');
             return !(await readBrain(brainKey('juw12', 'juw12/cairn')));
         }""", timeout=8000)
+
+    def test_home_screen_app_opens_the_brain_signed_in(self):
+        # The manifest has no start_url, so "Add to Home Screen" keeps the page's own address (?brain=...).
+        manifest = json.loads((Path(__file__).resolve().parents[1] / "docs" / "manifest.webmanifest").read_text(encoding="utf-8"))
+        self.assertNotIn("start_url", manifest)
+
+        # Safari: the PC's "Sign in a phone" QR code opens the brain and signs in.
+        page = self.open(f"?brain={REPO}#/map?signin={VALID_TOKEN}")
+        page.wait_for_function("() => window.cairn?.state?.info && !window.cairn.state.info.readOnly")
+        self.assertNotIn(VALID_TOKEN, page.url, "the token never stays in the address the home-screen icon saves")
+        self.assertIn("brain=juw12", page.url, "the brain stays in the address, so the icon opens it")
+        cookies = page.context.cookies()
+        self.assertTrue(any(cookie["name"] == "cairn_session" for cookie in cookies))
+
+        # Home-screen app: iOS gives it empty storage and a one-time copy of Safari's cookies only.
+        home = self.browser.new_context(viewport={"width": 390, "height": 844})
+        self.addCleanup(home.close)
+        install_github_mock(home)
+        home.add_cookies(cookies)
+        app = home.new_page()
+        app.goto(self.url + f"?brain={REPO}#/map")
+        app.wait_for_function("() => window.cairn?.state?.info && !window.cairn.state.info.readOnly", timeout=15000)
+        self.assertEqual(app.locator(".ro-banner").count(), 0)
+        self.assertIsNotNone(app.evaluate("localStorage.getItem('cairn.session')"), "the app keeps the sign-in it was given")
+        self.assertEqual(self.errors, [])
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,6 @@
   "name": "Cairn",
   "short_name": "Cairn",
   "description": "A second brain that lives inside your repo.",
-  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f4f1ea",
