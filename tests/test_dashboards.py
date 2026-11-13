@@ -97,17 +97,42 @@ class DashboardsTests(unittest.TestCase):
         self.assertFalse(dashboards.remove_page("beta"))
 
     def test_collect_reads_pages_and_reports_problems(self):
-        failing = mock.Mock(return_value=subprocess.CompletedProcess([], 1, "", "Traceback\nValueError: boom"))
+        spawned = []
+
+        def spawn(args, **kwargs):
+            spawned.append((args, kwargs))
+            return mock.Mock(pid=4321)
+
         pages = self.pages() + [{"id": "gone", "file": str(self.tmp / "missing.html")}]
         pages[1]["build"] = ["python", "build.py"]
-        entries, files = dashboards.collect(pages, run=failing)
+        with mock.patch.object(dashboards, "build_log", return_value=self.tmp / "beta.log"), \
+                mock.patch.object(Path, "home", return_value=self.tmp):
+            entries, files = dashboards.collect(pages, spawn=spawn, clock=lambda: self.page_b.stat().st_mtime + 60)
         self.assertEqual(set(files), {"alpha.html", "beta.html"})
         self.assertEqual(entries[0]["sha"], dashboards.git_blob_sha(self.page_a.read_bytes()))
         self.assertNotIn("error", entries[0])
-        self.assertIn("ValueError: boom", entries[1]["error"])  # build failed, old copy still shown
-        self.assertIn("sha", entries[1])
+        # the build runs in the background with no stdin (never waits on a console), one per page
+        self.assertEqual(spawned[0][0], ["python", "build.py"])
+        self.assertIs(spawned[0][1]["stdin"], subprocess.DEVNULL)
+        self.assertEqual((self.tmp / ".cairn" / "dashboards-build-beta.pid").read_text(), "4321")
+        self.assertNotIn("error", entries[1])  # fresh page: no warning
         self.assertIn("no page yet", entries[2]["error"])
         self.assertNotIn("sha", entries[2])
+
+    def test_a_running_build_is_not_started_twice_and_stale_pages_are_flagged(self):
+        spawn = mock.Mock(return_value=mock.Mock(pid=1))
+        page = {"id": "beta", "file": str(self.page_b), "build": ["python", "build.py"]}
+        (self.tmp / ".cairn").mkdir()
+        (self.tmp / ".cairn" / "dashboards-build-beta.pid").write_text("999")
+        (self.tmp / "beta.log").write_text("Traceback\nValueError: boom\n", encoding="utf-8")
+        with mock.patch.object(Path, "home", return_value=self.tmp), \
+                mock.patch.object(dashboards, "build_log", return_value=self.tmp / "beta.log"), \
+                mock.patch.object(dashboards, "_alive", return_value=True):
+            self.assertEqual(dashboards.start_build(page, spawn), "")
+            spawn.assert_not_called()
+            entries, _ = dashboards.collect([page], spawn=spawn, clock=lambda: self.page_b.stat().st_mtime + 3600)
+        self.assertIn("ValueError: boom", entries[0]["error"])
+        self.assertIn("sha", entries[0])  # the old copy is still shown
 
     def test_blob_sha_matches_git(self):
         self.assertEqual(dashboards.git_blob_sha(b""), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")

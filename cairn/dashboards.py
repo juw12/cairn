@@ -22,6 +22,7 @@ import base64
 import datetime as dt
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -34,7 +35,8 @@ from .brain import NO_WINDOW
 BRANCH = "dashboards"
 STATUS_FILE = "status.json"
 HEARTBEAT_SECONDS = 10 * 60  # publish at least this often so the phone can tell the PC is alive
-BUILD_TIMEOUT = 240
+BREAKAWAY = 0x01000000 if sys.platform == "win32" else 0  # CREATE_BREAKAWAY_FROM_JOB
+STALE_SECONDS = 30 * 60  # a built page older than this gets a warning on the phone
 MAX_BYTES = 20 * 1024 * 1024
 WEB_PAGE = "https://juw12.github.io/cairn/dash.html"
 TASK_NAME = "Cairn dashboards to phone"
@@ -69,13 +71,15 @@ def save_pages(pages: list[dict]) -> None:
     _write_json(config_path(), {"pages": pages})
 
 
-def add_page(page_id: str, file: str, title: str = "", build: str = "") -> dict:
+def add_page(page_id: str, file: str, title: str = "", build: str = "", cwd: str = "") -> dict:
     page_id = "".join(ch for ch in page_id.lower() if ch.isalnum() or ch in "-_")
     if not page_id:
         raise ValueError("Give the dashboard a short id, like `millennium`.")
     page = {"id": page_id, "title": title or page_id.replace("-", " ").title(), "file": str(Path(file))}
     if build:
         page["build"] = build_args(build)
+    if cwd:
+        page["cwd"] = str(Path(cwd))
     pages = [existing for existing in load_pages() if existing["id"] != page_id] + [page]
     save_pages(pages)
     return page
@@ -105,38 +109,92 @@ def build_args(command) -> list[str]:
     return [arg[1:-1] if len(arg) > 1 and arg[0] == arg[-1] == '"' else arg for arg in args]
 
 
-def run_build(command, run=subprocess.run) -> str:
-    """Run a page's build command. Returns "" on success, else a short reason for the phone."""
+def _alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return code.value == 259  # STILL_ACTIVE
     try:
-        args = build_args(command)
-        result = run(args, capture_output=True, text=True, timeout=BUILD_TIMEOUT, creationflags=NO_WINDOW)
-    except subprocess.TimeoutExpired:
-        return f"build took longer than {BUILD_TIMEOUT // 60} minutes"
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def build_log(page_id: str) -> Path:
+    return Path.home() / ".cairn" / f"dashboards-build-{page_id}.log"
+
+
+def start_build(page: dict, spawn=subprocess.Popen, alive=None) -> str:
+    """Start a page's build in the background and return at once; the next publish picks up the new
+    file. A slow build (a busy PC can take minutes) never holds back the other dashboards, and only
+    one build per page runs at a time. Returns "" or a short reason the build couldn't start."""
+    alive = alive or _alive
+    state_file = Path.home() / ".cairn" / f"dashboards-build-{page['id']}.pid"
+    try:
+        if alive(int(state_file.read_text().strip() or 0)):
+            return ""
+    except (OSError, ValueError):
+        pass
+    try:
+        args = build_args(page["build"])
+        log_file = build_log(page["id"])
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "w", encoding="utf-8") as log:
+            options = dict(stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, cwd=page.get("cwd") or None)
+            try:
+                # Outlive this run even when Task Scheduler closes its job when the publish ends.
+                process = spawn(args, creationflags=NO_WINDOW | BREAKAWAY, **options)
+            except OSError:
+                process = spawn(args, creationflags=NO_WINDOW, **options)
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(str(process.pid))
     except OSError as error:
         return f"build couldn't start: {error}"
-    if result.returncode != 0:
-        lines = (result.stderr or result.stdout or "").strip().splitlines()
-        return f"build failed: {lines[-1][:200] if lines else 'exit ' + str(result.returncode)}"
     return ""
 
 
-def collect(pages: list[dict], run=subprocess.run) -> tuple[list[dict], dict[str, bytes]]:
-    """Build what needs building and read every page. The newest good copy is used even when a
-    build fails, and the phone is told why the page may be old."""
+def build_problem(page: dict, now: float, page_mtime: float | None) -> str:
+    """Tell the phone when a built page is going stale, with the last line of its build log."""
+    if page_mtime is not None and now - page_mtime < STALE_SECONDS:
+        return ""
+    try:
+        lines = [line for line in build_log(page["id"]).read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+    except OSError:
+        lines = []
+    last = lines[-1][:200] if lines else "no output yet"
+    return f"page not rebuilt for a while; last build said: {last}"
+
+
+def collect(pages: list[dict], spawn=subprocess.Popen, clock=time.time) -> tuple[list[dict], dict[str, bytes]]:
+    """Kick off builds and read every page as it is now. The newest good copy is always used; the
+    phone is told when a page is getting old and why."""
     entries: list[dict] = []
     files: dict[str, bytes] = {}
     for page in pages:
-        error = run_build(page["build"], run) if page.get("build") else ""
+        error = start_build(page, spawn) if page.get("build") else ""
         path = Path(page["file"])
         entry = {"id": page["id"], "title": page.get("title") or page["id"], "file": f"{page['id']}.html"}
+        mtime = None
         try:
             data = path.read_bytes()
             if len(data) > MAX_BYTES:
                 raise OSError(f"page is over {MAX_BYTES // (1024 * 1024)} MB")
+            mtime = path.stat().st_mtime
             files[entry["file"]] = data
-            entry.update(sha=git_blob_sha(data), bytes=len(data), updated=_iso(path.stat().st_mtime))
+            entry.update(sha=git_blob_sha(data), bytes=len(data), updated=_iso(mtime))
         except OSError as problem:
             error = error or f"no page yet ({problem.strerror or problem})"
+        if page.get("build") and not error:
+            error = build_problem(page, clock(), mtime)
         if error:
             entry["error"] = error
         entries.append(entry)
@@ -210,14 +268,14 @@ class Publisher:
         return "published"
 
 
-def publish(force: bool = False, run=subprocess.run) -> tuple[str, list[dict]]:
+def publish(force: bool = False, spawn=subprocess.Popen) -> tuple[str, list[dict]]:
     pages = load_pages()
     if not pages:
         raise ValueError("No dashboards yet. Add one with `cairn dashboards add <id> <file>`.")
     config = relay.load_config()
     if not config:
         raise relay.RelayError("Set up the private relay repo first: `cairn relay setup`.")
-    entries, files = collect(pages, run)
+    entries, files = collect(pages, spawn)
     result = Publisher(relay.connect(config), relay.device_of(config)).publish(entries, files, force)
     return result, entries
 

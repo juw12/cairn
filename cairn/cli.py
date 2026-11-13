@@ -420,7 +420,7 @@ def cmd_dashboards(brain: Brain, args) -> int:
             if not args.page_id or not args.file:
                 print("Usage: cairn dashboards add <id> <file> [--title T] [--build \"command\"]", file=sys.stderr)
                 return 2
-            page = dashboards.add_page(args.page_id, args.file, args.title or "", args.build or "")
+            page = dashboards.add_page(args.page_id, args.file, args.title or "", args.build or "", args.cwd or "")
             print(f"Added {page['title']} ({page['id']}): {page['file']}")
             return 0
         if action == "remove":
@@ -496,6 +496,7 @@ def build_parser() -> argparse.ArgumentParser:
     dash_parser.add_argument("file", nargs="?")
     dash_parser.add_argument("--title", help="name on the phone tab (default: from the id)")
     dash_parser.add_argument("--build", help='command that rebuilds the page first, e.g. "python make_page.py"')
+    dash_parser.add_argument("--cwd", help="folder the build command runs in")
     dash_parser.add_argument("--force", action="store_true", help="publish even if nothing changed")
     dash_parser.add_argument("--minutes", type=int, default=5, help="schedule: how often to publish (default 5)")
     sub.add_parser("init", help="create the brain/ folder layout")
