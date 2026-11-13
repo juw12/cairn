@@ -108,6 +108,10 @@ class McpServerTests(unittest.TestCase):
             self.assertNotIn("handler", tool)
         self.assertTrue(tools["search"]["annotations"]["readOnlyHint"])
         self.assertFalse(tools["capture"]["annotations"]["readOnlyHint"])
+        hint_names = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+        for tool in tools.values():
+            for hint in hint_names:
+                self.assertIsInstance(tool["annotations"].get(hint), bool, f"{tool['name']} {hint}")
 
     def test_capture_search_and_read_a_decision(self):
         text, error = self.client.call(
