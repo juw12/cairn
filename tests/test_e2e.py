@@ -36,6 +36,54 @@ HUBS = {
 # whatever today's date is (a dated page never overwrites the fixed sample journal page).
 DEMO_NOTES = 27
 
+# Sessions in every state the Vibe recap tells apart: working, waiting, stopped on an error, quiet,
+# quiet for days, and two that ended (one shipped, one cut off mid-turn).
+RECAP_SEED = """() => {
+  const s = window.cairn.state;
+  const core = window.cairn.core;
+  const pad = (n) => String(n).padStart(2, "0");
+  const at = (minutesAgo) => {
+    const d = new Date(Date.now() - minutesAgo * 60000);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const hm = (minutesAgo) => at(minutesAgo).slice(11);
+  const note = (slug, meta, log, extra = "") => {
+    const head = Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join("\\n");
+    const text = `---\\n${head}\\n---\\n\\n## Log\\n\\n${log.join("\\n")}\\n${extra}`;
+    s.files.push({ path: `sessions/${slug}.md`, text, mtime: Date.now() });
+  };
+  note("a-working", { title: "Recap band for the Vibe page", type: "session", status: "live", started: at(42), source: "opencode", external: "ses_working1", folder: "E:/Projects/cairn", model: "Pega-Coding", effort: "high", tokens: 1843200, prompts: 6, turn: "working", turn_at: at(1) },
+    [`- ${hm(42)} start: Recap band for the Vibe page`, `- ${hm(3)} prompt: now add the chips for each state`]);
+  note("b-waiting", { title: "Fix the relay retry loop", type: "session", status: "live", started: at(95), source: "opencode", external: "ses_waiting1", folder: "E:/Projects/cairn", model: "Pega-Thinking", tokens: 912345, prompts: 4, turn: "done", turn_at: at(12) },
+    [`- ${hm(95)} start: Fix the relay retry loop`, `- ${hm(12)} pass: pytest (14s) · 61 passed`],
+    "\\n## Last reply\\n\\n> The retry loop now backs off 2, 4, 8 seconds and gives up after five tries.\\n> All 61 tests pass. Want me to commit and push, or tune the limits first?\\n");
+  note("c-error", { title: "Import the Obsidian vault", type: "session", status: "live", started: at(130), source: "opencode", external: "ses_error1", folder: "E:/Projects/trailmix", model: "Pega-Chat", tokens: 220100, prompts: 2, turn: "failed", turn_at: at(31) },
+    [`- ${hm(130)} start: Import the Obsidian vault`, `- ${hm(31)} fail: provider error · context length exceeded`]);
+  note("d-quiet", { title: "Tolerance stack for the O-ring", type: "session", status: "live", started: at(200), agent: "Vector" },
+    [`- ${hm(200)} start: Tolerance stack for the O-ring`, `- ${hm(75)} step: wrote the loop items from the 2D FAI`]);
+  note("e-stale", { title: "Old experiment nobody closed", type: "session", status: "live", started: at(4000) },
+    [`- ${hm(4000)} start: Old experiment nobody closed`]);
+  note("f-shipped", { title: "Share card for weekly stats", type: "session", status: "shipped", started: at(400), ended: at(310), source: "opencode", external: "ses_done1", folder: "E:/Projects/cairn", model: "Pega-Coding", tokens: 5300000, prompts: 11, turn: "done", turn_at: at(310), commits: 3 },
+    [`- ${hm(400)} start: Share card for weekly stats`, `- ${hm(310)} end: shipped · story and square cards render, share sheet opens on the phone`]);
+  note("g-cut", { title: "Leaderboard query", type: "session", status: "done", started: at(600), ended: at(560), source: "opencode", external: "ses_cut1", folder: "E:/Projects/cairn", model: "Pega-Thinking", tokens: 480000, prompts: 3, turn: "working", turn_at: at(560) },
+    [`- ${hm(600)} start: Leaderboard query`, `- ${hm(565)} prompt: rank by tokens, hours and streak`]);
+  s.notes = s.files.map((f) => core.noteFromFile(f.path, f.text, f.mtime));
+  window.cairn.rerender();
+}"""
+
+# A PC to chat with: remembers what was sent instead of running a model.
+CHAT_STUB = """() => {
+  const s = window.cairn.state;
+  window.__sent = [];
+  s.store.chat = async () => ({ available: true, models: ["Pega-Chat"], chats: [] });
+  s.store.chatAction = async (action, body) => {
+    window.__sent.push({ action, ...body });
+    return { id: "20261114-00000001", title: body.text, status: "idle", messages: [{ role: "user", text: body.text }] };
+  };
+  s.store.chatThread = async (id) => ({ id, title: "Chat", status: "idle", messages: [] });
+  window.cairn.rerender();
+}"""
+
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
 class EndToEndTests(unittest.TestCase):
@@ -643,6 +691,66 @@ class EndToEndTests(unittest.TestCase):
         self.assertGreater(page.locator(".ov-peek li").count(), 0)
         self.assertEqual(page.locator(".session-row").count(), page.locator(".ov-peek li").count())
         self.assertLessEqual(page.evaluate(overflow), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_live_recap_and_continue_from_a_session(self):
+        page = self.open()
+        self.go(page, "vibe")
+        page.evaluate(RECAP_SEED)
+        page.wait_for_selector(".vibe-recap .rc-row")
+
+        states = page.eval_on_selector_all(".rc-live > .rc-row", "nodes => nodes.map((n) => n.dataset.state)")
+        self.assertEqual(states, ["error", "waiting", "working", "quiet"])  # what needs you comes first
+        chips = page.eval_on_selector_all(".rc-chip", "nodes => nodes.map((n) => n.textContent.replace(/\\s+/g, ' ').trim())")
+        self.assertEqual(chips, ["1 stopped on an error", "1 waiting for you", "1 working", "2 quiet"])
+        working = '.rc-row[data-path="sessions/a-working.md"]'
+        waiting = '.rc-row[data-path="sessions/b-waiting.md"]'
+        self.assertEqual(page.inner_text(f"{working} .rc-state"), "Working")
+        self.assertEqual(page.inner_text(f"{working} .rc-model"), "Pega-Coding")
+        self.assertEqual(page.inner_text(f"{working} .rc-effort"), "high effort")
+        self.assertEqual(page.inner_text(f"{working} .rc-tokens"), "1.8M tokens")
+        self.assertEqual(page.inner_text(f"{waiting} .rc-state"), "Waiting for you")
+        self.assertIn("backs off 2, 4, 8 seconds", page.inner_text(f"{waiting} .rc-last.k-reply"))
+        self.assertIn("context length exceeded", page.inner_text('.rc-row[data-state="error"] .rc-last'))
+        self.assertIn("tokens in live sessions", page.inner_text(".vibe-recap > header"))
+
+        # A session nobody closed is folded away, not mixed in with the ones that are running.
+        self.assertEqual(page.locator("details.rc-fold .rc-row").count(), 1)
+        self.assertFalse(page.is_visible('.rc-row[data-path="sessions/e-stale.md"]'))
+        finished = page.eval_on_selector_all(".rc-finished .rc-state", "nodes => nodes.map((n) => n.innerText.trim())")
+        self.assertEqual(finished, ["Shipped", "Stopped mid-turn"])
+        self.assertIn("share sheet opens on the phone", page.inner_text('.rc-row[data-path="sessions/f-shipped.md"] .rc-last'))
+
+        # No PC to talk to: nothing to press. With one: continue what stopped, never what is still working.
+        self.assertEqual(page.locator(".rc-actions").count(), 0)
+        page.evaluate(CHAT_STUB)
+        page.wait_for_selector(f'{waiting} [data-action="vibe-continue"]')
+        self.assertEqual(page.locator(f'{working} [data-action="vibe-continue"]').count(), 0)
+        self.assertEqual(page.locator(f'{working} [data-action="vibe-newchat"]').count(), 1)
+        self.assertEqual(page.locator('.rc-row[data-path="sessions/d-quiet.md"] .rc-actions').count(), 0)
+
+        page.click(f'{waiting} [data-action="vibe-continue"]')
+        page.wait_for_function("() => window.cairn.state.view === 'chat'")
+        banner = page.inner_text('.chat-about[data-mode="continue"]')
+        self.assertIn("Fix the relay retry loop", banner)
+        self.assertIn("cairn", banner)
+        page.fill("#chat-input", "commit and push")
+        page.press("#chat-input", "Enter")
+        page.wait_for_function("() => window.__sent.length === 1")
+        sent = page.evaluate("window.__sent[0]")
+        self.assertEqual((sent["action"], sent["text"], sent["about"], sent["mode"]), ("send", "commit and push", "sessions/b-waiting.md", "continue"))
+        page.wait_for_selector(".chat-msg.user")
+        self.assertEqual(page.locator(".chat-about").count(), 0)  # said once; the chat carries on from here
+
+        self.go(page, "vibe")
+        page.click(f'{working} [data-action="vibe-newchat"]')
+        page.wait_for_selector('.chat-about[data-mode="new"]')
+        page.click('.chat-about [data-chat="plain"]')
+        page.wait_for_selector(".chat-about", state="detached")
+        page.fill("#chat-input", "just a question")
+        page.press("#chat-input", "Enter")
+        page.wait_for_function("() => window.__sent.length === 2")
+        self.assertNotIn("about", page.evaluate("window.__sent[1]"))
         self.assertEqual(self.errors, [])
 
     def test_feedback_capture_prefix(self):

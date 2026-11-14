@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -119,7 +120,40 @@ def delete(chat_id: str) -> None:
 # ============================================================ sending
 
 
-def send(chat_id: str, text: str, model: str = "") -> dict:
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,80}$")
+
+
+def about(brain, note_path: str, mode: str) -> dict:
+    """Where a chat started from a session note runs: that session's folder, and its OpenCode session to continue.
+
+    The page only names the note. The folder and session id are read from the note here, so a device
+    can never point a chat at a folder or session of its choosing.
+    """
+    from . import core
+
+    note_path = str(note_path or "").replace("\\", "/")
+    if brain is None or not note_path.startswith("sessions/") or not note_path.endswith(".md") or ".." in note_path.split("/"):
+        raise ValueError("that is not a session")
+    try:
+        file = brain.read(note_path)
+    except (OSError, ValueError) as error:
+        raise ValueError("that session is not on this PC") from error
+    note = core.note_from_file(note_path, file["text"], file["mtime"])
+    meta = note["meta"]
+    folder = str(meta.get("folder") or "").strip()
+    if not folder or not Path(folder).is_dir():
+        raise ValueError("that session's folder is not on this PC")
+    if mode != "continue":
+        return {"session": "", "folder": folder, "title": ""}
+    session = str(meta.get("external") or "").strip()
+    if meta.get("source") != "opencode" or session.startswith("batch-") or not SESSION_ID_RE.match(session):
+        raise ValueError("Cairn can only continue OpenCode sessions")
+    return {"session": session, "folder": folder, "title": str(note.get("title") or "")[:60]}
+
+
+def send(chat_id: str, text: str, model: str = "", session: str = "", folder: str = "", title: str = "") -> dict:
+    """`session`, `folder` and `title` only apply to a new chat (see `about`): continue that OpenCode
+    session, and run in that folder instead of the empty chat workspace."""
     text = text.strip()
     if not text:
         raise ValueError("type a message first")
@@ -135,9 +169,10 @@ def send(chat_id: str, text: str, model: str = "") -> dict:
             new_id = chat_id if chat_id and _path(chat_id) else f"{time.strftime('%Y%m%d')}-{secrets.token_hex(4)}"
             chat = {
                 "id": new_id,
-                "title": text.splitlines()[0][:60],
+                "title": title or text.splitlines()[0][:60],
                 "model": model,
-                "session": "",
+                "session": session,
+                "folder": folder,
                 "status": "idle",
                 "created": time.time(),
                 "messages": [],
@@ -160,8 +195,9 @@ def send(chat_id: str, text: str, model: str = "") -> dict:
         else:
             command += ["--title", chat["title"]]
         command.append(text)
+        started_in = chat.get("folder") or ""
         process = subprocess.Popen(
-            command, cwd=str(workspace()), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            command, cwd=started_in if started_in and Path(started_in).is_dir() else str(workspace()), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", **_no_window(),
         )
         _running[chat["id"]] = process

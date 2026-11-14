@@ -182,6 +182,34 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(thread["messages"][0]["text"], "anyone there?")
         self.assertIn("Couldn't run that", thread["messages"][1]["text"])
 
+    def test_phone_can_continue_a_session_named_by_its_note(self):
+        folder = tempfile.mkdtemp(dir=self.tmp.name).replace("\\", "/")
+        text = f"---\ntitle: Fix the relay\ntype: session\nsource: opencode\nexternal: ses_abc\nfolder: {folder}\n---\n"
+
+        class FakeBrain:
+            def read(self, path):
+                if path != "sessions/fix.md":
+                    raise FileNotFoundError(path)
+                return {"path": path, "text": text, "mtime": 1}
+
+        with_brain = relay.Relay(self.gh, brain=FakeBrain)  # a function returning the current brain works too
+        self.phone_sends("1700000000005-aa06", action="send", thread="20261111-00000005", text="carry on", about="sessions/fix.md", mode="continue")
+        with_brain.step()
+        continued = self.wait_idle("20261111-00000005")
+        self.assertEqual((continued["folder"], continued["title"]), (folder, "Fix the relay"))
+
+        # The phone names a note; a folder or session it sends itself is never used.
+        self.phone_sends("1700000000006-aa07", action="send", thread="20261111-00000006", text="hi", folder="C:/", session="ses_evil")
+        with_brain.step()
+        self.assertEqual(self.wait_idle("20261111-00000006").get("folder"), "")
+
+    def test_session_chat_is_refused_when_the_note_is_not_on_this_pc(self):
+        self.phone_sends("1700000000007-aa08", action="send", thread="20261111-00000007", text="carry on", about="sessions/fix.md", mode="continue")
+        self.relay.step()
+        thread = json.loads(self.gh.text("threads/20261111-00000007.json"))
+        self.assertIn("not a session", thread["error"])
+        self.assertIsNone(chat.load("20261111-00000007"), "nothing was run")
+
     def test_delete_removes_the_chat_everywhere(self):
         self.phone_sends("1700000000002-aa03", action="send", thread="20261111-00000002", text="hello")
         self.relay.step()

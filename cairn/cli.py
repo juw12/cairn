@@ -395,7 +395,7 @@ def cmd_relay(brain: Brain, args) -> int:
             return 0
         if args.relay_action == "run":
             config = relay.load_config()
-            relay.Relay(relay.connect(config), device=relay.device_of(config or {})).run()
+            relay.Relay(relay.connect(config), device=relay.device_of(config or {}), brain=brain).run()
             return 0
         config = relay.load_config()
         if not config:

@@ -2135,6 +2135,8 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
 .chat-list-toggle { display: none; }
 .chat-notice { margin: 10px 14px 0; padding: 8px 12px; border-radius: var(--radius); background: var(--danger-soft); color: var(--danger); font-size: 13px; }
 .chat-relay-status { margin: 6px 14px 0; font-size: 12px; }
+.chat-about { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 14px 0; padding: 8px 12px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2); font-size: 13px; }
+.chat-about p { flex: 1 1 240px; margin: 0; }
 .chat-relay-setup p { margin: 0 0 6px; }
 .chat-relay-setup ol { margin: 0 0 8px; padding-left: 20px; color: var(--text); }
 .chat-relay-setup li { margin: 2px 0; }

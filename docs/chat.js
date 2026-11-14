@@ -23,7 +23,7 @@ const canChat = () => direct() || Boolean(session());
 export const chatReady = () => canChat();
 const pollMs = () => (direct() ? 1000 : 4000);
 const chatState = () =>
-  state.chat || (state.chat = { list: null, models: [], available: true, current: "", thread: null, showList: false, pcSeen: 0, relayError: "", device: "", devices: [] });
+  state.chat || (state.chat = { list: null, models: [], available: true, current: "", thread: null, about: null, showList: false, pcSeen: 0, relayError: "", device: "", devices: [] });
 
 function savedModel(models) {
   const saved = localStorage.getItem(MODEL_KEY) || "";
@@ -106,6 +106,32 @@ function noticeHtml(c) {
     : `<div class="chat-relay-status muted">${where}</div>`);
 }
 
+// A chat started from a session on the Vibe page. Only the note's path is sent: the PC reads the
+// folder and the OpenCode session id from the note itself.
+function aboutHtml(c) {
+  if (!c.about || c.thread) return "";
+  const where = c.about.folder ? ` in <strong>${esc(c.about.folder)}</strong>` : "";
+  const lead = c.about.mode === "continue"
+    ? `Your next message continues <strong>${esc(c.about.title)}</strong>${where}.`
+    : `New chat${where}, next to <strong>${esc(c.about.title)}</strong>.`;
+  return `<div class="chat-about" data-mode="${esc(c.about.mode)}">
+    <p>${lead} <span class="muted">It runs in that project folder on your PC, so the model can read and change its files.</span></p>
+    <button type="button" class="btn sm ghost" data-chat="plain">Plain chat instead</button>
+  </div>`;
+}
+
+export function startChatAbout(path, mode) {
+  const note = state.notes.find((n) => n.path === path);
+  if (!note) return false;
+  const c = chatState();
+  const folder = String(note.meta.folder || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+  c.current = "";
+  c.thread = null;
+  c.showList = false;
+  c.about = { path, mode, title: note.title, folder };
+  return true;
+}
+
 export function chatView() {
   const c = chatState();
   if (!canChat()) {
@@ -131,7 +157,7 @@ export function chatView() {
           <select id="chat-model" class="chat-model" aria-label="Model" ${models.length ? "" : "disabled"}>${options || "<option>No models</option>"}</select>
           ${c.thread ? `<button type="button" class="btn sm ghost" data-chat="delete" aria-label="Delete chat" title="Delete chat">${icon("trash", "sm")}</button>` : ""}
         </header>
-        <div id="chat-notices">${noticeHtml(c)}</div>
+        <div id="chat-notices">${aboutHtml(c)}${noticeHtml(c)}</div>
         <div class="chat-log" id="chat-log">${logHtml(c.thread)}</div>
         <form class="chat-form" id="chat-form">
           <textarea id="chat-input" rows="1" placeholder="Message ${esc(model.split("/").pop() || "OpenCode")}…" ${c.available ? "" : "disabled"}></textarea>
@@ -167,7 +193,7 @@ function paint() {
   const title = $(".chat-title");
   if (title) title.textContent = c.thread?.title || "New chat";
   const notices = $("#chat-notices");
-  if (notices && !notices.contains(document.activeElement)) notices.innerHTML = noticeHtml(c);
+  if (notices && !notices.contains(document.activeElement)) notices.innerHTML = aboutHtml(c) + noticeHtml(c);
   const form = $("#chat-form");
   const running = c.thread?.status === "running";
   const button = form?.querySelector("button");
@@ -211,6 +237,7 @@ async function refreshList() {
 async function openChat(id) {
   const c = chatState();
   c.current = id;
+  c.about = null;
   c.showList = false;
   $(".chat-page")?.classList.remove("show-list");
   try {
@@ -229,10 +256,11 @@ function newChat() {
   const c = chatState();
   c.current = "";
   c.thread = null;
+  c.about = null;
   c.showList = false;
   $(".chat-page")?.classList.remove("show-list");
+  $("#chat-input")?.focus(); // first: paint() leaves the notices alone while focus is inside them
   paint();
-  $("#chat-input")?.focus();
 }
 
 async function sendMessage() {
@@ -244,7 +272,9 @@ async function sendMessage() {
   input.value = "";
   autoGrow(input);
   try {
-    c.thread = await api().chatAction("send", { id: c.current, text, model });
+    const about = !c.current && c.about ? { about: c.about.path, mode: c.about.mode } : {};
+    c.thread = await api().chatAction("send", { id: c.current, text, model, ...about });
+    c.about = null;
     c.current = c.thread.id;
     paint();
     const log = $("#chat-log");
@@ -292,7 +322,7 @@ export function wireChat() {
     const open = event.target.closest("[data-chat-open]");
     if (open) return openChat(open.dataset.chatOpen);
     const action = event.target.closest("[data-chat]")?.dataset.chat;
-    if (action === "new") return newChat();
+    if (action === "new" || action === "plain") return newChat();
     if (action === "toggle-list") {
       c.showList = !c.showList;
       page.classList.toggle("show-list", c.showList);

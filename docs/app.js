@@ -18,7 +18,7 @@ import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createM
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { startLiveSync } from "./live.js";
-import { chatView, glowView, wireChat } from "./chat.js";
+import { chatView, glowView, startChatAbout, wireChat } from "./chat.js";
 import { showShortcuts } from "./shortcuts.js";
 import { initVoiceLog, journalView, openLogSheet, syncLogFab, wireJournal } from "./voicelog.js";
 import { showWelcome } from "./welcome.js";
@@ -361,6 +361,8 @@ function wireGlobal() {
       "vibe-outcome": () => setVibeOutcome(actionEl.dataset.outcome),
       "vibe-overview": () => setOverviewOutcome(actionEl.dataset.outcome),
       "vibe-lane": () => jumpToLive(actionEl.dataset.path),
+      "vibe-continue": () => startChatAbout(actionEl.dataset.path, "continue") && setView("chat"),
+      "vibe-newchat": () => startChatAbout(actionEl.dataset.path, "new") && setView("chat"),
       "vibe-to-list": jumpToList,
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
       "ap-toggle": toggleEnabled,

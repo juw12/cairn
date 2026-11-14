@@ -297,8 +297,9 @@ class GitHub:
 
 
 class Relay:
-    def __init__(self, github: GitHub, chats=chat, clock=time.time, device: dict | None = None) -> None:
+    def __init__(self, github: GitHub, chats=chat, clock=time.time, device: dict | None = None, brain=None) -> None:
         self.gh = github
+        self.brain = brain  # a Brain, or a function returning the current one; needed to chat about a session
         self.device = device
         self.prefix = f"devices/{device['id']}/" if device else ""
         self.chats = chats
@@ -356,7 +357,11 @@ class Relay:
         if action == "send":
             text = str(request.get("text") or "")
             try:
-                self.chats.send(thread, text, str(request.get("model") or ""))
+                target = {}
+                if request.get("about"):
+                    brain = self.brain() if callable(self.brain) else self.brain
+                    target = chat.about(brain, str(request["about"]), str(request.get("mode") or ""))
+                self.chats.send(thread, text, str(request.get("model") or ""), **target)
                 self.answered[thread] = {"request": request_id}
             except ValueError as error:
                 self.answered[thread] = {"request": request_id, "error": str(error), "text": text}
@@ -503,7 +508,7 @@ def setup(repo: str = "", proxy: str = "", name: str = "") -> dict:
     return config
 
 
-def start_in_background(stop: threading.Event, log=print) -> threading.Thread | None:
+def start_in_background(stop: threading.Event, log=print, brain=None) -> threading.Thread | None:
     """For the desktop app: run the worker on a thread if the relay has been set up."""
     config = load_config()
     if not config or config.get("enabled") is False:
@@ -513,7 +518,7 @@ def start_in_background(stop: threading.Event, log=print) -> threading.Thread | 
         # Keep trying: at sign-in the network or the token store may not be ready yet.
         while not stop.is_set():
             try:
-                Relay(connect(config), device=device_of(config)).run(stop, log)
+                Relay(connect(config), device=device_of(config), brain=brain).run(stop, log)
                 return
             except (RelayError, OSError) as error:
                 log(f"relay: {error} (retrying in a minute)")

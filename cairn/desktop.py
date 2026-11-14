@@ -1116,7 +1116,8 @@ class DesktopApp:
             threading.Thread(target=loop, daemon=True).start()
         from . import relay
 
-        relay.start_in_background(self.stopping, log)  # chat from anywhere, once `cairn relay setup` was run
+        # chat from anywhere, once `cairn relay setup` was run
+        relay.start_in_background(self.stopping, log, brain=lambda: self.server.RequestHandlerClass.brain)
         from . import widget
 
         # iPhone widget: live sessions within seconds of a change, once `cairn widget pair` was run

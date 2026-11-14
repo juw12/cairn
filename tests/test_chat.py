@@ -43,9 +43,11 @@ class ChatTests(unittest.TestCase):
         self.env = mock.patch.dict(os.environ, {"CAIRN_HOME": self.tmp.name})
         self.env.start()
         self.commands = []
+        self.started_in = []
 
         def fake_popen(command, **kwargs):
             self.commands.append(command)
+            self.started_in.append(kwargs.get("cwd"))
             return FakeProcess(command, **kwargs)
 
         self.patches = [
@@ -106,6 +108,70 @@ class ChatTests(unittest.TestCase):
         chat.delete(thread["id"])
         self.assertIsNone(chat.load(thread["id"]))
         self.assertFalse((Path(self.tmp.name) / "chats" / f"{thread['id']}.json").exists())
+
+    def test_chat_started_from_a_session_continues_it_in_its_folder(self):
+        folder = tempfile.mkdtemp(dir=self.tmp.name)
+        started = chat.send("", "carry on", "", session="ses_abc", folder=folder, title="Fix the relay")
+        done = self.wait_idle(started["id"])
+        command = self.commands[0]
+        self.assertEqual(command[command.index("-s") + 1], "ses_abc")  # continues that OpenCode session
+        self.assertNotIn("--title", command)
+        self.assertEqual(self.started_in[0], folder)  # and runs in its repo, not the empty chat workspace
+        self.assertEqual((done["title"], done["folder"]), ("Fix the relay", folder))
+
+        chat.send(started["id"], "and again", "", session="ses_other", folder=self.tmp.name)
+        self.wait_idle(started["id"])
+        self.assertEqual(self.started_in[1], folder, "an existing chat keeps its own folder and session")
+        self.assertNotIn("ses_other", self.commands[1])
+
+    def test_plain_chat_still_runs_in_the_chat_workspace(self):
+        started = chat.send("", "hello", "")
+        self.wait_idle(started["id"])
+        self.assertEqual(self.started_in[0], str(chat.workspace()))
+
+    def test_about_reads_the_folder_and_session_from_the_note_only(self):
+        folder = tempfile.mkdtemp(dir=self.tmp.name).replace("\\", "/")
+
+        def session_note(**meta):
+            fields = {"title": "Fix the relay", "type": "session", "source": "opencode", "external": "ses_abc", "folder": folder}
+            fields.update(meta)
+            head = "\n".join(f"{key}: {value}" for key, value in fields.items() if value is not None)
+            return f"---\n{head}\n---\n\n## Log\n"
+
+        class FakeBrain:
+            notes = {
+                "sessions/ok.md": session_note(),
+                "sessions/vector.md": session_note(source=None, external=None),
+                "sessions/batch.md": session_note(external="batch-2026-11-14"),
+                "sessions/odd.md": session_note(external="ses abc; rm"),
+                "sessions/gone.md": session_note(folder=folder + "/missing"),
+                "notes/idea.md": session_note(),
+            }
+
+            def read(self, path):
+                if path not in self.notes:
+                    raise FileNotFoundError(path)
+                return {"path": path, "text": self.notes[path], "mtime": 1}
+
+        brain = FakeBrain()
+        self.assertEqual(chat.about(brain, "sessions/ok.md", "continue"), {"session": "ses_abc", "folder": folder, "title": "Fix the relay"})
+        self.assertEqual(chat.about(brain, "sessions/ok.md", "new"), {"session": "", "folder": folder, "title": ""})
+        self.assertEqual(chat.about(brain, "sessions/vector.md", "new")["folder"], folder)
+        refused = [
+            ("sessions/vector.md", "continue", "only continue OpenCode"),
+            ("sessions/batch.md", "continue", "only continue OpenCode"),
+            ("sessions/odd.md", "continue", "only continue OpenCode"),
+            ("sessions/gone.md", "new", "folder is not on this PC"),
+            ("sessions/nope.md", "continue", "not on this PC"),
+            ("notes/idea.md", "continue", "not a session"),
+            ("../sessions/ok.md", "new", "not a session"),
+            ("sessions/../notes/idea.md", "continue", "not a session"),
+        ]
+        for path, mode, reason in refused:
+            with self.subTest(path=path, mode=mode), self.assertRaisesRegex(ValueError, reason):
+                chat.about(brain, path, mode)
+        with self.assertRaisesRegex(ValueError, "not a session"):
+            chat.about(None, "sessions/ok.md", "continue")
 
 
 if __name__ == "__main__":

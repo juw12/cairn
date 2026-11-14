@@ -303,7 +303,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             chat_id = str(body.get("id", ""))
             if action == "send":
-                return self._send_json(chat.send(chat_id, str(body.get("text", "")), str(body.get("model", ""))))
+                # Started from a session on the Vibe page: continue it, or a new chat in its folder.
+                target = chat.about(self.brain, str(body["about"]), str(body.get("mode", ""))) if body.get("about") else {}
+                return self._send_json(chat.send(chat_id, str(body.get("text", "")), str(body.get("model", "")), **target))
             if action == "stop":
                 chat.stop(chat_id)
                 return self._send_json({"ok": True})

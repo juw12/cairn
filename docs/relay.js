@@ -169,7 +169,9 @@ export const relayStore = {
     if (action === "send") {
       const id = body.id || newChatId();
       const text = String(body.text || "").trim();
-      const request = makeRequest("send", id, { text, model: body.model || "" });
+      // `about` names a session note; the PC reads the folder and session to continue from it.
+      const about = body.about ? { about: String(body.about), mode: String(body.mode || "") } : {};
+      const request = makeRequest("send", id, { text, model: body.model || "", ...about });
       await postRequest(request);
       const known = waiting.get(id)?.thread || fetched.get(contentsUrl(`${base()}threads/${id}.json`))?.data || {
         id, title: text.split("\n")[0].slice(0, 60), model: body.model || "", messages: [],
