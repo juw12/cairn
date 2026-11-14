@@ -19,6 +19,8 @@ let pollTimer = null;
 const direct = () => typeof state.store?.chat === "function";
 const api = () => (direct() ? state.store : relayStore);
 const canChat = () => direct() || Boolean(session());
+// For other views: is there a PC to talk to (served by it, paired with it, or through the relay)?
+export const chatReady = () => canChat();
 const pollMs = () => (direct() ? 1000 : 4000);
 const chatState = () =>
   state.chat || (state.chat = { list: null, models: [], available: true, current: "", thread: null, showList: false, pcSeen: 0, relayError: "", device: "", devices: [] });
