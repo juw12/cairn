@@ -246,6 +246,7 @@ def _vibe_watch(brain: Brain, args) -> int:
         "everywhere": args.everywhere,
         "days": args.days,
         "idle_minutes": args.idle,
+        "last_reply": args.last_reply,
     }
     if args.vector_process:
         options["vector_names"] = tuple(args.vector_process)
@@ -254,6 +255,7 @@ def _vibe_watch(brain: Brain, args) -> int:
         extra += ["--everywhere"] if args.everywhere else []
         extra += ["--no-opencode"] if args.no_opencode else []
         extra += ["--no-vector"] if args.no_vector else []
+        extra += ["--last-reply"] if args.last_reply else []
         extra += [f"--vector-process={name}" for name in args.vector_process or []]
         try:
             target = watch.install_startup(brain, extra)
@@ -604,6 +606,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--idle", type=int, default=30, help="watch: minutes without activity before a session ends (default 30)")
     vibe_parser.add_argument("--days", type=int, default=14, help="watch: how far back to pick up OpenCode sessions (default 14)")
     vibe_parser.add_argument("--everywhere", action="store_true", help="watch: OpenCode sessions from every folder, not just this repo")
+    vibe_parser.add_argument("--last-reply", action="store_true", help="watch: also copy the closing reply of a finished OpenCode turn into its note (one short line), so you can read how it ended from your phone; off by default because notes sync")
     vibe_parser.add_argument("--no-opencode", action="store_true", help="watch: skip OpenCode")
     vibe_parser.add_argument("--no-vector", action="store_true", help="watch: skip Vector detection")
     vibe_parser.add_argument("--vector-process", action="append", help="watch: process name(s) that mean Vector is open (default Vector.exe)")

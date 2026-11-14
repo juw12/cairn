@@ -1,6 +1,7 @@
 """`cairn vibe watch`: OpenCode sessions read from its database, Vector detected from outside."""
 
 import io
+import json
 import os
 import shutil
 import sqlite3
@@ -24,6 +25,13 @@ FULL_COLUMNS = (
     "time_created integer, time_updated integer, time_archived integer, model text, cost real"
 )
 OLD_COLUMNS = "id text primary key, parent_id text, directory text, title text, time_created integer, time_updated integer"
+# OpenCode 2.2: the tables became session_v2 and session_message, with tokens and typed messages.
+V2_COLUMNS = (
+    "id text primary key, parent_id text, directory text, title text, time_created integer, time_updated integer, "
+    "time_archived integer, summary_additions integer, summary_deletions integer, summary_files integer, "
+    "model text, cost real, tokens_input integer, tokens_output integer, tokens_reasoning integer, "
+    "tokens_cache_read integer, tokens_cache_write integer, idle_outcome text"
+)
 
 
 def make_db(path: Path, rows: list[dict], columns: str = FULL_COLUMNS, messages: dict | None = None) -> Path:
@@ -41,6 +49,31 @@ def make_db(path: Path, rows: list[dict], columns: str = FULL_COLUMNS, messages:
         for number, stamp in enumerate((messages or {}).get(row["id"], [])):
             connection.execute(
                 "insert into message values (?, ?, ?, ?)", (f"{row['id']}-{number}", row["id"], stamp, "SECRET PROMPT TEXT"),
+            )
+    connection.commit()
+    connection.close()
+    return path
+
+
+def make_v2_db(path: Path, rows: list[dict], messages: dict | None = None) -> Path:
+    """An OpenCode 2.2 database. `messages` maps a session id to (time, type, data) in order."""
+    connection = sqlite3.connect(path)
+    connection.execute(f"create table session_v2 ({V2_COLUMNS})")
+    connection.execute(
+        "create table session_message (id text, session_id text, type text, seq integer, time_created integer, "
+        "time_updated integer, data text)"
+    )
+    names = [part.split()[0] for part in V2_COLUMNS.split(", ")]
+    for row in rows:
+        keys = [k for k in row if k in names]
+        connection.execute(
+            f"insert into session_v2 ({', '.join(keys)}) values ({', '.join('?' for _ in keys)})",
+            [row[k] for k in keys],
+        )
+        for number, (stamp, kind, data) in enumerate((messages or {}).get(row["id"], [])):
+            connection.execute(
+                "insert into session_message values (?, ?, ?, ?, ?, ?, ?)",
+                (f"{row['id']}-{number}", row["id"], kind, number, stamp, stamp, json.dumps(data)),
             )
     connection.commit()
     connection.close()
@@ -271,6 +304,173 @@ class OpenCodeTests(unittest.TestCase):
         # Active time, not end minus start: 15 and 20 minutes, side by side, so 20 on the clock.
         self.assertEqual(stats["agent_minutes"], 15 + 20)
         self.assertEqual(stats["minutes"], 20)
+
+
+class OpenCodeV2Tests(unittest.TestCase):
+    """OpenCode 2.2 and later: tokens, effort, typed messages, and scripted runs."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "repo"
+        self.root.mkdir()
+        self.brain = Brain(self.root)
+        self.brain.init()
+        self.now = int(time.time() * 1000)
+        self.db = Path(self.tmp.name) / "opencode.db"
+        # Noon yesterday: a fixed point well inside one calendar day, whenever the tests run.
+        yesterday = time.localtime(self.now / 1000 - 86_400)
+        self.noon = int(time.mktime((yesterday.tm_year, yesterday.tm_mon, yesterday.tm_mday, 12, 0, 0, 0, 0, -1))) * 1000
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def row(self, ident, title, started_min_ago, **extra):
+        row = {
+            "id": ident, "title": title, "directory": str(self.root),
+            "time_created": self.now - started_min_ago * MINUTE, "time_updated": self.now,
+            "summary_additions": 0, "summary_deletions": 0, "summary_files": 0, "cost": 0.0,
+            "model": '{"id": "big-model", "providerID": "acme", "variant": "high"}',
+            "tokens_input": 0, "tokens_output": 0, "tokens_reasoning": 0, "tokens_cache_read": 0, "tokens_cache_write": 0,
+            "idle_outcome": "succeeded",
+        }
+        row.update(extra)
+        return row
+
+    def turn(self, *minutes_ago, reply="SECRET REPLY TEXT", finished=True, outcome="succeeded"):
+        """One prompt and its reply at the given times (minutes ago), then the idle marker when `finished`."""
+        asked, replied, *rest = minutes_ago
+        chat = [
+            (self.now - asked * MINUTE, "user", {"text": "SECRET PROMPT TEXT"}),
+            (self.now - replied * MINUTE, "assistant", {
+                "model": {"id": "small-model", "providerID": "acme", "variant": "low"},
+                "content": [{"type": "reasoning", "text": "SECRET THINKING"}, {"type": "text", "text": reply}],
+            }),
+        ]
+        if finished:
+            chat.append((self.now - (rest[0] if rest else replied) * MINUTE, "idle", {"outcome": outcome}))
+        return chat
+
+    def sync(self, **options):
+        return watch.watch_once(self.brain, vector=False, now_ms=self.now, db_path=self.db, git="definitely-not-git", **options)
+
+    def notes(self):
+        return {n["meta"]["external"]: n for n in sessions(self.brain)}
+
+    def text(self, note):
+        return self.brain.read(note["path"])["text"]
+
+    def test_new_tables_give_model_effort_tokens_and_where_the_turn_stands(self):
+        make_v2_db(self.db, [
+            self.row("ses_wait", "Waiting for me", 60, tokens_input=1000, tokens_output=200, tokens_reasoning=300, tokens_cache_read=5000),
+            self.row("ses_busy", "Still working", 20),
+            self.row("ses_fail", "Broke", 300, idle_outcome="failed"),
+            self.row("ses_cut", "Cut off", 300),
+        ], messages={
+            "ses_wait": self.turn(60, 50) + self.turn(10, 5),
+            "ses_busy": self.turn(20, 2, finished=False),
+            "ses_fail": self.turn(300, 200, outcome="failed"),
+            "ses_cut": self.turn(300, 200, finished=False),
+        })
+        self.sync()
+        notes = self.notes()
+        self.assertEqual(set(notes), {"ses_wait", "ses_busy", "ses_fail", "ses_cut"})
+        waiting = notes["ses_wait"]["meta"]
+        self.assertEqual(notes["ses_wait"]["status"], "live")
+        self.assertEqual((waiting["model"], waiting["effort"]), ("big-model", "high"))
+        # Read and written, reasoning included; what the cache served is kept apart.
+        self.assertEqual((waiting["tokens"], waiting["tokens_in"], waiting["tokens_out"], waiting["tokens_cache"]), ("1500", "1000", "500", "5000"))
+        self.assertEqual((waiting["prompts"], waiting["turn"]), ("2", "done"))
+        self.assertIn("turn finished, waiting for you", self.text(notes["ses_wait"]))
+        self.assertEqual(notes["ses_busy"]["meta"]["turn"], "working")
+        self.assertNotIn("tokens", notes["ses_busy"]["meta"])
+        self.assertEqual((notes["ses_fail"]["status"], notes["ses_fail"]["meta"]["turn"]), ("done", "failed"))
+        self.assertIn("last turn stopped with an error", self.text(notes["ses_fail"]))
+        self.assertEqual((notes["ses_cut"]["status"], notes["ses_cut"]["meta"]["turn"]), ("done", "working"))
+        self.assertIn("stopped mid-turn", self.text(notes["ses_cut"]))
+        for note in notes.values():
+            self.assertNotIn("SECRET", self.text(note))
+        self.assertEqual(self.sync(), [], "a second pass rewrites nothing")
+
+    def test_model_comes_from_the_last_reply_when_the_session_has_none(self):
+        make_v2_db(self.db, [self.row("ses_a", "No model on the row", 300, model=None)], messages={"ses_a": self.turn(300, 200)})
+        self.sync()
+        note = self.notes()["ses_a"]
+        self.assertEqual((note["meta"]["model"], note["meta"]["effort"]), ("small-model", "low"))
+        self.assertNotIn("SECRET", self.text(note))
+
+    def test_subagent_tokens_count_toward_the_conversation_that_started_them(self):
+        make_v2_db(self.db, [
+            self.row("ses_parent", "Survey", 300, tokens_input=100, tokens_output=10),
+            self.row("ses_child", "Sub task", 290, parent_id="ses_parent", tokens_input=50, tokens_output=5, tokens_reasoning=5),
+            self.row("ses_grandchild", "Sub sub task", 280, parent_id="ses_child", tokens_input=7, tokens_cache_read=40),
+        ], messages={"ses_parent": self.turn(300, 200)})
+        self.sync()
+        [note] = sessions(self.brain)
+        self.assertEqual((note["meta"]["tokens"], note["meta"]["tokens_cache"]), ("177", "40"))
+
+    def test_the_closing_reply_is_copied_only_when_asked(self):
+        long_reply = "All 12 tests pass.  " + "Done and pushed. " * 40
+        make_v2_db(self.db, [self.row("ses_a", "Fix the build", 30)], messages={"ses_a": self.turn(30, 5, reply=long_reply)})
+        self.sync()
+        note = self.notes()["ses_a"]
+        self.assertNotIn("Last reply", self.text(note))
+        self.assertNotIn("tests pass", self.text(note))
+        self.sync(last_reply=True)
+        text = self.text(self.notes()["ses_a"])
+        reply = text.split("## Last reply")[1].strip()
+        self.assertTrue(reply.startswith("> All 12 tests pass. Done and pushed."), reply)
+        self.assertLessEqual(len(reply), watch.REPLY_CHARS + 2)
+        self.assertNotIn("SECRET", text)  # the prompt and the reasoning stay out even then
+        self.assertEqual([e["kind"] for e in core.session_log(text)], ["start", "note", "note"])
+
+    def test_a_script_firing_one_prompt_chats_becomes_one_note_a_day(self):
+        def run(number, minute):
+            start = self.noon + minute * MINUTE
+            row = self.row(f"ses_run{number}", f"Run {number}", 0, time_created=start, time_updated=start, tokens_input=100, tokens_output=10,
+                           idle_outcome="failed" if number == 4 else "succeeded")
+            chat = [
+                (start, "user", {"text": "SECRET PROMPT TEXT"}),
+                (start + MINUTE, "assistant", {"content": [{"type": "text", "text": "SECRET REPLY TEXT"}]}),
+                (start + MINUTE, "idle", {"outcome": row["idle_outcome"]}),
+            ]
+            return row, chat
+
+        def build(count):
+            self.db.unlink(missing_ok=True)
+            runs = [run(number, number * 2) for number in range(count)]
+            talk = self.row("ses_talk", "A real conversation", 0, time_created=self.noon, time_updated=self.noon)
+            chat = [(self.noon + m * MINUTE, kind, {}) for m, kind in ((0, "user"), (1, "assistant"), (2, "idle"), (3, "user"), (4, "assistant"), (5, "idle"))]
+            make_v2_db(self.db, [row for row, _ in runs] + [talk], messages={**{row["id"]: chat for row, chat in runs}, "ses_talk": chat})
+
+        build(3)  # three quick chats are just three chats
+        self.sync()
+        self.assertEqual(set(self.notes()), {"ses_run0", "ses_run1", "ses_run2", "ses_talk"})
+        build(25)  # the same folder, the same day, now plainly a script
+        self.sync()
+        notes = self.notes()
+        [batch_id] = [ident for ident in notes if ident.startswith("batch-")]
+        self.assertEqual(set(notes), {"ses_run0", "ses_run1", "ses_run2", "ses_talk", batch_id}, "notes already written are kept")
+        batch = notes[batch_id]
+        self.assertEqual(batch["title"], "repo: automated runs")
+        self.assertEqual((batch["meta"]["runs"], batch["meta"]["prompts"], batch["meta"]["tokens"]), ("22", "22", str(22 * 110)))
+        self.assertEqual(batch["status"], "done")
+        self.assertIn("22 automated runs (1 stopped with an error)", self.text(batch))
+        self.assertNotIn("SECRET", self.text(batch))
+        self.assertEqual(self.sync(), [], "a second pass rewrites nothing")
+        stats = core.vibe_stats(self.brain.notes(), time.strftime("%Y-%m-%d"))
+        self.assertEqual(stats["sessions"], 5)
+
+    def test_the_watcher_command_takes_last_reply(self):
+        make_v2_db(self.db, [self.row("ses_a", "Fix the build", 30)], messages={"ses_a": self.turn(30, 5, reply="Build is green.")})
+        out = io.StringIO()
+        os.environ["CAIRN_OPENCODE_DB"] = str(self.db)
+        try:
+            with redirect_stdout(out), redirect_stderr(out):
+                code = main(["--root", str(self.root), "vibe", "watch", "--once", "--no-vector", "--last-reply"])
+        finally:
+            del os.environ["CAIRN_OPENCODE_DB"]
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("> Build is green.", self.text(self.notes()["ses_a"]))
 
 
 class StartupTests(unittest.TestCase):

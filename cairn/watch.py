@@ -3,9 +3,12 @@
 Two sources, both read-only and both optional:
 
 * **OpenCode** keeps every chat in a local SQLite database. We read only the session table (title,
-  folder, model, cost) and message timestamps, never message text. Each OpenCode session becomes one
-  session note, kept in sync on every pass. OpenCode does not record what a session changed, so when
-  the session's folder is a git repo, commits made there while the session ran are the evidence.
+  folder, model, tokens, cost) and message timestamps and types, never message text, unless you switch
+  on `--last-reply`: then the closing reply of a finished turn is copied in, cut to one short line.
+  Each OpenCode session becomes one session note, kept in sync on every pass; a script that starts
+  hundreds of one-prompt chats a day becomes one note per folder per day. OpenCode does not record what
+  a session changed, so when the session's folder is a git repo, commits made there while the session
+  ran are the evidence.
 * **Vector** (or any desktop assistant whose chats we cannot read) is detected from the outside: the
   app's process is running *and* the repo changes. That opens a live session, new commits are logged as
   they land, and the session ends when the app closes or the repo goes quiet.
@@ -41,6 +44,12 @@ EVERY_SECONDS = 60
 VECTOR_PROCESSES = ("Vector.exe", "Vector")
 STARTUP_NAME = "Cairn vibe watch.vbs"
 CLAIM_STALE_SECONDS = 5 * 60  # a watcher that has not checked in for this long has stopped
+SESSION_TABLES = ("session_v2", "session")  # OpenCode 2.2 renamed its tables; newest first
+MESSAGE_TABLES = ("session_message", "message")
+TOKEN_COLUMNS = ("tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read", "tokens_cache_write")
+QUIET_TYPES = ("model-switched", "agent-switched", "system")  # bookkeeping messages: not a turn starting or ending
+BATCH_RUNS = 20  # this many one-prompt runs in one folder in one day is a script, not a person
+REPLY_CHARS = 280
 
 
 class WatchError(RuntimeError):
@@ -112,42 +121,101 @@ def _model_name(value) -> str:
     return _one_line(parsed)[:60]
 
 
+def _connect(db_path: Path) -> sqlite3.Connection:
+    """The OpenCode database, opened read-only."""
+    uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
+    try:
+        return sqlite3.connect(uri, uri=True, timeout=5)
+    except sqlite3.Error as error:
+        raise WatchError(f"Could not open the OpenCode database: {error}") from error
+
+
+def _table(connection: sqlite3.Connection, names: tuple[str, ...], needed: set[str]) -> tuple[str, set[str]]:
+    """The first of `names` that exists with the `needed` columns, and all its columns.
+    OpenCode renamed its tables in 2.2 (session -> session_v2, message -> session_message)."""
+    for name in names:
+        columns = {row[1] for row in connection.execute(f"pragma table_info({name})")}
+        if needed <= columns:
+            return name, columns
+    return "", set()
+
+
+def _model_effort(value) -> str:
+    """The reasoning effort OpenCode stores next to the model (its "variant"), when there is one."""
+    try:
+        parsed = json.loads(str(value or ""))
+    except ValueError:
+        return ""
+    if isinstance(parsed, dict):
+        return _one_line(parsed.get("variant") or parsed.get("effort") or "")[:30]
+    return ""
+
+
+def _tokens(record: dict) -> dict:
+    """Tokens of one session row: what went in, what came out (reasoning included), what the cache served."""
+    return {
+        "in": int(record.get("tokens_input") or 0),
+        "out": int(record.get("tokens_output") or 0) + int(record.get("tokens_reasoning") or 0),
+        "cache": int(record.get("tokens_cache_read") or 0) + int(record.get("tokens_cache_write") or 0),
+    }
+
+
+def _turn(last_type: str, outcome) -> str:
+    """Where the conversation stands, from the type of its last message: OpenCode writes an `idle`
+    message when a turn ends. "" when the database does not record message types."""
+    if not last_type:
+        return ""
+    if last_type != "idle":
+        return "working"
+    return "failed" if str(outcome or "") == "failed" else "done"
+
+
 def read_opencode(db_path: Path, since_ms: int, only_inside: str = "") -> list[dict]:
     """Top-level OpenCode sessions active since `since_ms` (subagent runs are counted, not listed).
 
-    Opens the database read-only and selects only session-table columns: no prompts, no replies."""
+    Opens the database read-only and selects only session-table columns and message times and types:
+    no prompts, no replies."""
     if not db_path.is_file():
         return []
-    uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
+    connection = _connect(db_path)
     try:
-        connection = sqlite3.connect(uri, uri=True, timeout=5)
-    except sqlite3.Error as error:
-        raise WatchError(f"Could not open the OpenCode database: {error}") from error
-    try:
-        columns = {row[1] for row in connection.execute("pragma table_info(session)")}
-        if not {"id", "title", "time_created", "time_updated"} <= columns:
+        table, columns = _table(connection, SESSION_TABLES, {"id", "title", "time_created", "time_updated"})
+        if not table:
             return []
         wanted = [
             "id", "parent_id", "title", "directory", "time_created", "time_updated", "time_archived",
-            "summary_additions", "summary_deletions", "summary_files", "model", "cost",
+            "summary_additions", "summary_deletions", "summary_files", "model", "cost", "idle_outcome",
+            *TOKEN_COLUMNS,
         ]
         present = [name for name in wanted if name in columns]
         rows = connection.execute(
-            f"select {', '.join(present)} from session where time_updated >= ? order by time_created",
+            f"select {', '.join(present)} from {table} where time_updated >= ? order by time_created",
             (since_ms,),
         ).fetchall()
         records = [dict(zip(present, row)) for row in rows]
-        activity = _message_times(connection, [str(r["id"]) for r in records if not r.get("parent_id")])
+        activity = _message_activity(connection, [str(r["id"]) for r in records if not r.get("parent_id")])
     except sqlite3.Error as error:
         raise WatchError(f"Could not read OpenCode sessions: {error}") from error
     finally:
         connection.close()
 
+    has_tokens = "tokens_input" in columns
+    parents = {str(r["id"]): str(r["parent_id"]) for r in records if r.get("parent_id")}
     subagents: dict[str, int] = {}
+    tokens: dict[str, dict] = {}
     for record in records:
         parent = record.get("parent_id")
         if parent:
             subagents[parent] = subagents.get(parent, 0) + 1
+        # A subagent burns its own tokens; they belong to the conversation that started it.
+        root = str(record["id"])
+        for _ in range(20):
+            if root not in parents:
+                break
+            root = parents[root]
+        total = tokens.setdefault(root, {"in": 0, "out": 0, "cache": 0})
+        for key, amount in _tokens(record).items():
+            total[key] += amount
     sessions = []
     for record in records:
         if record.get("parent_id") or record.get("time_archived"):
@@ -155,7 +223,8 @@ def read_opencode(db_path: Path, since_ms: int, only_inside: str = "") -> list[d
         directory = str(record.get("directory") or "")
         if only_inside and not _inside(directory, only_inside):
             continue
-        stamps = activity.get(str(record["id"]), [])
+        seen = activity.get(str(record["id"]), {})
+        stamps = seen.get("times", [])
         sessions.append({
             "id": str(record["id"]),
             "title": _one_line(record.get("title")) or "OpenCode session",
@@ -170,29 +239,174 @@ def read_opencode(db_path: Path, since_ms: int, only_inside: str = "") -> list[d
             "removed": int(record.get("summary_deletions") or 0),
             "files": int(record.get("summary_files") or 0),
             "model": _model_name(record.get("model")),
+            "effort": _model_effort(record.get("model")),
             "cost": float(record.get("cost") or 0),
+            "tokens": tokens.get(str(record["id"])) if has_tokens else None,
+            "prompts": seen.get("prompts"),
+            "turn": _turn(seen.get("last", ""), record.get("idle_outcome")),
             "subagents": subagents.get(str(record["id"]), 0),
             "commits": 0,
         })
     return sessions
 
 
-def _message_times(connection: sqlite3.Connection, session_ids: list[str]) -> dict[str, list[int]]:
-    """Message timestamps per session (timestamps only; message content is never selected)."""
-    columns = {row[1] for row in connection.execute("pragma table_info(message)")}
-    if not session_ids or not {"session_id", "time_created"} <= columns:
+def _message_activity(connection: sqlite3.Connection, session_ids: list[str]) -> dict[str, dict]:
+    """Per session: message `times` (sorted), and where the table records message types, how many
+    `prompts` you sent and the `last` message type. Message content is never selected."""
+    table, columns = _table(connection, MESSAGE_TABLES, {"session_id", "time_created"})
+    if not session_ids or not table:
         return {}
-    times: dict[str, list[int]] = {}
+    typed = "type" in columns
+    order = "seq" if "seq" in columns else "time_created"
+    seen: dict[str, dict] = {}
     for start in range(0, len(session_ids), 500):
         chunk = session_ids[start:start + 500]
         query = (
-            f"select session_id, time_created from message where session_id in ({','.join('?' for _ in chunk)}) "
-            "order by session_id, time_created"
+            f"select session_id, time_created, {'type' if typed else 'null'} from {table} "
+            f"where session_id in ({','.join('?' for _ in chunk)}) order by session_id, {order}"
         )
-        for session_id, created in connection.execute(query, chunk):
+        for session_id, created, kind in connection.execute(query, chunk):
+            entry = seen.setdefault(str(session_id), {"times": [], "prompts": 0 if typed else None, "last": ""})
             if created is not None:
-                times.setdefault(str(session_id), []).append(int(created))
-    return times
+                entry["times"].append(int(created))
+            if kind == "user":
+                entry["prompts"] += 1
+            if typed and kind not in QUIET_TYPES:
+                entry["last"] = str(kind or "")
+    for entry in seen.values():
+        entry["times"].sort()
+    return seen
+
+
+def _folder_label(directory: str) -> str:
+    return Path(str(directory).replace("\\", "/")).name or "OpenCode"
+
+
+def rollup_batches(sessions: list[dict], keep_ids=(), threshold: int = BATCH_RUNS) -> list[dict]:
+    """Fold scripted one-prompt runs into one session per folder per day.
+
+    A loop that starts a fresh one-prompt chat hundreds of times a day would otherwise bury the page (and
+    the brain) in notes. A folder counts as scripted once it has `threshold` such runs in a single day;
+    from then on its one-prompt runs are summed into a daily "automated runs" session, so their time and
+    tokens still count. Runs that already have a note (`keep_ids`) and real conversations are left alone."""
+    keep = set(keep_ids)
+
+    def short(session: dict) -> bool:
+        return session.get("prompts") is not None and session["prompts"] <= 1 and not session["subagents"]
+
+    per_day: dict[tuple[str, str], int] = {}
+    for session in sessions:
+        if short(session):
+            key = (_norm_dir(session["directory"]), _day(session["created"]))
+            per_day[key] = per_day.get(key, 0) + 1
+    scripted = {folder for (folder, _), count in per_day.items() if count >= threshold}
+    if not scripted:
+        return sessions
+    kept, groups = [], {}
+    for session in sessions:
+        folder = _norm_dir(session["directory"])
+        if folder in scripted and short(session) and session["id"] not in keep:
+            groups.setdefault((folder, _day(session["created"])), []).append(session)
+        else:
+            kept.append(session)
+    for (folder, day), members in groups.items():
+        kept.append(_batch_session(folder, day, members))
+    return sorted(kept, key=lambda session: session["created"])
+
+
+def _batch_session(folder: str, day: str, members: list[dict]) -> dict:
+    latest = max(members, key=lambda session: session["updated"])
+    pieces = sorted((start, start + minutes * 60_000) for member in members for start, minutes in member["spans"])
+    merged: list[list[int]] = []
+    for start, end in pieces:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    spans = [(start, max(1, round((end - start) / 60_000))) for start, end in merged]
+    models: dict[str, int] = {}
+    for member in members:
+        if member["model"]:
+            models[member["model"]] = models.get(member["model"], 0) + 1
+    model = max(models, key=models.get) if models else ""
+    counted = [member["tokens"] for member in members if member.get("tokens")]
+    return {
+        "id": f"batch-{hashlib.sha1(folder.encode('utf-8')).hexdigest()[:10]}-{day}",
+        "title": f"{_folder_label(latest['directory'])}: automated runs",
+        "directory": latest["directory"],
+        "created": min(member["created"] for member in members),
+        "updated": latest["updated"],
+        "minutes": sum(minutes for _, minutes in spans) if spans else None,
+        "spans": spans,
+        "messages": sum(member["messages"] for member in members),
+        "added": sum(member["added"] for member in members),
+        "removed": sum(member["removed"] for member in members),
+        "files": sum(member["files"] for member in members),
+        "model": model,
+        "effort": next((member["effort"] for member in members if member["model"] == model and member["effort"]), ""),
+        "cost": sum(member["cost"] for member in members),
+        "tokens": {key: sum(tokens[key] for tokens in counted) for key in ("in", "out", "cache")} if counted else None,
+        "prompts": sum(member["prompts"] or 0 for member in members),
+        "turn": latest["turn"],
+        "subagents": 0,
+        "commits": 0,
+        "runs": len(members),
+        "failed_runs": sum(1 for member in members if member["turn"] == "failed"),
+        "lookup": latest["id"],
+    }
+
+
+def attach_details(db_path: Path, sessions: list[dict], last_reply: bool = False) -> None:
+    """Fill in what the session table leaves out, for the sessions about to be written.
+
+    The model and effort are read from the last reply's metadata when the session row has none. Only
+    with `last_reply` switched on is any message text read: the closing reply of a finished turn,
+    cut to one short line, so you can see how a session ended from another device."""
+    wanted = [s for s in sessions if not s.get("model") or (last_reply and s.get("turn") in ("done", "failed") and not s.get("runs"))]
+    if not wanted or not db_path.is_file():
+        return
+    try:
+        connection = _connect(db_path)
+    except WatchError:
+        return
+    try:
+        table, columns = _table(connection, MESSAGE_TABLES, {"session_id", "type", "seq", "data"})
+        if not table:
+            return
+        for session in wanted:
+            ident = session.get("lookup") or session["id"]
+            if not session.get("model"):
+                row = connection.execute(
+                    f"select json_extract(data, '$.model.id'), json_extract(data, '$.model.variant') from {table} "
+                    "where session_id = ? and type = 'assistant' order by seq desc limit 1", (ident,),
+                ).fetchone()
+                if row and row[0]:
+                    session["model"] = _one_line(row[0])[:60]
+                    session["effort"] = _one_line(row[1] or "")[:30]
+            if last_reply and session.get("turn") in ("done", "failed") and not session.get("runs"):
+                rows = connection.execute(
+                    f"select data from {table} where session_id = ? and type = 'assistant' order by seq desc limit 5",
+                    (ident,),
+                ).fetchall()
+                session["reply"] = next((text for text in (_reply_text(data) for (data,) in rows) if text), "")
+    except sqlite3.Error:
+        return  # details are a bonus: the session itself is still written
+    finally:
+        connection.close()
+
+
+def _reply_text(data) -> str:
+    """The last piece of text in one assistant message, on one line and cut to REPLY_CHARS."""
+    try:
+        content = json.loads(str(data or "")).get("content") or []
+    except (ValueError, AttributeError):
+        return ""
+    for part in reversed(content if isinstance(content, list) else []):
+        if isinstance(part, dict) and part.get("type") == "text":
+            text = _one_line(part.get("text"))
+            if text:
+                return text if len(text) <= REPLY_CHARS else text[:REPLY_CHARS - 1].rstrip() + "…"
+    return ""
 
 
 def active_minutes(stamps: list[int], gap_minutes: int = ACTIVE_GAP_MINUTES) -> int:
@@ -310,6 +524,22 @@ def _opencode_note(session: dict, status: str) -> tuple[dict, str]:
         meta["git"] = "no"  # no commit evidence either way: the folder is not a git repo
     if session["cost"] > 0:
         meta["cost"] = f"{session['cost']:.2f}"
+    if session.get("effort"):
+        meta["effort"] = session["effort"]
+    tokens = session.get("tokens")
+    if tokens and (tokens["in"] or tokens["out"] or tokens["cache"]):
+        meta["tokens"] = str(tokens["in"] + tokens["out"])  # what the model read and wrote; cached context is extra
+        meta["tokens_in"] = str(tokens["in"])
+        meta["tokens_out"] = str(tokens["out"])
+        meta["tokens_cache"] = str(tokens["cache"])
+    if session.get("prompts"):
+        meta["prompts"] = str(session["prompts"])
+    turn = session.get("turn", "")
+    if turn:
+        meta["turn"] = turn
+        meta["turn_at"] = _stamp(session["updated"])
+    if session.get("runs"):
+        meta["runs"] = str(session["runs"])
     lines = [f"- {_clock(session['created'])} start: {session['title']} (OpenCode{', ' + session['model'] if session['model'] else ''})"]
     if session.get("messages"):
         lines.append(f"- {_clock(session['updated'])} note: {session['messages']} messages, about {session['minutes']} min of activity")
@@ -319,6 +549,13 @@ def _opencode_note(session: dict, status: str) -> tuple[dict, str]:
         lines.append(f"- {_clock(session['updated'])} note: {session['files']} files changed, +{session['added']} −{session['removed']}")
     if session.get("commits"):
         lines.append(f"- {_clock(session['updated'])} note: {session['commits']} commit{'s' if session['commits'] != 1 else ''} in this folder while it ran")
+    if session.get("runs"):
+        failed = session.get("failed_runs", 0)
+        lines.append(f"- {_clock(session['updated'])} note: {session['runs']} automated runs{f' ({failed} stopped with an error)' if failed else ''}")
+    elif status == "live" and turn == "done":
+        lines.append(f"- {_clock(session['updated'])} note: turn finished, waiting for you")
+    elif status == "live" and turn == "failed":
+        lines.append(f"- {_clock(session['updated'])} note: turn stopped with an error")
     if status != "live":
         if status in ("shipped", "partial"):
             outcome = "code changed"
@@ -326,8 +563,16 @@ def _opencode_note(session: dict, status: str) -> tuple[dict, str]:
             outcome = "no commits in its folder"
         else:
             outcome = "no commits seen (folder is not a git repo)"
+        if session.get("runs"):
+            pass
+        elif turn == "failed":
+            outcome += ", last turn stopped with an error"
+        elif turn == "working":
+            outcome += ", stopped mid-turn (no finish recorded)"
         lines.append(f"- {_clock(session['updated'])} end: {status}: auto-detected, {outcome}")
     body = f"## Goal\n\n{session['title']}\n\n## Log\n\n" + "\n".join(lines) + "\n"
+    if session.get("reply"):
+        body += f"\n## Last reply\n\n> {session['reply']}\n"
     return meta, body
 
 
@@ -561,15 +806,17 @@ def sync_vector(brain: Brain, running: bool, now_ms: int, idle_minutes: int = ID
 def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, everywhere: bool = False,
                days: int = DAYS, idle_minutes: int = IDLE_MINUTES, now_ms: int | None = None,
                vector_names=VECTOR_PROCESSES, db_path: Path | None = None, running: bool | None = None,
-               git: str | None = None) -> list[str]:
+               git: str | None = None, last_reply: bool = False) -> list[str]:
     """One pass over every source. Returns human-readable lines describing what changed."""
     now_ms = _now_ms() if now_ms is None else now_ms
     messages = []
     if opencode:
         path = db_path or opencode_db_path()
         sessions = read_opencode(path, now_ms - days * 86_400_000, "" if everywhere else str(brain.root))
+        sessions = rollup_batches(sessions, _external_index(brain, "opencode"))
         pending = needs_refresh(brain, sessions, now_ms, idle_minutes)
         attach_commits(pending, git)
+        attach_details(path, pending, last_reply)
         counts = sync_opencode(brain, pending, now_ms, idle_minutes)
         if counts["created"] or counts["updated"]:
             messages.append(f"OpenCode: {counts['created']} new, {counts['updated']} updated session(s)")
