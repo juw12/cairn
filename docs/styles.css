@@ -2237,3 +2237,16 @@ details.rc-fold[open] > summary { margin-bottom: 6px; }
   .rc-actions .btn { min-height: 40px; }
   .mu-list li { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Share card dialog: the picture on the left, what goes on it on the right. */
+.modal.share { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); gap: 24px; align-items: start; width: min(800px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+.share-preview { display: grid; place-items: center; }
+.share-canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: min(72vh, 520px); border-radius: 12px; box-shadow: var(--shadow-lg); }
+.share-field { display: grid; gap: 6px; margin-top: 12px; font-size: 13.5px; color: var(--ink); }
+.share-field .select { width: 100%; }
+@media (max-width: 640px) {
+  .modal.share { grid-template-columns: 1fr; gap: 16px; padding: 18px; }
+  .share-canvas { max-height: 42vh; }
+  .modal.share .actions { justify-content: stretch; }
+  .modal.share .actions .btn { flex: 1 1 auto; justify-content: center; }
+}

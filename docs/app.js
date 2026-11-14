@@ -13,7 +13,7 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
-import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
+import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -363,6 +363,7 @@ function wireGlobal() {
       "vibe-lane": () => jumpToLive(actionEl.dataset.path),
       "vibe-continue": () => startChatAbout(actionEl.dataset.path, "continue") && setView("chat"),
       "vibe-newchat": () => startChatAbout(actionEl.dataset.path, "new") && setView("chat"),
+      "vibe-share": shareStats,
       "vibe-to-list": jumpToList,
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
       "ap-toggle": toggleEnabled,

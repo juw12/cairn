@@ -187,7 +187,7 @@ export async function syncBrain() {
 
 // ============================================================ desktop app: open a brain, settings
 
-function modal(html, wire) {
+export function modal(html, wire) {
   const wrap = document.createElement("div");
   wrap.className = "modal-wrap";
   wrap.innerHTML = html;

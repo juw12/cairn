@@ -11,6 +11,7 @@ import { renderNav, renderView } from "./app.js";
 import { estimateEffort, estimateProgress, formatMinutes } from "./progress.js";
 import { compact, minutesText, recap } from "./recap.js";
 import { chatReady } from "./chat.js";
+import { openShare } from "./share.js";
 
 const POLL_MS = 3000;
 const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped", done: "Done" };
@@ -1356,6 +1357,10 @@ function feedbackForm(sessions) {
   </form>`;
 }
 
+export function shareStats() {
+  openShare(core.vibeStats(state.notes, today()));
+}
+
 export function vibeView() {
   const stats = core.vibeStats(state.notes, today());
   const sessions = sessionNotes();
@@ -1370,7 +1375,8 @@ export function vibeView() {
   const head = pageHead(
     "Vibe",
     "Live progress of your AI coding sessions, what came out of them, and what people said about it. Every session and every piece of feedback is a Markdown file in <code>brain/</code>.",
-    `<button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("play")} ${liveSession() ? "Start another" : "Start session"}</button>`,
+    `${stats.sessions ? `<button class="btn" data-action="vibe-share" title="Your last 14 days as a picture to post">${icon("external")} Share stats</button>` : ""}
+    <button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("play")} ${liveSession() ? "Start another" : "Start session"}</button>`,
   );
   return `${head}
     ${recapBand()}

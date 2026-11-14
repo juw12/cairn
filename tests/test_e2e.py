@@ -753,6 +753,34 @@ class EndToEndTests(unittest.TestCase):
         self.assertNotIn("about", page.evaluate("window.__sent[1]"))
         self.assertEqual(self.errors, [])
 
+    def test_vibe_share_card_is_drawn_from_totals_and_names_the_model_only_when_asked(self):
+        page = self.open()
+        self.go(page, "vibe")
+        page.evaluate(RECAP_SEED)
+        page.click('[data-action="vibe-share"]')
+        page.wait_for_selector(".modal.share .share-canvas")
+        card = "document.querySelector('.share-canvas')"
+
+        self.assertEqual(page.evaluate(f"[{card}.width, {card}.height]"), [1080, 1920])
+        self.assertEqual(page.evaluate(f"{card}.getContext('2d').getImageData(5, 5, 1, 1).data[3]"), 255)  # painted, not blank
+        self.assertEqual(page.evaluate(f"{card}.dataset.headline"), "hours")
+        self.assertEqual(page.evaluate(f"{card}.dataset.model"), "")  # model names stay off the card until asked for
+        page.check('.modal.share [name="models"]')
+        self.assertTrue(page.evaluate(f"{card}.dataset.model").startswith("Pega-"))
+
+        page.select_option('.modal.share [name="headline"]', "tokens")
+        self.assertEqual(page.evaluate(f"{card}.dataset.headline"), "tokens")
+        self.assertRegex(page.evaluate(f"{card}.dataset.hero"), r"^\d[\d.]*[kMBT]$")
+        page.select_option('.modal.share [name="format"]', "square")
+        self.assertEqual(page.evaluate(f"[{card}.width, {card}.height]"), [1080, 1080])
+
+        with page.expect_download() as download:
+            page.click('.modal.share [data-share="save"]')
+        self.assertEqual(download.value.suggested_filename, "cairn-vibe-square.png")
+        page.click(".modal.share [data-cancel]")
+        page.wait_for_selector(".modal.share", state="detached")
+        self.assertEqual(self.errors, [])
+
     def test_feedback_capture_prefix(self):
         page = self.open()
         page.fill("#capture-input", "fb: offline maps saved my hike #maps")
