@@ -894,8 +894,39 @@ def _percent(part: int, whole: int) -> int | None:
     return int(100 * part / whole + 0.5) if whole else None
 
 
+def _session_prompts(note: dict) -> int:
+    """Prompts in one session: a watcher counts them in `prompts`, a hand-logged one has prompt lines."""
+    logged = sum(1 for entry in session_log(note["body"]) if entry["kind"] == "prompt")
+    return max(_count(note["meta"].get("prompts")), logged)
+
+
+def _model_usage(sessions: list[dict]) -> list[dict]:
+    """Sessions, tokens and minutes per model, the heaviest first."""
+    usage: dict[str, dict] = {}
+    for note in sessions:
+        name = note["meta"].get("model")
+        name = name.strip() if isinstance(name, str) else ""
+        if not name:
+            continue
+        entry = usage.setdefault(name, {"model": name, "sessions": 0, "tokens": 0, "minutes": 0})
+        entry["sessions"] += 1
+        entry["tokens"] += _count(note["meta"].get("tokens"))
+        entry["minutes"] += session_minutes(note)
+    return sorted(usage.values(), key=lambda entry: (-entry["tokens"], -entry["sessions"], entry["model"]))
+
+
+def _day_streak(active: set[str], end: dt.date) -> int:
+    """Days in a row with a session, counted back from today (or from yesterday, before today's first)."""
+    day = end if end.isoformat() in active else end - dt.timedelta(days=1)
+    streak = 0
+    while day.isoformat() in active:
+        streak += 1
+        day -= dt.timedelta(days=1)
+    return streak
+
+
 def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
-    """Totals for the Vibe view: sessions, results, checks, code churn and feedback."""
+    """Totals for the Vibe view: sessions, results, checks, code churn, tokens and feedback."""
     sessions = [n for n in notes if n["type"] == "session"]
     feedback = [n for n in notes if n["type"] == "feedback"]
     finished = [s for s in sessions if s["status"] in FINISHED]
@@ -919,7 +950,9 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
             "sessions": len(on_day),
             "minutes": union_minutes(span for s in on_day for span in session_spans(s)),
             "shipped": sum(1 for s in on_day if s["status"] == "shipped"),
+            "tokens": sum(_count(s["meta"].get("tokens")) for s in on_day),
         })
+    active = {_session_day(s) for s in sessions} - {""}
     wall = union_minutes(span for s in ended for span in session_spans(s))
     agent = sum(session_minutes(s) for s in ended)
     return {
@@ -934,7 +967,15 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
         "minutes": wall,
         "agent_minutes": agent,
         "parallel": int(10 * agent / wall + 0.5) / 10 if wall else None,
-        "prompts": sum(1 for e in logs if e["kind"] == "prompt"),
+        "prompts": sum(_session_prompts(s) for s in sessions),
+        # What the models read and wrote; cached context is counted apart because it is re-read, not new.
+        "tokens": sum(_count(s["meta"].get("tokens")) for s in sessions),
+        "tokens_in": sum(_count(s["meta"].get("tokens_in")) for s in sessions),
+        "tokens_out": sum(_count(s["meta"].get("tokens_out")) for s in sessions),
+        "tokens_cache": sum(_count(s["meta"].get("tokens_cache")) for s in sessions),
+        "models": _model_usage(sessions),
+        "active_days": len(active),
+        "streak": _day_streak(active, end),
         "passed": passed,
         "failed": failed,
         "pass_rate": _percent(passed, passed + failed),

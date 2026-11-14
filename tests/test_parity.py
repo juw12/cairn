@@ -53,9 +53,12 @@ EDITS = [
     [{"status": "doing", "tags": []}, "x [[link]]\n"],
 ]
 VIBE_NOTES = {
-    "sessions/2026-11-04-dark-mode.md": "---\ntitle: Dark mode\ntype: session\nstatus: shipped\nstarted: 2026-11-04T23:40\nended: 2026-11-05T00:55\ncommits: 3\nadded: 120\nremoved: 8\n---\n## Log\n\n- 23:40 start: Dark mode\n- 23:50 prompt: add a toggle\n- 9:05 fail: pytest (12s)\n- 00:40 pass: pytest\n* 00:41 pass: again\n- 00:42 bogus: ignored\n- 00:43 skill: /refine app cairn · 6.5 -> 8.7\n- 00:44 skill: /Council verdict ship\n- 00:45 skill: no slash\n- 00:46 skill: /refine again\n- not a log line\n- 00:55 end: shipped\n",
+    "sessions/2026-11-04-dark-mode.md": "---\ntitle: Dark mode\ntype: session\nstatus: shipped\nstarted: 2026-11-04T23:40\nended: 2026-11-05T00:55\ncommits: 3\nadded: 120\nremoved: 8\nmodel: zeta-large\neffort: high\ntokens: 1500\ntokens_in: 1000\ntokens_out: 500\ntokens_cache: 9000\nprompts: 4\n---\n## Log\n\n- 23:40 start: Dark mode\n- 23:50 prompt: add a toggle\n- 9:05 fail: pytest (12s)\n- 00:40 pass: pytest\n* 00:41 pass: again\n- 00:42 bogus: ignored\n- 00:43 skill: /refine app cairn · 6.5 -> 8.7\n- 00:44 skill: /Council verdict ship\n- 00:45 skill: no slash\n- 00:46 skill: /refine again\n- not a log line\n- 00:55 end: shipped\n",
     "sessions/2026-11-05-sync.md": "---\ntitle: Sync\ntype: session\nstatus: dropped\nstarted: 2026-11-05T10:00\nended: 2026-11-05T09:00\ncommits: two\n---\n- 10:00 fail: npm test\n",
     "sessions/2026-11-05-live.md": "---\ntitle: Live one\ntype: session\nstatus: live\nstarted: 2026-02-30T10:00\ncreated: 2026-11-05\n---\n",
+    "sessions/2026-11-03-runs.md": "---\ntitle: Runs\ntype: session\nstatus: done\nstarted: 2026-11-03T08:00\nended: 2026-11-03T09:00\nminutes: 12\nmodel: alpha-mini\ntokens: 1500\ntokens_in: 1400\ntokens_out: 100\nprompts: 22\nruns: 22\n---\n- 08:00 prompt: one\n",
+    "sessions/2026-11-03-more.md": "---\ntitle: More\ntype: session\nstatus: done\nstarted: 2026-11-03T10:00\nended: 2026-11-03T10:30\nmodel: alpha-mini\ntokens: lots\n---\n- 10:00 prompt: one\n- 10:05 prompt: two\n",
+    "sessions/2026-11-01-old.md": "---\ntitle: Old\ntype: session\nstatus: done\nstarted: 2026-11-01T10:00\nended: 2026-11-01T10:30\nmodel: Beta\ntokens: 1500\n---\n",
     "feedback/a.md": "---\ntitle: Hard to find\ntype: feedback\nrating: 3\n---\n",
     "feedback/b.md": "---\ntitle: Love it\ntype: feedback\nstatus: addressed\nrating: 5\n---\n",
     "feedback/c.md": "---\ntitle: Meh\ntype: feedback\nstatus: planned\nrating: 9\n---\n",

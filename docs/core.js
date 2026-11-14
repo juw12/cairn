@@ -892,7 +892,42 @@ function percent(part, whole) {
   return whole ? Math.floor((100 * part) / whole + 0.5) : null;
 }
 
-// Totals for the Vibe view: sessions, results, checks, code churn and feedback.
+// Prompts in one session: a watcher counts them in `prompts`, a hand-logged one has prompt lines.
+function sessionPrompts(note) {
+  const logged = sessionLog(note.body).filter((entry) => entry.kind === "prompt").length;
+  return Math.max(count(note.meta.prompts), logged);
+}
+
+// Sessions, tokens and minutes per model, the heaviest first.
+function modelUsage(sessions) {
+  const usage = new Map();
+  for (const note of sessions) {
+    const name = typeof note.meta.model === "string" ? note.meta.model.trim() : "";
+    if (!name) continue;
+    if (!usage.has(name)) usage.set(name, { model: name, sessions: 0, tokens: 0, minutes: 0 });
+    const entry = usage.get(name);
+    entry.sessions += 1;
+    entry.tokens += count(note.meta.tokens);
+    entry.minutes += sessionMinutes(note);
+  }
+  return [...usage.values()].sort(
+    (a, b) => b.tokens - a.tokens || b.sessions - a.sessions || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0),
+  );
+}
+
+// Days in a row with a session, counted back from today (or from yesterday, before today's first).
+function dayStreak(active, end) {
+  const iso = (time) => new Date(time).toISOString().slice(0, 10);
+  let day = active.has(iso(end)) ? end : end - 86400000;
+  let streak = 0;
+  while (active.has(iso(day))) {
+    streak += 1;
+    day -= 86400000;
+  }
+  return streak;
+}
+
+// Totals for the Vibe view: sessions, results, checks, code churn, tokens and feedback.
 export function vibeStats(notes, today, days = 14) {
   const sessions = notes.filter((n) => n.type === "session");
   const feedback = notes.filter((n) => n.type === "feedback");
@@ -919,8 +954,10 @@ export function vibeStats(notes, today, days = 14) {
       sessions: onDay.length,
       minutes: unionMinutes(onDay.flatMap(sessionSpans)),
       shipped: onDay.filter((s) => s.status === "shipped").length,
+      tokens: sum(onDay, (s) => count(s.meta.tokens)),
     });
   }
+  const active = new Set(sessions.map(sessionDay).filter(Boolean));
   const wall = unionMinutes(ended.flatMap(sessionSpans));
   const agent = sum(ended, sessionMinutes);
   return {
@@ -935,7 +972,15 @@ export function vibeStats(notes, today, days = 14) {
     minutes: wall,
     agent_minutes: agent,
     parallel: wall ? Math.floor((10 * agent) / wall + 0.5) / 10 : null,
-    prompts: logs.filter((e) => e.kind === "prompt").length,
+    prompts: sum(sessions, sessionPrompts),
+    // What the models read and wrote; cached context is counted apart because it is re-read, not new.
+    tokens: sum(sessions, (s) => count(s.meta.tokens)),
+    tokens_in: sum(sessions, (s) => count(s.meta.tokens_in)),
+    tokens_out: sum(sessions, (s) => count(s.meta.tokens_out)),
+    tokens_cache: sum(sessions, (s) => count(s.meta.tokens_cache)),
+    models: modelUsage(sessions),
+    active_days: active.size,
+    streak: dayStreak(active, end),
     passed,
     failed,
     pass_rate: percent(passed, passed + failed),
