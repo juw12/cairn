@@ -12,6 +12,7 @@ import { board, codeView, contextView, decisions, home, ideas, mcpSnippet, moveN
 import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
+import { addFriend, loadLeaderboard, publishStats, removeFriend, setLeaderboardStat, unpublishStats } from "./leaderboard.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
 import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
@@ -394,6 +395,15 @@ function wireGlobal() {
       "obsidian-unlink": unlinkObsidian,
       "map-reset": () => resetMap(),
       "open-brain": () => openBrain(actionEl.dataset.repo),
+      "lb-stat": () => setLeaderboardStat(actionEl.dataset.stat),
+      "lb-refresh": () => {
+        loadLeaderboard(true);
+        renderView();
+      },
+      "friend-add": () => addFriend(actionEl.dataset.repo),
+      "friend-remove": () => removeFriend(actionEl.dataset.repo),
+      "stats-publish": publishStats,
+      "stats-unpublish": unpublishStats,
       "sign-in": openSignIn,
       "sign-out": () => {
         auth.signOut();
@@ -474,6 +484,10 @@ function wireGlobal() {
     if (event.target.id === "people-form") {
       event.preventDefault();
       return lookupProfile(event.target.query.value);
+    }
+    if (event.target.id === "friend-form") {
+      event.preventDefault();
+      return addFriend(event.target.query.value);
     }
     if (event.target.id === "obsidian-form") {
       event.preventDefault();

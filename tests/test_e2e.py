@@ -781,6 +781,73 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector(".modal.share", state="detached")
         self.assertEqual(self.errors, [])
 
+    def test_people_leaderboard_ranks_friends_by_their_published_totals(self):
+        def stats_note(tokens, minutes, sessions):
+            lines = ["title: Vibe stats", "type: note", "publish: true", "updated: 2026-11-10", f"vibe_tokens: {tokens}", f"vibe_minutes: {minutes}",
+                     f"vibe_sessions: {sessions}", "vibe_prompts: 300", "vibe_streak: 3", "vibe_active_days: 12"]
+            return "---\n" + "\n".join(lines) + "\n---\n\nSelf-reported.\n"
+
+        def friends_on_github(mock):
+            base = mock.repos["juw12/cairn"]["meta"]
+            brains = {
+                "alice": {"brain/vibe-stats.md": stats_note(5_000_000_000, 600, 40)},
+                "bob": {"vibe-stats.md": stats_note(1000, 90_000, 12)},
+                # Text from the internet: a number that is not a number must never reach the page.
+                "carol": {"brain/vibe-stats.md": stats_note("<img src=x onerror=alert(1)>", 60, 5)},
+            }
+            for login, files in brains.items():
+                meta = dict(base, name="brain", full_name=f"{login}/brain", owner={"login": login, "avatar_url": base["owner"]["avatar_url"]})
+                mock.repos[f"{login}/brain"] = {"meta": meta, "files": files}
+
+        page = self.open(setup=friends_on_github)
+        self.go(page, "vibe")
+        page.evaluate(RECAP_SEED)
+        self.go(page, "people")
+        for login in ("alice", "bob", "carol"):
+            page.fill("#friend-query", f"{login}/brain")
+            page.press("#friend-query", "Enter")
+            page.wait_for_selector(f'#leaderboard [data-login="{login}"]')
+
+        order = "nodes => nodes.map((n) => (n.classList.contains('me') ? 'me' : n.dataset.login))"
+        self.assertEqual(page.eval_on_selector_all(".lb-row", order), ["alice", "me", "bob"])
+        self.assertEqual(page.inner_text('.lb-row[data-login="alice"] .lb-place'), "1")
+        self.assertEqual(page.inner_text('.lb-row[data-login="alice"] .lb-value'), "5B")
+        self.assertIn("only on this device", page.inner_text(".lb-row.me"))
+        self.assertIn("hasn't published totals yet", page.inner_text('.lb-waiting [data-login="carol"]'))
+        self.assertEqual(page.locator("#leaderboard img[src=x]").count(), 0)
+
+        page.click('[data-action="lb-stat"][data-stat="hours"]')
+        page.wait_for_selector('[data-action="lb-stat"][data-stat="hours"][aria-pressed="true"]')
+        friends = [login for login in page.eval_on_selector_all(".lb-row", order) if login != "me"]
+        self.assertEqual(friends, ["bob", "alice"])
+        self.assertEqual(page.inner_text('.lb-row[data-login="bob"] .lb-place'), "1")
+
+        # Your own totals stay on the device until you publish them, and the note carries numbers only.
+        self.assertIsNone(self.note_text(page, "vibe-stats.md"))
+        page.click('[data-action="stats-publish"]')
+        page.wait_for_selector(".modal")
+        self.assertIn("Not included: session titles, folders, model names, messages.", page.inner_text(".modal"))
+        page.click(".modal button[type=submit]")
+        page.wait_for_selector('[data-action="stats-unpublish"]')
+        note = self.note_text(page, "vibe-stats.md")
+        self.assertIn("publish: true", note)
+        self.assertRegex(note, r"vibe_tokens: \d+")
+        for private in ("Pega-", "Recap band", "E:/Projects"):
+            self.assertNotIn(private, note)
+        self.assertIn("published", page.inner_text(".lb-row.me"))
+        page.click('[data-action="stats-unpublish"]')
+        page.wait_for_selector('[data-action="stats-unpublish"]', state="detached")
+        self.assertIsNone(self.note_text(page, "vibe-stats.md"))
+
+        page.click('[data-action="friend-remove"][data-repo="bob/brain"]')
+        page.wait_for_selector('.lb-row[data-login="bob"]', state="detached")
+        kept = page.evaluate("JSON.parse(localStorage.getItem('cairn.friends')).map((f) => [f.fullName, f.root])")
+        self.assertEqual(kept, [["alice/brain", "brain/"], ["carol/brain", "brain/"]])
+        # Bob keeps his notes at the top of his repo: brain/ and .brain/ were tried once, then remembered.
+        self.assertEqual(len(self.errors), 2, self.errors)
+        for error in self.errors:
+            self.assertIn("404", error)
+
     def test_feedback_capture_prefix(self):
         page = self.open()
         page.fill("#capture-input", "fb: offline maps saved my hike #maps")

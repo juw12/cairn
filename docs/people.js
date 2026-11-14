@@ -12,6 +12,7 @@ import { LAST_BRAIN_KEY, readOnly, state } from "./state.js";
 import { flushPending, renderDrawer } from "./drawer.js";
 import { claimsFromNotes } from "./proof.js";
 import { profileClaims, runCheck } from "./proofview.js";
+import { friends, leaderboardView } from "./leaderboard.js";
 import { applyInfo, render, renderSidebarFoot, renderView, setView } from "./app.js";
 
 // ============================================================ network: profiles, discover, read-only brains
@@ -150,6 +151,8 @@ function profileBlock() {
 
 function repoRow(repo) {
   const updated = repo.pushedAt ? relativeTime(Date.parse(repo.pushedAt)) : "";
+  const mine = repo.owner.toLowerCase() === (auth.session()?.login || "").toLowerCase();
+  const friend = friends().some((f) => f.fullName.toLowerCase() === repo.fullName.toLowerCase());
   return `
     <div class="repo-row">
       ${repo.avatar ? `<img src="${esc(repo.avatar)}" alt="" width="36" height="36" loading="lazy">` : ""}
@@ -159,6 +162,7 @@ function repoRow(repo) {
       </div>
       <span class="muted repo-meta">${updated}</span>
       <div class="repo-actions">
+        ${mine || friend ? "" : `<button class="btn sm ghost" data-action="friend-add" data-repo="${esc(repo.fullName)}">Add friend</button>`}
         <button class="btn sm ghost" data-action="open-profile" data-login="${esc(repo.owner)}">Profile</button>
         <button class="btn sm" data-action="open-brain" data-repo="${esc(repo.fullName)}">Open</button>
       </div>
@@ -317,6 +321,7 @@ export function peopleView() {
     </form>
     ${myBrainsBlock()}
     ${profileBlock()}
+    ${leaderboardView()}
     <h3 class="section-title">Recently published by others</h3>
     ${discoverHtml}
     ${publishHint}`;

@@ -70,6 +70,7 @@ export const state = {
   peopleQuery: "",
   profile: null,
   discover: null,
+  leaderboard: null,
   obsidian: null,
   proofCheck: null,
   canvas: null,
