@@ -331,7 +331,8 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
     An Obsidian vault is a whole personal brain, so sessions from every folder belong in it; a brain
     inside one project only takes that project's sessions (the CLI default). Vector sessions are left
     to the assistant's own reports unless turned on: process detection can only guess. The closing
-    reply of a finished OpenCode turn is copied into its note only when `vibeWatchReplies` is on."""
+    reply of a finished OpenCode turn is copied into its note only when `vibeWatchReplies` is on.
+    While a session is live, this computer's load is noted in machines/ unless `vibeWatchLaptop` is off."""
     everywhere = config.get("vibeWatchEverywhere")
     if everywhere is None:
         everywhere = (Path(root) / ".obsidian").is_dir()
@@ -340,6 +341,7 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
         "vector": bool(config.get("vibeWatchVector", False)),
         "everywhere": bool(everywhere),
         "last_reply": bool(config.get("vibeWatchReplies", False)),
+        "laptop": bool(config.get("vibeWatchLaptop", True)),
     }
 
 

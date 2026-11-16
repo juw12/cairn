@@ -130,8 +130,9 @@ export function estimateProgress({ log, elapsed, startedClock, durations }) {
  * @param {Array<{kind:string}>} input.log
  * @param {{added?:number,removed?:number,changedCount?:number,commits?:Array<{added:number,removed:number}>}|null} input.git
  * @param {number[]} input.durations  finished-session minutes, to place this one against your usual
+ * @param {{level:string}|null} input.machine  the computer's load now (machineReading), when it applies to this session
  */
-export function estimateEffort({ elapsed, log, git, durations = [] }) {
+export function estimateEffort({ elapsed, log, git, durations = [], machine = null }) {
   const checks = log.filter((e) => e.kind === "pass" || e.kind === "fail");
   const failed = checks.filter((e) => e.kind === "fail").length;
   const prompts = log.filter((e) => e.kind === "prompt").length;
@@ -151,11 +152,58 @@ export function estimateEffort({ elapsed, log, git, durations = [] }) {
   if (prompts) add(prompts >= 4 ? 1 : 0, `${prompts} prompt${prompts === 1 ? "" : "s"}`);
 
   const score = factors.reduce((sum, f) => sum + f.points, 0);
-  const level = score >= 5 ? "heavy" : score >= 2 ? "medium" : "light";
+  // The size of the work says nothing about a laptop that is flat out, so a measured load can lift the level, never lower it.
+  const work = score >= 5 ? "heavy" : score >= 2 ? "medium" : "light";
+  const laptop = LEVELS.includes(machine?.level) ? machine.level : null;
+  const level = laptop && LEVELS.indexOf(laptop) > LEVELS.indexOf(work) ? laptop : work;
   const longerThan = durations.length >= MIN_HISTORY
     ? Math.round((durations.filter((d) => d < elapsed).length * 100) / durations.length)
     : null;
-  return { level, score, factors, longerThan, lines, files, failed, checks: checks.length };
+  return { level, work, laptop, score, factors, longerThan, lines, files, failed, checks: checks.length };
+}
+
+// ------------------------------------------------------------ the computer under the sessions
+
+const LEVELS = ["light", "medium", "heavy"];
+export const MACHINE_FRESH_MIN = 30; // an older reading is shown with its time, and no longer lifts a session's effort
+
+const numberOrNull = (value) => (value === "" || value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value));
+const listOf = (value) => String(value || "").split(";").map((part) => part.trim()).filter(Boolean);
+
+/** The reading a watcher left in a machines/ note, in the shape the local app's /api/vibe gives. Null for any other note. */
+export function machineFromNote(note) {
+  const meta = note?.meta || {};
+  if (!LEVELS.includes(meta.load) || typeof meta.machine_at !== "string" || !meta.machine_at) return null;
+  return {
+    name: String(meta.title || note.title || ""),
+    cpu: String(meta.machine_cpu || ""),
+    cores: numberOrNull(meta.machine_cores),
+    ram_gb: numberOrNull(meta.machine_ram_gb),
+    at: meta.machine_at,
+    cpu_pct: numberOrNull(meta.load_cpu),
+    ram_pct: numberOrNull(meta.load_ram),
+    commit_pct: numberOrNull(meta.load_commit),
+    power: String(meta.load_power || ""),
+    level: meta.load,
+    reasons: listOf(meta.load_why),
+    top: listOf(meta.load_top),
+  };
+}
+
+/**
+ * The computer and its load: measured now by the local app when there is one, else the newest machines/ note.
+ * Adds `live`, `age` (minutes since the reading) and `fresh` (recent enough to describe the present).
+ */
+export function machineReading(live, notes, nowMs = Date.now()) {
+  let reading = live && LEVELS.includes(live.level) ? { ...live, live: true } : null;
+  if (!reading) {
+    const noted = notes.map(machineFromNote).filter(Boolean).sort((a, b) => (a.at < b.at ? 1 : -1));
+    reading = noted.length ? { ...noted[0], live: false } : null;
+  }
+  if (!reading) return null;
+  const at = Date.parse(reading.at);
+  const age = Number.isFinite(at) ? Math.max(0, Math.round((nowMs - at) / 60000)) : null;
+  return { ...reading, age, fresh: reading.live || (age !== null && age <= MACHINE_FRESH_MIN) };
 }
 
 export function formatMinutes(minutes) {

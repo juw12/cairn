@@ -1,6 +1,6 @@
 // Checks for docs/progress.js; run by tests/test_progress.py (needs Node).
 import assert from "node:assert/strict";
-import { estimateEffort, estimateProgress, formatMinutes, historyRemaining, reportedProgress } from "../docs/progress.js";
+import { MACHINE_FRESH_MIN, estimateEffort, estimateProgress, formatMinutes, historyRemaining, machineFromNote, machineReading, reportedProgress } from "../docs/progress.js";
 
 const log = (...entries) => entries.map(([time, kind, text]) => ({ time, kind, text }));
 
@@ -62,6 +62,47 @@ assert.equal(heavy.level, "heavy");
 assert.ok(heavy.factors.some((f) => f.text === "3 checks, 2 failed"));
 assert.equal(heavy.lines, 660);
 assert.equal(heavy.longerThan, 70);
+
+// The laptop under the work: a measured load lifts the level, never lowers it, and both halves stay readable.
+const lifted = estimateEffort({ elapsed: 8, log: [], git: null, machine: { level: "heavy" } });
+assert.deepEqual([lifted.level, lifted.work, lifted.laptop], ["heavy", "light", "heavy"]);
+const kept = estimateEffort({ elapsed: 45, log: [], git: { added: 150, removed: 30, changedCount: 4, commits: [] }, machine: { level: "light" } });
+assert.deepEqual([kept.level, kept.work, kept.laptop], ["medium", "medium", "light"]);
+assert.equal(light.laptop, null);
+assert.equal(light.work, "light");
+assert.equal(estimateEffort({ elapsed: 8, log: [], git: null, machine: { level: "melting" } }).level, "light");
+
+// A watcher's machines/ note reads back in the shape the local app gives.
+const noted = {
+  title: "ACME Roadrunner 14",
+  meta: {
+    title: "ACME Roadrunner 14", machine_at: "2026-03-04T10:00", machine_cpu: "Intel Core i5", machine_cores: "8", machine_ram_gb: "15.8",
+    load: "heavy", load_cpu: "91", load_ram: "80", load_commit: "", load_power: "on battery 62%",
+    load_why: "CPU 91% busy; memory 80% full", load_top: "python x3: 2.0 GB, 60% CPU; node: 1.1 GB",
+  },
+};
+const fromNote = machineFromNote(noted);
+assert.deepEqual(
+  [fromNote.name, fromNote.cpu, fromNote.cores, fromNote.ram_gb, fromNote.cpu_pct, fromNote.ram_pct, fromNote.commit_pct, fromNote.level],
+  ["ACME Roadrunner 14", "Intel Core i5", 8, 15.8, 91, 80, null, "heavy"],
+);
+assert.deepEqual(fromNote.reasons, ["CPU 91% busy", "memory 80% full"]);
+assert.deepEqual(fromNote.top, ["python x3: 2.0 GB, 60% CPU", "node: 1.1 GB"]);
+assert.equal(machineFromNote({ meta: { title: "Plain note" } }), null);
+assert.equal(machineFromNote({ meta: { load: "heavy" } }), null);
+
+// The page prefers what the local app measures now; a note counts for the present only while it is recent.
+const at = (stamp) => new Date(stamp).getTime();
+const older = { meta: { ...noted.meta, machine_at: "2026-03-04T08:00", load: "light" } };
+const live = machineReading({ level: "medium", at: "2026-03-04T10:20" }, [noted], at("2026-03-04T10:20"));
+assert.deepEqual([live.level, live.live, live.fresh], ["medium", true, true]);
+const fresh = machineReading(null, [older, noted, { meta: {} }], at("2026-03-04T10:25"));
+assert.deepEqual([fresh.level, fresh.live, fresh.age, fresh.fresh], ["heavy", false, 25, true]);
+assert.equal(machineReading(undefined, [noted], at(`2026-03-04T10:${MACHINE_FRESH_MIN}`)).fresh, true);
+const stale = machineReading(null, [noted], at("2026-03-04T11:05"));
+assert.deepEqual([stale.age, stale.fresh], [65, false]);
+assert.equal(estimateEffort({ elapsed: 8, log: [], git: null, machine: stale.fresh ? stale : null }).level, "light");
+assert.equal(machineReading(null, [], at("2026-03-04T10:00")), null);
 
 assert.equal(formatMinutes(0), "under a minute");
 assert.equal(formatMinutes(45), "45 min");

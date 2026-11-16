@@ -11,8 +11,9 @@ import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
-from cairn import core, watch
+from cairn import core, vibe, watch
 from cairn.brain import Brain
 from cairn.cli import main
 
@@ -619,3 +620,77 @@ class ClaimTests(unittest.TestCase):
         watch.claim_watch(self.brain, "app:1", now=1000)
         self.assertEqual([n for n in self.brain.notes() if n["type"] == "session"], [])
         self.assertFalse(str(watch._claim_path(self.brain)).endswith(".md"))
+
+
+class MachineNoteTests(unittest.TestCase):
+    """The watcher notes the computer's load in machines/, so a phone reading the brain from GitHub sees it too."""
+
+    READING = {
+        "name": "ACME Roadrunner 14", "cpu": "Intel Core i5", "cores": 8, "ram_gb": 15.8,
+        "at": "2026-03-04T10:00", "cpu_pct": 91, "ram_pct": 80, "ram_free_gb": 3.1, "commit_pct": 70,
+        "power": "on battery 62%", "level": "heavy",
+        "reasons": ["CPU 91% busy", "memory 80% full"],
+        "top": ["python x3: 2.0 GB, 60% CPU", "node: 1.1 GB"],
+    }
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.brain = Brain(Path(self.tmp.name))
+        self.brain.init()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def reading(self, **changes) -> dict:
+        return {**self.READING, **changes}
+
+    def test_the_note_reads_back_as_written(self):
+        path, text = watch.machine_note(self.READING)
+        self.assertEqual(path, "machines/acme-roadrunner-14.md")
+        parsed = core.parse_note(text)
+        meta = parsed["meta"]
+        self.assertEqual((meta["title"], meta["type"], meta["tags"]), ("ACME Roadrunner 14", "note", ["machine"]))
+        self.assertEqual((meta["machine_at"], meta["machine_cpu"], meta["machine_cores"], meta["machine_ram_gb"]), ("2026-03-04T10:00", "Intel Core i5", "8", "15.8"))
+        self.assertEqual((meta["load"], meta["load_cpu"], meta["load_ram"], meta["load_commit"]), ("heavy", "91", "80", "70"))
+        self.assertEqual(meta["load_power"], "on battery 62%")
+        self.assertEqual(meta["load_why"], "CPU 91% busy; memory 80% full")
+        self.assertEqual(meta["load_top"], "python x3: 2.0 GB, 60% CPU; node: 1.1 GB")
+        self.assertNotIn("publish", meta)
+        self.assertIn("whole computer, not one session", parsed["body"])
+
+    def test_a_computer_without_a_name_or_a_cpu_figure_still_gets_a_note(self):
+        path, text = watch.machine_note(self.reading(name="", cpu_pct=None, power="", reasons=[], top=[], level="light"))
+        self.assertEqual(path, "machines/this-computer.md")
+        meta = core.parse_note(text)["meta"]
+        self.assertEqual((meta["title"], meta["load"], meta["load_cpu"]), ("This computer", "light", ""))
+
+    def test_nothing_is_written_without_a_live_session(self):
+        self.assertFalse(watch.sync_machine(self.brain, self.READING))
+        self.assertFalse(self.brain.resolve("machines/acme-roadrunner-14.md").exists())
+
+    def test_the_note_is_rewritten_only_when_the_load_really_changed(self):
+        vibe.start(self.brain, "Something live")
+        self.assertTrue(watch.sync_machine(self.brain, self.READING), "the first reading is written")
+        self.assertFalse(watch.sync_machine(self.brain, self.READING), "the same reading is not")
+        self.assertFalse(watch.sync_machine(self.brain, self.reading(at="2026-03-04T10:10", cpu_pct=86, ram_pct=84)), "a small move is not")
+        self.assertTrue(watch.sync_machine(self.brain, self.reading(at="2026-03-04T10:01", cpu_pct=70, ram_pct=80, level="medium")), "another level is")
+        self.assertTrue(watch.sync_machine(self.brain, self.reading(at="2026-03-04T10:02", cpu_pct=58, level="medium")), "CPU moved 12 points")
+        self.assertFalse(watch.sync_machine(self.brain, self.reading(at="2026-03-04T10:16", cpu_pct=58, level="medium")), "14 minutes on, unchanged")
+        self.assertTrue(watch.sync_machine(self.brain, self.reading(at="2026-03-04T10:17", cpu_pct=58, level="medium")), "15 minutes on, refreshed")
+        meta = core.parse_note(self.brain.read("machines/acme-roadrunner-14.md")["text"])["meta"]
+        self.assertEqual((meta["machine_at"], meta["load"], meta["load_cpu"]), ("2026-03-04T10:17", "medium", "58"))
+
+    def test_an_unreadable_computer_writes_nothing(self):
+        vibe.start(self.brain, "Something live")
+        with mock.patch.object(watch.machine, "snapshot", return_value=None):
+            self.assertFalse(watch.sync_machine(self.brain))
+        self.assertFalse((self.brain.dir / "machines").exists())
+
+    def test_a_pass_notes_the_load_only_when_asked(self):
+        vibe.start(self.brain, "Something live")
+        with mock.patch.object(watch.machine, "snapshot", return_value=self.READING):
+            quiet = watch.watch_once(self.brain, opencode=False, vector=False)
+            self.assertFalse((self.brain.dir / "machines").exists())
+            lines = watch.watch_once(self.brain, opencode=False, vector=False, laptop=True)
+        self.assertEqual(quiet, [])
+        self.assertEqual(lines, ["Laptop: load noted in machines/"])

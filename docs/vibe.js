@@ -8,8 +8,8 @@ import { escapeHtml as esc } from "./md.js";
 import { $, $$, ask, icon, pageHead, plural, statusPill, toast, today } from "./ui.js";
 import { createNote, fileByPath, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { renderNav, renderView } from "./app.js";
-import { estimateEffort, estimateProgress, formatMinutes } from "./progress.js";
-import { compact, minutesText, recap } from "./recap.js";
+import { estimateEffort, estimateProgress, formatMinutes, machineReading } from "./progress.js";
+import { compact, minutesText, recap, sessionState } from "./recap.js";
 import { chatReady } from "./chat.js";
 import { openShare } from "./share.js";
 
@@ -49,6 +49,8 @@ const clock = () => new Date().toTimeString().slice(0, 5);
 const stamp = () => `${today()}T${clock()}`;
 const oneLine = (text) => String(text).replace(/\s+/g, " ").trim();
 const canPoll = () => typeof state.store?.vibe === "function";
+// The computer the sessions run on: measured now by the local app, else the newest machines/ note a watcher left.
+const machine = () => machineReading(state.vibeMachine, state.notes);
 
 function startedKey(note) {
   return `${note.meta.started || note.meta.created || ""} ${note.path}`;
@@ -420,8 +422,11 @@ function liveEstimate(live, newest) {
   const progress = estimateProgress({ log, elapsed, startedClock, durations });
   // Git figures cover the whole repo since the newest session started, so only that card uses them.
   const git = newest && state.vibeGit?.available ? state.vibeGit : null;
-  const effort = estimateEffort({ elapsed, log, git, durations });
-  return { progress, effort, agent, elapsed, git };
+  // The load is the whole computer's, so it only speaks for a session that is working right now, and only while the reading is recent.
+  const reading = machine();
+  const load = reading?.fresh && sessionState(live, core.stampMinutes(stamp())).key === "working" ? reading : null;
+  const effort = estimateEffort({ elapsed, log, git, durations, machine: load });
+  return { progress, effort, agent, elapsed, git, load };
 }
 
 function timeLeftText(progress) {
@@ -444,8 +449,12 @@ function basisText(progress, agent) {
 
 // The bar, the time left and the effort badge for one live session. Re-rendered every poll tick.
 function progressPanel(live, newest) {
-  const { progress, effort, agent, git } = liveEstimate(live, newest);
+  const { progress, effort, agent, git, load } = liveEstimate(live, newest);
   const known = progress.pct !== null;
+  const lifted = effort.laptop && effort.level !== effort.work;
+  const badgeTitle = lifted
+    ? `The ${machineWord(load).toLowerCase()} is under ${effort.laptop} load right now. The work alone reads ${effort.work}.`
+    : EFFORT_MEANING[effort.level];
   const pctLabel = known ? `${progress.pct}%` : "—";
   const valueAttrs = known ? ` aria-valuenow="${progress.pct}" aria-valuetext="${progress.pct}%, ${esc(timeLeftText(progress))}"` : ` aria-valuetext="unknown"`;
   const open = state.vibeEffortOpen?.[live.path] ? " open" : "";
@@ -460,7 +469,7 @@ function progressPanel(live, newest) {
     <div class="vibe-progress-head">
       <strong class="vibe-pct">${pctLabel}</strong>
       <span class="vibe-left">${esc(timeLeftText(progress))}</span>
-      <span class="effort effort-${effort.level}" title="${esc(EFFORT_MEANING[effort.level])}">${EFFORT_LABEL[effort.level]} effort</span>
+      <span class="effort effort-${effort.level}" title="${esc(badgeTitle)}">${EFFORT_LABEL[effort.level]} effort</span>
     </div>
     <div class="vibe-bar" role="progressbar" aria-label="Progress of ${esc(live.title)}" aria-valuemin="0" aria-valuemax="100"${valueAttrs}>
       <span style="width:${known ? progress.pct : 100}%"></span>
@@ -468,11 +477,67 @@ function progressPanel(live, newest) {
     <p class="vibe-basis muted small">${basisText(progress, agent)}</p>
     <details class="vibe-effort" data-effort="${esc(live.path)}"${open}>
       <summary>Why ${EFFORT_LABEL[effort.level].toLowerCase()}?</summary>
-      <p class="small">${EFFORT_MEANING[effort.level]} Score ${effort.score} (medium from 2, heavy from 5).</p>
+      <p class="small">${load ? `Work so far: ${effort.work}. ` : ""}${EFFORT_MEANING[effort.work]} Score ${effort.score} (medium from 2, heavy from 5).</p>
       <ul class="effort-factors">${factors}</ul>
-      ${longer}${gitNote}
+      ${longer}${gitNote}${machineWhy(load)}
     </details>
   </div>`;
+}
+
+// ============================================================ the computer under the sessions
+
+const machineWord = (reading) => (reading?.power ? "Laptop" : "Computer");
+const loadFigures = (reading) =>
+  [reading.cpu_pct !== null && reading.cpu_pct !== undefined ? `CPU ${reading.cpu_pct}% busy` : "", reading.ram_pct !== null && reading.ram_pct !== undefined ? `memory ${reading.ram_pct}% full` : ""].filter(Boolean);
+
+// "as of 14:02", with the day when the reading is from another one.
+function machineWhen(reading) {
+  const day = String(reading.at).slice(0, 10);
+  const time = String(reading.at).slice(11, 16);
+  return day === today() ? time : `${dayLabel(day)} ${time}`;
+}
+
+// The laptop's half of "Why heavy?": what was measured, what is using it, and that it is not this session's alone.
+function machineWhy(reading) {
+  if (!reading) return "";
+  const why = (reading.reasons?.length ? reading.reasons : loadFigures(reading)).join(" · ");
+  const top = reading.top?.length ? `<p class="muted small">Using the most: ${esc(reading.top.slice(0, 3).join(" · "))}</p>` : "";
+  return `<p class="small effort-machine"><strong>${machineWord(reading)}: ${reading.level}.</strong> ${esc(why)}${reading.live ? "" : ` <span class="muted">as of ${esc(machineWhen(reading))}</span>`}</p>
+      ${top}
+      <p class="muted small">That is the whole ${machineWord(reading).toLowerCase()}, everything running on it, not only this session. The badge shows the higher of the two.</p>`;
+}
+
+function machineMeter(label, pct, note = "") {
+  if (pct === null || pct === undefined) return "";
+  return `<div class="vm-meter">
+      <span class="vm-label">${label}</span>
+      <span class="vibe-bar vm-bar" role="meter" aria-label="${label}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${Math.min(100, Math.max(0, pct))}%"></span></span>
+      <span class="vm-num">${pct}%${note ? ` <span class="muted">${esc(note)}</span>` : ""}</span>
+    </div>`;
+}
+
+// Which computer this is and how loaded it is, above everything that runs on it. Re-rendered every poll tick.
+function machineStrip() {
+  const reading = machine();
+  if (!reading) return "";
+  const spec = [reading.cpu, reading.cores ? `${reading.cores} cores` : "", reading.ram_gb ? `${reading.ram_gb} GB memory` : ""].filter(Boolean).join(" · ");
+  const free = reading.ram_free_gb !== null && reading.ram_free_gb !== undefined ? `${reading.ram_free_gb} GB free` : "";
+  const when = reading.live
+    ? "measured now"
+    : `as of ${machineWhen(reading)}${reading.fresh ? "" : ", may have changed since"}`;
+  const foot = [reading.power, reading.top?.length ? `Using the most: ${reading.top.slice(0, 4).join(" · ")}` : ""].filter(Boolean);
+  return `<section class="vibe-machine${reading.fresh ? "" : " stale"}" aria-label="This ${machineWord(reading).toLowerCase()}">
+    <header>
+      <h2>${esc(reading.name || `This ${machineWord(reading).toLowerCase()}`)}</h2>
+      ${spec ? `<span class="vm-spec">${esc(spec)}</span>` : ""}
+      <span class="effort effort-${reading.level}" title="${esc((reading.reasons || []).join(" · ") || "CPU and memory have room to spare")}">${EFFORT_LABEL[reading.level]} load</span>
+    </header>
+    <div class="vm-meters">
+      ${machineMeter("CPU", reading.cpu_pct)}
+      ${machineMeter("Memory", reading.ram_pct, free)}
+    </div>
+    <p class="vm-foot muted small">${esc(foot.join(" · "))}${foot.length ? " · " : ""}<span class="vm-when">${esc(when)}</span></p>
+  </section>`;
 }
 
 // One line under a lane in the overview: a thin bar, the percent, the time left and the effort.
@@ -491,6 +556,8 @@ function laneProgress(live) {
 
 // Live tick: refresh every bar in place, keeping an opened "why" block open.
 function refreshProgress() {
+  const strip = $(".vibe-machine");
+  if (strip) strip.outerHTML = machineStrip();
   for (const panel of $$(".vibe-progress")) {
     const note = noteByPath(panel.dataset.path);
     if (note) panel.outerHTML = progressPanel(note, panel.dataset.newest === "1");
@@ -551,6 +618,9 @@ async function poll() {
     state.vibeGitKey = gitKey;
     changed = true;
   }
+  // An app that just gained (or lost) the reading needs the strip drawn; after that it updates in place.
+  if (Boolean(data.machine) !== Boolean(state.vibeMachine)) changed = true;
+  state.vibeMachine = data.machine || null;
   if (changed && state.view === "vibe") {
     renderNav();
     renderView();
@@ -1380,6 +1450,7 @@ export function vibeView() {
   );
   return `${head}
     ${recapBand()}
+    ${machineStrip()}
     ${overview(sessions)}
     ${liveCards()}
     ${figures(stats)}

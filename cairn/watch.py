@@ -34,8 +34,8 @@ import sys
 import time
 from pathlib import Path
 
-from . import core, vibe
-from .brain import Brain
+from . import core, machine, vibe
+from .brain import Brain, ConflictError
 
 IDLE_MINUTES = 30
 ACTIVE_GAP_MINUTES = 10  # a pause longer than this between messages is not counted as working time
@@ -50,6 +50,9 @@ TOKEN_COLUMNS = ("tokens_input", "tokens_output", "tokens_reasoning", "tokens_ca
 QUIET_TYPES = ("model-switched", "agent-switched", "system")  # bookkeeping messages: not a turn starting or ending
 BATCH_RUNS = 20  # this many one-prompt runs in one folder in one day is a script, not a person
 REPLY_CHARS = 280
+MACHINE_FOLDER = "machines"
+MACHINE_NOTE_MINUTES = 15  # an unchanged reading is written again after this long, so a reader can tell it is current
+MACHINE_MOVE_POINTS = 10  # CPU or memory moving this many points is worth a new note
 
 
 class WatchError(RuntimeError):
@@ -800,13 +803,94 @@ def sync_vector(brain: Brain, running: bool, now_ms: int, idle_minutes: int = ID
     return action
 
 
+# ------------------------------------------------------------ this computer's load
+
+
+def machine_note(reading: dict) -> tuple[str, str]:
+    """(path, text) of the note that carries a `machine.snapshot()` reading to readers that only have
+    the notes, such as a phone opening the brain from GitHub. One note per computer model."""
+    def text(value) -> str:
+        return "" if value is None else str(value)
+
+    name = text(reading.get("name")) or "This computer"
+    reasons = "; ".join(reading.get("reasons") or [])
+    top = "; ".join(reading.get("top") or [])
+    meta = {
+        "title": name,
+        "type": "note",
+        "tags": ["machine"],
+        "machine_at": text(reading.get("at")),
+        "machine_cpu": text(reading.get("cpu")),
+        "machine_cores": text(reading.get("cores")),
+        "machine_ram_gb": text(reading.get("ram_gb")),
+        "load": text(reading.get("level")),
+        "load_cpu": text(reading.get("cpu_pct")),
+        "load_ram": text(reading.get("ram_pct")),
+        "load_commit": text(reading.get("commit_pct")),
+        "load_power": text(reading.get("power")),
+        "load_why": reasons,
+        "load_top": top,
+    }
+    lines = [
+        "Written by the Cairn session watcher while an AI coding session is live, so the Vibe page can show",
+        "how loaded this computer was. It is the whole computer, not one session. Rewritten on every change.",
+        "",
+        f"- {meta['machine_cpu']}, {meta['machine_cores']} cores, {meta['machine_ram_gb']} GB memory",
+        f"- {meta['load'].capitalize()} load at {meta['machine_at'].replace('T', ' ')}" + (f": {reasons}" if reasons else ""),
+    ]
+    lines += [f"- {meta['load_power'].capitalize()}"] if meta["load_power"] else []
+    lines += [f"- Using the most: {top}"] if top else []
+    path = f"{MACHINE_FOLDER}/{core.slugify(name) or 'this-computer'}.md"
+    return path, core.serialize_note(meta, "\n".join(lines) + "\n")
+
+
+def _machine_changed(old: dict, reading: dict) -> bool:
+    """Worth writing again: another level, CPU or memory moved a good way, or the note is getting old."""
+    if str(old.get("load", "")) != str(reading.get("level", "")):
+        return True
+    for key, now in (("load_cpu", reading.get("cpu_pct")), ("load_ram", reading.get("ram_pct"))):
+        try:
+            if now is not None and abs(int(old.get(key)) - int(now)) >= MACHINE_MOVE_POINTS:
+                return True
+        except (TypeError, ValueError):
+            return True  # nothing comparable was written before
+    try:
+        written = dt.datetime.fromisoformat(str(old.get("machine_at", "")))
+        age = dt.datetime.fromisoformat(str(reading.get("at", ""))) - written
+    except ValueError:
+        return True
+    return abs(age.total_seconds()) >= MACHINE_NOTE_MINUTES * 60
+
+
+def sync_machine(brain: Brain, reading: dict | None = None) -> bool:
+    """Note this computer's load while a session is live. True when the note was written.
+    Quiet on purpose: an idle brain, an unreadable machine and an unchanged reading write nothing."""
+    if not vibe.live_sessions(brain):
+        return False
+    reading = machine.snapshot() if reading is None else reading
+    if not reading:
+        return False
+    path, text = machine_note(reading)
+    try:
+        if not brain.resolve(path).exists():
+            brain.write(path, text)
+            return True
+        current = brain.read(path)
+        if not _machine_changed(core.parse_note(current["text"])["meta"], reading):
+            return False
+        brain.write(path, text, current["mtime"])
+        return True
+    except (ConflictError, OSError):  # edited or synced under us: the next pass writes it
+        return False
+
+
 # ------------------------------------------------------------ the loop
 
 
 def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, everywhere: bool = False,
                days: int = DAYS, idle_minutes: int = IDLE_MINUTES, now_ms: int | None = None,
                vector_names=VECTOR_PROCESSES, db_path: Path | None = None, running: bool | None = None,
-               git: str | None = None, last_reply: bool = False) -> list[str]:
+               git: str | None = None, last_reply: bool = False, laptop: bool = False) -> list[str]:
     """One pass over every source. Returns human-readable lines describing what changed."""
     now_ms = _now_ms() if now_ms is None else now_ms
     messages = []
@@ -827,6 +911,8 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
             messages.append("Vector: session started (app open and the repo changed)")
         elif action == "ended":
             messages.append("Vector: session ended")
+    if laptop and sync_machine(brain):
+        messages.append("Laptop: load noted in machines/")
     return messages
 
 

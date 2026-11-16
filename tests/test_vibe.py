@@ -181,6 +181,10 @@ class VibeGitAndServerTests(unittest.TestCase):
         self.assertTrue(paths[0].startswith("feedback/") and paths[1].startswith("sessions/"))
         self.assertTrue(data["git"]["available"])
         self.assertEqual(data["git"]["commits"], [])
+        # This computer's load rides along: a reading on Windows, null where it cannot be read.
+        self.assertIn("machine", data)
+        if data["machine"] is not None:
+            self.assertIn(data["machine"]["level"], ("light", "medium", "heavy"))
 
 
 if __name__ == "__main__":

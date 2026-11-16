@@ -247,6 +247,7 @@ def _vibe_watch(brain: Brain, args) -> int:
         "days": args.days,
         "idle_minutes": args.idle,
         "last_reply": args.last_reply,
+        "laptop": not args.no_laptop,
     }
     if args.vector_process:
         options["vector_names"] = tuple(args.vector_process)
@@ -255,6 +256,7 @@ def _vibe_watch(brain: Brain, args) -> int:
         extra += ["--everywhere"] if args.everywhere else []
         extra += ["--no-opencode"] if args.no_opencode else []
         extra += ["--no-vector"] if args.no_vector else []
+        extra += ["--no-laptop"] if args.no_laptop else []
         extra += ["--last-reply"] if args.last_reply else []
         extra += [f"--vector-process={name}" for name in args.vector_process or []]
         try:
@@ -609,6 +611,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--last-reply", action="store_true", help="watch: also copy the closing reply of a finished OpenCode turn into its note (one short line), so you can read how it ended from your phone; off by default because notes sync")
     vibe_parser.add_argument("--no-opencode", action="store_true", help="watch: skip OpenCode")
     vibe_parser.add_argument("--no-vector", action="store_true", help="watch: skip Vector detection")
+    vibe_parser.add_argument("--no-laptop", action="store_true", help="watch: do not note this computer's load in machines/")
     vibe_parser.add_argument("--vector-process", action="append", help="watch: process name(s) that mean Vector is open (default Vector.exe)")
     vibe_parser.add_argument("--install", action="store_true", help="watch: start the watcher when you sign in to Windows")
     vibe_parser.add_argument("--uninstall", action="store_true", help="watch: stop starting it at sign-in")

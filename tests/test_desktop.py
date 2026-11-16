@@ -609,6 +609,9 @@ class VibeWatchTests(unittest.TestCase):
         self.assertTrue(options["everywhere"])
         self.assertTrue(options["opencode"])
         self.assertFalse(options["vector"], "Vector reports itself; process guessing stays opt-in")
+        self.assertTrue(options["laptop"], "the load is noted unless switched off")
+        self.config.set("vibeWatchLaptop", False)
+        self.assertFalse(desktop.vibe_watch_options(self.config, self.brain.root)["laptop"])
         self.config.set("vibeWatchEverywhere", False)
         self.assertFalse(desktop.vibe_watch_options(self.config, self.brain.root)["everywhere"])
 

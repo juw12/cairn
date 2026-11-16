@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, mcp, precedent, vibe
+from . import __version__, autopilot, chat, machine, mcp, precedent, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -200,7 +200,11 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(urlparse(self.path).query)
                 since = query.get("since", [""])[0]
                 base = query.get("base", [""])[0]
-                self._send_json({"files": vibe.vibe_files(brain), "git": vibe.git_activity(brain, since, base)})
+                self._send_json({
+                    "files": vibe.vibe_files(brain),
+                    "git": vibe.git_activity(brain, since, base),
+                    "machine": machine.snapshot(),  # this computer and its load now; None where it cannot be read
+                })
             elif route == "/api/chat":
                 self._send_json(chat.summary())
             elif route == "/api/chat/thread":
