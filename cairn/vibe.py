@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import subprocess
+import threading
 import time
 
 from . import core
@@ -21,6 +22,11 @@ from .brain import Brain
 RESULTS = ("shipped", "partial", "dropped")
 MAX_COMMITS = 20
 MAX_CHANGED = 50
+GIT_TTL_S = 20
+GIT_FIRST_WAIT_S = 2
+
+_git_lock = threading.Lock()
+_git_cache: dict[tuple, dict] = {}
 
 
 class VibeError(RuntimeError):
@@ -263,6 +269,35 @@ def git_activity(brain: Brain, since: str = "", base: str = "") -> dict:
         "removed": removed,
         "commits": commits,
     }
+
+
+def git_activity_soon(brain: Brain, since: str = "", base: str = "") -> dict | None:
+    """`git_activity` for the live page, which asks every few seconds and must never wait on git.
+
+    On a busy PC one git command can take most of a minute, and this needs seven. So the last reading is
+    returned at once and refreshed in the background, one run at a time. None until the first reading is
+    in (the page shows "Connecting…"); a run that fails keeps the last good reading."""
+    key = (str(brain.root), since, base)
+    with _git_lock:
+        if key not in _git_cache and len(_git_cache) >= 32:
+            _git_cache.clear()  # old sessions; a refresh still running keeps its own entry
+        entry = _git_cache.setdefault(key, {"at": 0.0, "value": None, "thread": None})
+        thread = entry["thread"]
+        if thread is None and time.time() - entry["at"] >= GIT_TTL_S:
+            def refresh() -> None:
+                try:
+                    entry["value"] = git_activity(brain, since, base)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+                finally:
+                    entry["at"] = time.time()
+                    entry["thread"] = None
+
+            thread = entry["thread"] = threading.Thread(target=refresh, daemon=True)
+            thread.start()
+    if entry["value"] is None and thread is not None:
+        thread.join(GIT_FIRST_WAIT_S)
+    return entry["value"]
 
 
 def stats_text(brain: Brain) -> str:

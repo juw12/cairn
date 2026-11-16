@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -139,6 +140,7 @@ class VibeGitAndServerTests(unittest.TestCase):
         self.git = git
         self.brain = Brain(self.root)
         self.brain.init()
+        vibe._git_cache.clear()
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -169,10 +171,13 @@ class VibeGitAndServerTests(unittest.TestCase):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
             port = server.server_address[1]
-            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-            conn.request("GET", "/api/vibe?since=&base=", headers={"X-Cairn": "1"})
-            data = json.loads(conn.getresponse().read())
-            conn.close()
+            for _ in range(60):  # git is read in the background; a slow PC answers null first
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                conn.request("GET", "/api/vibe?since=&base=", headers={"X-Cairn": "1"})
+                data = json.loads(conn.getresponse().read())
+                conn.close()
+                if data["git"] is not None:
+                    break
         finally:
             server.shutdown()
             server.server_close()
@@ -185,6 +190,66 @@ class VibeGitAndServerTests(unittest.TestCase):
         self.assertIn("machine", data)
         if data["machine"] is not None:
             self.assertIn(data["machine"]["level"], ("light", "medium", "heavy"))
+
+
+class GitActivitySoonTests(unittest.TestCase):
+    """The live page must not wait on git: no repository needed, `git_activity` is replaced."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.brain = Brain(Path(self.tmp.name))
+        self.real = vibe.git_activity
+        self.first_wait = vibe.GIT_FIRST_WAIT_S
+        vibe._git_cache.clear()
+
+    def tearDown(self):
+        vibe.git_activity = self.real
+        vibe.GIT_FIRST_WAIT_S = self.first_wait
+        vibe._git_cache.clear()
+        self.tmp.cleanup()
+
+    def _settle(self):
+        for _ in range(200):
+            if all(entry["thread"] is None for entry in vibe._git_cache.values()):
+                return
+            time.sleep(0.01)
+        self.fail("background git read did not finish")
+
+    def test_slow_git_does_not_block_and_the_reading_arrives_later(self):
+        release = threading.Event()
+        calls = []
+
+        def slow(brain, since="", base=""):
+            calls.append((since, base))
+            release.wait(5)
+            return {"available": True, "commits": [], "head": "abc"}
+
+        vibe.git_activity = slow
+        vibe.GIT_FIRST_WAIT_S = 0.05
+        started = time.time()
+        self.assertIsNone(vibe.git_activity_soon(self.brain, "2026-01-01T10:00", ""))
+        self.assertIsNone(vibe.git_activity_soon(self.brain, "2026-01-01T10:00", ""))
+        self.assertLess(time.time() - started, 2)
+        self.assertEqual(len(calls), 1)  # one run at a time, however often the page asks
+        release.set()
+        self._settle()
+        self.assertEqual(vibe.git_activity_soon(self.brain, "2026-01-01T10:00", "")["head"], "abc")
+        self.assertEqual(len(calls), 1)  # fresh: served from the last reading
+
+    def test_a_failed_read_keeps_the_last_reading(self):
+        vibe.git_activity = lambda brain, since="", base="": {"available": True, "head": "good"}
+        self.assertEqual(vibe.git_activity_soon(self.brain)["head"], "good")
+        self._settle()
+
+        def failing(brain, since="", base=""):
+            raise subprocess.TimeoutExpired("git", 20)
+
+        vibe.git_activity = failing
+        for entry in vibe._git_cache.values():
+            entry["at"] = 0.0  # stale: the next call starts a refresh
+        self.assertEqual(vibe.git_activity_soon(self.brain)["head"], "good")
+        self._settle()
+        self.assertEqual(vibe.git_activity_soon(self.brain)["head"], "good")
 
 
 if __name__ == "__main__":
