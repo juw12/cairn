@@ -286,6 +286,8 @@ The **Autopilot** page (and `cairn autopilot`) goes one step further: hand over 
 agent round after round (OpenCode by default, or any command such as `claude -p`) until it reports `STATUS: DONE`,
 gives it a couple of polish rounds, marks the queue task done, logs the lesson and takes the next `#auto` item.
 You watch the live log, steer with a comment, and get a Windows notification when it needs you.
+A round that fails with no reply (connection lost, gateway down) is not counted: the job waits 30 seconds to
+10 minutes and tries again by itself, and only asks for you after about a day of failed tries.
 
 ```bash
 cairn autopilot add "add dark mode to settings, tests passing" --workdir ~/code/app

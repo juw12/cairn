@@ -186,7 +186,10 @@ class FakeEngine:
 
     def run(self, job, prompt):
         self.prompts.append(prompt)
-        return self.replies.pop(0), "session-1", ""
+        reply = self.replies.pop(0)
+        if reply is None:  # a round that failed without a reply, like a lost connection
+            return "", job["session_id"], "the agent exited with code 1"
+        return reply, "session-1", ""
 
     def stop(self):
         pass
@@ -237,6 +240,72 @@ class AutopilotTests(HomeTestCase):
         worker.work_on(job)
         self.assertIn("token is in the vault now", engine.prompts[1])
         self.assertEqual(autopilot.get_job(job["id"])["pending_comments"], [])
+
+    def test_a_failed_first_round_is_retried_with_the_brief(self):
+        worker, engine = self.worker([None, "Read the code.\nSTATUS: CONTINUE\nNEXT: write it"])
+        job = autopilot.create_job("Publish the page", str(self.tmp / "work"))
+        worker.work_on(job)
+        job = autopilot.get_job(job["id"])
+        self.assertEqual(job["status"], "queued", "a lost connection does not block the job")
+        self.assertEqual((job["rounds"], job["silent_rounds"]), (0, 1), "a failed try is not a round")
+        self.assertGreater(job["retry_at"], time.time())
+        self.assertIsNone(worker.pick(), "the job waits before it is tried again")
+        self.assertEqual(self.notes, [])
+        autopilot.update_job(job["id"], retry_at=time.time() - 1)
+        self.assertEqual(worker.pick()["id"], job["id"])
+        worker.work_on(autopilot.get_job(job["id"]))
+        job = autopilot.get_job(job["id"])
+        self.assertIn("How to work", engine.prompts[1], "the retry is still the first prompt, with the brief")
+        self.assertEqual((job["rounds"], job["silent_rounds"], job["retry_at"]), (1, 0, 0))
+        self.assertIn("trying again at", autopilot.read_log(job["id"])["text"])
+
+    def test_failures_wait_longer_each_time_and_keep_your_comment(self):
+        worker, engine = self.worker(["Read the code.\nSTATUS: CONTINUE", None, None, None, None, None, None, "Wrote it.\nSTATUS: CONTINUE"])
+        job = autopilot.create_job("Publish the page", str(self.tmp / "work"))
+        worker.work_on(job)
+        autopilot.add_comment(job["id"], "use the dark theme")
+        for expected in (30, 60, 120, 300, 600, 600):
+            before = time.time()
+            worker.work_on(autopilot.get_job(job["id"]))
+            job = autopilot.get_job(job["id"])
+            self.assertEqual(job["status"], "queued")
+            self.assertAlmostEqual(job["retry_at"] - before, expected, delta=10)
+        self.assertEqual(job["rounds"], 1)
+        self.assertEqual(self.notes, [], "no notification while it is still trying")
+        worker.work_on(job)
+        job = autopilot.get_job(job["id"])
+        self.assertIn("use the dark theme", engine.prompts[-1], "the comment sent with a failed try goes out again")
+        self.assertEqual((job["rounds"], job["pending_comments"]), (2, []))
+
+    def test_a_waiting_job_holds_the_queue_but_not_other_jobs(self):
+        precedent.queue_add(self.brain, "Add CSV export #auto")
+        worker, _ = self.worker([None])
+        job = autopilot.create_job("Publish the page", str(self.tmp / "work"))
+        worker.work_on(job)
+        self.assertIsNone(worker.pick())
+        self.assertEqual(len(autopilot.jobs()), 1, "an outage does not pull the queue into failing jobs")
+        other = autopilot.create_job("Write the notes", str(self.tmp / "notes"))
+        self.assertEqual(worker.pick()["id"], other["id"])
+        autopilot.add_comment(job["id"], "try now")
+        self.assertEqual(worker.pick()["id"], job["id"], "your comment ends the wait")
+
+    def test_gives_up_only_after_many_failures_in_a_row(self):
+        worker, _ = self.worker([None, None, None])
+        job = autopilot.create_job("Publish the page", str(self.tmp / "work"))
+        old_limit = autopilot.GIVE_UP_ATTEMPTS
+        autopilot.GIVE_UP_ATTEMPTS = 3
+        try:
+            for _ in range(2):
+                worker.work_on(autopilot.get_job(job["id"]))
+            self.assertEqual(autopilot.get_job(job["id"])["status"], "queued")
+            worker.work_on(autopilot.get_job(job["id"]))
+        finally:
+            autopilot.GIVE_UP_ATTEMPTS = old_limit
+        job = autopilot.get_job(job["id"])
+        self.assertEqual(job["status"], "blocked")
+        self.assertIn("3 times in a row", job["blocked_reason"])
+        self.assertEqual((job["silent_rounds"], job["retry_at"]), (0, 0), "a resumed job starts a fresh count")
+        self.assertEqual([title for title, _ in self.notes], ["Cairn autopilot needs you"])
 
     def test_parse_reply_takes_the_last_status(self):
         self.assertEqual(autopilot.parse_reply("STATUS: CONTINUE\nmore\nSTATUS: DONE - shipped\nNEXT: polish"), ("DONE", "shipped", "polish"))

@@ -5,6 +5,8 @@ BLOCKED <reason>` and `NEXT: <step>`, and the autopilot calls it again with the 
 goal is done it gets a couple of improvement rounds, then the next `#queue #auto` task is pulled
 from the brain. It stops only for hard stops (money, sending to people, final submit, passwords)
 and tells you with a desktop notification. Your comments are optional steering.
+A round that fails without a reply (connection lost, gateway down, agent crash) is not a round:
+the job waits (30 s up to 10 min) and tries again by itself, for about a day before it asks for you.
 
 The first prompt of every goal is the precedent brief (see precedent.py), so the agent starts
 with what you asked for after similar goals, your profile and the working loop.
@@ -52,6 +54,10 @@ PROXY_ERRORS = ("UnsupportedContentType", "ECONNREFUSED", "407", "Proxy Authenti
 PROXY_KEYS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
 HEARTBEAT_SECONDS = 20
 STALE_SECONDS = 90
+# Waits between tries after a round fails without a reply; the last one repeats.
+RETRY_WAITS = (30, 60, 120, 300, 600)
+# About a day of trying at the longest wait. Only then is the job blocked.
+GIVE_UP_ATTEMPTS = 150
 
 PROTOCOL = """
 SCOPE: work ONLY on the goal above. Do not start other goals, queue items or projects -
@@ -183,6 +189,7 @@ def create_job(goal: str, workdir: str = "", source: str = "app", queue_path: st
         "rounds": 0,
         "improve_rounds": 0,
         "silent_rounds": 0,
+        "retry_at": 0,
         "pending_comments": [],
         "comments": [],
         "last_status": "",
@@ -214,6 +221,7 @@ def add_comment(job_id: str, text: str) -> dict | None:
             comments=job["comments"] + [{"at": _now(), "text": text}],
             status=status,
             blocked_reason="",
+            retry_at=0,
         )
 
 
@@ -519,10 +527,17 @@ class Autopilot:
         self.release()
 
     def pick(self) -> dict | None:
+        now = time.time()
+        waiting = False
         for job in jobs():
             if job["status"] in ("queued", "running"):
+                if job.get("retry_at", 0) > now:
+                    waiting = True
+                    continue
                 return job
-        if settings()["auto_pull_queue"]:
+        # While a job waits to retry, the queue is left alone: an outage must not turn every
+        # queue task into a failing job.
+        if settings()["auto_pull_queue"] and not waiting:
             return self.pull_from_queue()
         return None
 
@@ -538,6 +553,7 @@ class Autopilot:
         mode = "first" if job["rounds"] == 0 else ("improve" if job["last_status"] == "DONE" else "continue")
         prompt = first_prompt(self.brain, job) if mode == "first" else next_prompt(job, mode)
         round_number = job["rounds"] + 1
+        sent_comments = job["pending_comments"]
         update_job(job["id"], status="running", pending_comments=[])
         self.current = job["id"]
         append_log(job["id"], f"\n=== Round {round_number} ({mode}) {_now()} ===\n")
@@ -556,18 +572,24 @@ class Autopilot:
             "last_status": status or "CONTINUE",
         }
         if error and not text:
-            silent = job["silent_rounds"] + 1
-            append_log(job["id"], f"[{_now()}] {error} (attempt {silent})\n")
-            changes["silent_rounds"] = silent
-            if silent >= 3:
-                changes.update(status="blocked", blocked_reason=f"The agent keeps failing: {error}")
+            # A technical failure is not a round: the round count, the plan and your comments stay
+            # as they were, and the same prompt goes out again after a wait.
+            silent = job.get("silent_rounds", 0) + 1
+            changes = {"session_id": session_id, "pending_comments": sent_comments + job["pending_comments"]}
+            if silent >= GIVE_UP_ATTEMPTS:
+                append_log(job["id"], f"[{_now()}] {error} (attempt {silent}); giving up until you resume it\n")
+                changes.update(status="blocked", silent_rounds=0, retry_at=0,
+                               blocked_reason=f"The agent failed {silent} times in a row: {error}")
                 self.notify("Cairn autopilot needs you", changes["blocked_reason"])
             else:
-                changes["status"] = "queued"
-                self._stop.wait(20)
+                retry_at = time.time() + RETRY_WAITS[min(silent, len(RETRY_WAITS)) - 1]
+                again = dt.datetime.fromtimestamp(retry_at).strftime("%H:%M:%S")
+                append_log(job["id"], f"[{_now()}] {error} (attempt {silent}); trying again at {again}\n")
+                changes.update(status="queued", silent_rounds=silent, retry_at=retry_at)
             update_job(job["id"], **changes)
             return
         changes["silent_rounds"] = 0
+        changes["retry_at"] = 0
         if status == "BLOCKED":
             changes.update(status="blocked", blocked_reason=detail or "needs your input")
             self.notify("Cairn autopilot needs you", f"{job['goal'][:60]}: {changes['blocked_reason']}")
