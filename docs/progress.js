@@ -207,6 +207,45 @@ export function machineReading(live, notes, nowMs = Date.now()) {
   return { ...reading, age, fresh: reading.live || (age !== null && age <= MACHINE_FRESH_MIN) };
 }
 
+// ------------------------------------------------------------ GitHub Actions minutes
+
+const GITHUB_LEVELS = ["ok", "warn", "critical", "over"];
+
+/** One month of GitHub Actions minutes from a github-usage/ note the watcher left. Null for any other note. */
+export function githubFromNote(note) {
+  const meta = note?.meta || {};
+  const used = numberOrNull(meta.gh_used);
+  const limit = numberOrNull(meta.gh_limit);
+  if (!/^\d{4}-\d{2}$/.test(String(meta.gh_month || "")) || used === null || !limit || limit < 0) return null;
+  const pct = numberOrNull(meta.gh_pct) ?? Math.round((used * 100) / limit);
+  const projected = numberOrNull(meta.gh_projected) ?? used;
+  const repos = listOf(meta.gh_repos)
+    .map((part) => /^(.*\S)\s+(\d+)$/.exec(part))
+    .filter(Boolean)
+    .map((match) => ({ name: match[1], minutes: Number(match[2]) }));
+  return {
+    month: String(meta.gh_month),
+    account: String(meta.gh_account || ""),
+    at: String(meta.gh_at || ""),
+    used,
+    limit,
+    pct,
+    level: GITHUB_LEVELS.includes(meta.gh_level) ? meta.gh_level : pct >= 100 ? "over" : pct >= 90 ? "critical" : pct >= 75 ? "warn" : "ok",
+    projected,
+    projectedPct: numberOrNull(meta.gh_projected_pct) ?? Math.round((projected * 100) / limit),
+    resets: String(meta.gh_resets || ""),
+    repos,
+    days: listOf(meta.gh_days).map(Number).filter(Number.isFinite),
+    public: numberOrNull(meta.gh_public) ?? 0,
+    final: meta.gh_final === "yes" || meta.gh_final === true,
+  };
+}
+
+/** Every month the watcher noted, newest first. */
+export function githubUsage(notes) {
+  return notes.map(githubFromNote).filter(Boolean).sort((a, b) => (a.month < b.month ? 1 : -1));
+}
+
 export function formatMinutes(minutes) {
   if (minutes === null || minutes === undefined) return "";
   if (minutes < 1) return "under a minute";

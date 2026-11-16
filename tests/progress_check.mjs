@@ -1,6 +1,6 @@
 // Checks for docs/progress.js; run by tests/test_progress.py (needs Node).
 import assert from "node:assert/strict";
-import { MACHINE_FRESH_MIN, estimateEffort, estimateProgress, formatMinutes, historyRemaining, machineFromNote, machineReading, reportedProgress } from "../docs/progress.js";
+import { MACHINE_FRESH_MIN, estimateEffort, estimateProgress, formatMinutes, githubFromNote, githubUsage, historyRemaining, machineFromNote, machineReading, reportedProgress } from "../docs/progress.js";
 
 const log = (...entries) => entries.map(([time, kind, text]) => ({ time, kind, text }));
 
@@ -106,6 +106,25 @@ const stale = machineReading(null, [noted], at("2026-03-04T11:05"));
 assert.deepEqual([stale.age, stale.fresh], [65, false]);
 assert.equal(estimateEffort({ elapsed: 8, log: [], git: null, machine: stale.fresh ? stale : null }).level, "light");
 assert.equal(machineReading(null, [], at("2026-03-04T10:00")), null);
+
+// GitHub Actions minutes come from the github-usage/ notes the watcher leaves, one per month.
+const november = {
+  meta: {
+    gh_account: "ada", gh_month: "2026-11", gh_at: "2026-11-16T16:40", gh_used: "1440", gh_limit: "2000", gh_pct: "72", gh_level: "warn",
+    gh_projected: "3246", gh_projected_pct: "162", gh_resets: "2026-12-01", gh_repos: "vault 779; job digest 319", gh_days: "104;50;0;231",
+    gh_public: "26140", gh_final: "no",
+  },
+};
+const usage = githubFromNote(november);
+assert.deepEqual([usage.month, usage.account, usage.used, usage.limit, usage.pct, usage.level, usage.projected, usage.projectedPct], ["2026-11", "ada", 1440, 2000, 72, "warn", 3246, 162]);
+assert.deepEqual(usage.repos, [{ name: "vault", minutes: 779 }, { name: "job digest", minutes: 319 }]);
+assert.deepEqual([usage.days, usage.public, usage.final, usage.resets], [[104, 50, 0, 231], 26140, false, "2026-12-01"]);
+const october = githubFromNote({ meta: { gh_month: "2026-10", gh_used: "1900", gh_limit: "2000", gh_final: "yes" } });
+assert.deepEqual([october.pct, october.level, october.projected, october.final, october.days], [95, "critical", 1900, true, []]);
+assert.equal(githubFromNote({ meta: { title: "Plain note" } }), null);
+assert.equal(githubFromNote({ meta: { gh_month: "2026-11", gh_used: "12" } }), null);
+assert.equal(githubFromNote({ meta: { gh_month: "November", gh_used: "12", gh_limit: "2000" } }), null);
+assert.deepEqual(githubUsage([{ meta: {} }, { meta: { gh_month: "2026-10", gh_used: "68", gh_limit: "2000" } }, november]).map((month) => month.month), ["2026-11", "2026-10"]);
 
 assert.equal(formatMinutes(0), "under a minute");
 assert.equal(formatMinutes(45), "45 min");

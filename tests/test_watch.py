@@ -467,7 +467,7 @@ class OpenCodeV2Tests(unittest.TestCase):
         os.environ["CAIRN_OPENCODE_DB"] = str(self.db)
         try:
             with redirect_stdout(out), redirect_stderr(out):
-                code = main(["--root", str(self.root), "vibe", "watch", "--once", "--no-vector", "--last-reply"])
+                code = main(["--root", str(self.root), "vibe", "watch", "--once", "--no-vector", "--no-github", "--last-reply"])
         finally:
             del os.environ["CAIRN_OPENCODE_DB"]
         self.assertEqual(code, 0, out.getvalue())
@@ -569,7 +569,7 @@ class VectorTests(unittest.TestCase):
         os.environ["CAIRN_OPENCODE_DB"] = str(Path(self.tmp.name) / "none.db")
         try:
             with redirect_stdout(out), redirect_stderr(err):
-                code = main(["--root", str(self.root), "vibe", "watch", "--once", "--no-vector"])
+                code = main(["--root", str(self.root), "vibe", "watch", "--once", "--no-vector", "--no-github"])
         finally:
             del os.environ["CAIRN_OPENCODE_DB"]
         self.assertEqual(code, 0, err.getvalue())
@@ -702,3 +702,11 @@ class MachineNoteTests(unittest.TestCase):
             lines = watch.watch_once(self.brain, opencode=False, vector=False, laptop=True)
         self.assertEqual(quiet, [])
         self.assertEqual(lines, ["Laptop: load noted in machines/"])
+
+    def test_a_pass_asks_github_only_when_asked(self):
+        with mock.patch.object(watch.github_usage, "sync", return_value=True) as sync:
+            quiet = watch.watch_once(self.brain, opencode=False, vector=False)
+            sync.assert_not_called()
+            lines = watch.watch_once(self.brain, opencode=False, vector=False, github=True)
+        self.assertEqual(quiet, [])
+        self.assertEqual(lines, ["GitHub: Actions minutes noted in github-usage/"])

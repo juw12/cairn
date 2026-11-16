@@ -34,7 +34,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import core, machine, vibe
+from . import core, github_usage, machine, vibe
 from .brain import Brain, ConflictError
 
 IDLE_MINUTES = 30
@@ -892,7 +892,8 @@ def sync_machine(brain: Brain, reading: dict | None = None) -> bool:
 def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, everywhere: bool = False,
                days: int = DAYS, idle_minutes: int = IDLE_MINUTES, now_ms: int | None = None,
                vector_names=VECTOR_PROCESSES, db_path: Path | None = None, running: bool | None = None,
-               git: str | None = None, last_reply: bool = False, laptop: bool = False) -> list[str]:
+               git: str | None = None, last_reply: bool = False, laptop: bool = False,
+               github: bool = False) -> list[str]:
     """One pass over every source. Returns human-readable lines describing what changed."""
     now_ms = _now_ms() if now_ms is None else now_ms
     messages = []
@@ -915,6 +916,8 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
             messages.append("Vector: session ended")
     if laptop and sync_machine(brain):
         messages.append("Laptop: load noted in machines/")
+    if github and github_usage.sync(brain):
+        messages.append(f"GitHub: Actions minutes noted in {github_usage.FOLDER}/")
     return messages
 
 

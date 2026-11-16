@@ -219,6 +219,11 @@ stand by and take over within five minutes of it stopping.
   let the assistant report itself with `cairn vibe start/log/check/end`.
 - **Privacy:** the OpenCode database is opened read-only and only session metadata and message timestamps are read,
   never message text. Nothing leaves your machine. `--no-opencode` and `--no-vector` turn either source off.
+- **GitHub Actions minutes:** with a GitHub token (the one `cairn publish` uses) the watcher reads your Actions
+  usage once an hour and keeps one note per month in `github-usage/`. The Vibe page shows this month's free
+  minutes as a meter, warns at 75%, 90% and 100% (or when the last 7 days' pace would pass 100% by month end),
+  and keeps the daily and monthly history. Only private repos count; it is an estimate and GitHub's own meter
+  decides. The calls only read; `--no-github` turns them off.
 - **On the page:** sessions are grouped by day (click a day to fold it) and the outcome chips (shipped, no code
   change, no git) double as the legend and as filters. Day totals are clock time too.
 - **Time vibing** is clock time with at least one session working: two agents running side by side for an hour count

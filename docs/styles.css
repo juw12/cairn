@@ -1589,8 +1589,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .dist-row .star-label .icon { width: 11px; height: 11px; fill: currentColor; }
 .session-row .meta .check-pass .icon, .session-row .meta .check-fail .icon { width: 12px; height: 12px; stroke-width: 2.2; vertical-align: -1px; }
 /* vibe: secondary text one step louder than the app-wide --muted, still quieter than --ink-2 */
-.vibe-recap, .vibe-machine, .vibe-overview, .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook { --muted: #59544b; }
-:root[data-theme="dark"] :is(.vibe-recap, .vibe-machine, .vibe-overview, .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook) { --muted: #a9a296; }
+.vibe-recap, .vibe-machine, .vibe-github, .vibe-overview, .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook { --muted: #59544b; }
+:root[data-theme="dark"] :is(.vibe-recap, .vibe-machine, .vibe-github, .vibe-overview, .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook) { --muted: #a9a296; }
 .vibe-figures .figure .label { font-size: 13px; }
 @media (max-width: 600px) {
   :is(.vibe-log-form, .fb-form, .fb-row, .vibe-end) :is(.input, .select, .btn) { min-height: 40px; }
@@ -2229,9 +2229,9 @@ details.rc-fold[open] > summary { margin-bottom: 6px; }
 .mu-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .mu-bar i { display: block; height: 100%; min-width: 2px; border-radius: 2px; background: var(--accent); }
 /* The computer under the sessions: which one it is and how loaded it is right now (or when a watcher last noted it) */
-.vibe-machine { padding: 0 0 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
-.vibe-machine > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 8px; }
-.vibe-machine > header h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.vibe-machine, .vibe-github { padding: 0 0 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+:is(.vibe-machine, .vibe-github) > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 8px; }
+:is(.vibe-machine, .vibe-github) > header h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .vm-spec { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .vm-meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 24px; }
 .vm-meter { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; }
@@ -2243,6 +2243,18 @@ details.rc-fold[open] > summary { margin-bottom: 6px; }
 .vibe-machine.stale .vm-meters { opacity: .6; }
 .vibe-machine.stale .vm-when { color: var(--ink-2); font-weight: 500; }
 .effort-machine { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+/* GitHub Actions minutes: this month's meter, the warning, and the history the watcher keeps in github-usage/ */
+.gh-meter { grid-template-columns: 58px minmax(0, 1fr) auto; }
+.gh-bar.gh-warn > span { background: var(--idea); }
+.gh-bar.gh-critical > span, .gh-bar.gh-over > span { background: var(--danger); }
+.gh-history { margin-top: 8px; font-size: 12.5px; }
+.gh-history > summary { cursor: pointer; color: var(--ink-2); font-weight: 500; width: fit-content; }
+.gh-days { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 10px 0 4px; padding-bottom: 1px; border-bottom: 1px solid var(--line); }
+.gh-days > span { flex: 1 1 0; max-width: 18px; height: 100%; display: flex; align-items: flex-end; }
+.gh-days i { display: block; width: 100%; min-height: 1px; border-radius: 2px 2px 0 0; background: var(--ink-2); }
+.gh-days-foot { margin: 0 0 8px; }
+.gh-month { grid-template-columns: 112px minmax(0, 1fr) auto; margin-top: 4px; }
+.gh-note { margin: 8px 0 0; }
 @media (max-width: 600px) {
   .vm-meters { grid-template-columns: minmax(0, 1fr); }
   .vm-spec { flex-basis: 100%; order: 3; }

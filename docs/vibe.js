@@ -8,7 +8,7 @@ import { escapeHtml as esc } from "./md.js";
 import { $, $$, ask, icon, pageHead, plural, statusPill, toast, today } from "./ui.js";
 import { createNote, fileByPath, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { renderNav, renderView } from "./app.js";
-import { estimateEffort, estimateProgress, formatMinutes, machineReading } from "./progress.js";
+import { estimateEffort, estimateProgress, formatMinutes, githubUsage, machineReading } from "./progress.js";
 import { compact, minutesText, recap, sessionState } from "./recap.js";
 import { chatReady } from "./chat.js";
 import { openShare } from "./share.js";
@@ -537,6 +537,82 @@ function machineStrip() {
       ${machineMeter("Memory", reading.ram_pct, free)}
     </div>
     <p class="vm-foot muted small">${esc(foot.join(" · "))}${foot.length ? " · " : ""}<span class="vm-when">${esc(when)}</span></p>
+  </section>`;
+}
+
+// ------------------------------------------------------------ GitHub Actions minutes
+
+const GITHUB_LABEL = { ok: "Within the free minutes", warn: "Getting close", critical: "Almost at the limit", over: "Over the limit" };
+const GITHUB_EFFORT = { ok: "light", warn: "medium", critical: "heavy", over: "heavy" };
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const monthName = (month) => `${MONTHS[Number(month.slice(5, 7)) - 1] || month} ${month.slice(0, 4)}`;
+const thousands = (value) => Number(value).toLocaleString("en-US");
+
+function githubBar(reading, label) {
+  return `<span class="vibe-bar vm-bar gh-bar gh-${reading.level}" role="meter" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100, reading.pct)}"><span style="width:${Math.min(100, Math.max(0, reading.pct))}%"></span></span>`;
+}
+
+// What the badge is warning about, in one sentence.
+function githubWhy(reading) {
+  if (reading.level === "over") return "Workflows in private repos stop running until the minutes start again.";
+  if (reading.level === "critical") return "GitHub mails at 90% and stops private workflows at 100%.";
+  if (reading.level === "warn" && reading.pct < 75) return `At the last 7 days' pace the month ends at about ${reading.projectedPct}%.`;
+  if (reading.level === "warn") return "GitHub mails at 75%, 90% and 100%.";
+  return "Private workflows have room to run.";
+}
+
+// The days of the running month as bars, then one row per earlier month.
+function githubHistory(current, earlier) {
+  const peak = Math.max(1, ...current.days);
+  const days = current.days.length
+    ? `<div class="gh-days" role="img" aria-label="Minutes used on each day of ${esc(monthName(current.month))}">
+        ${current.days.map((minutes, index) => `<span title="${esc(`${current.month}-${String(index + 1).padStart(2, "0")}: ${thousands(minutes)} min`)}"><i style="height:${Math.round((minutes * 100) / peak)}%"></i></span>`).join("")}
+      </div>
+      <p class="muted small gh-days-foot">Each bar is a day of ${esc(monthName(current.month))}, 1 to ${current.days.length}. The busiest took ${thousands(peak)} minutes.</p>`
+    : "";
+  const months = earlier
+    .filter((reading) => reading.used || reading.public)
+    .map(
+      (reading) => `<div class="vm-meter gh-month">
+        <span class="vm-label">${esc(monthName(reading.month))}</span>
+        ${githubBar(reading, monthName(reading.month))}
+        <span class="vm-num">${thousands(reading.used)} of ${thousands(reading.limit)} <span class="muted">${reading.pct}%${reading.final ? "" : ", not final"}</span></span>
+      </div>`,
+    )
+    .join("");
+  if (!days && !months) return "";
+  return `<details class="gh-history">
+      <summary>Usage history</summary>
+      ${days}
+      ${months || `<p class="muted small">No earlier month with minutes used yet.</p>`}
+    </details>`;
+}
+
+// How much of the month's free GitHub Actions minutes are gone, from the notes the watcher leaves in github-usage/.
+function githubStrip() {
+  const [current, ...earlier] = githubUsage(state.notes);
+  if (!current) return "";
+  const foot = [
+    !current.final && current.resets ? `Starts again from zero on ${current.resets}` : "",
+    !current.final ? `about ${thousands(current.projected)} by the end of the month at the last 7 days' pace (${current.projectedPct}%)` : "",
+    current.repos.length ? `Most: ${current.repos.slice(0, 4).map((repo) => `${repo.name} ${thousands(repo.minutes)}`).join(" · ")}` : "",
+    current.public ? `public repos ${thousands(current.public)} min, free` : "",
+  ].filter(Boolean);
+  const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(current.at) ? `as of ${current.at.slice(0, 10) === today() ? current.at.slice(11, 16) : `${dayLabel(current.at.slice(0, 10))} ${current.at.slice(11, 16)}`}` : "";
+  return `<section class="vibe-github" aria-label="GitHub Actions minutes">
+    <header>
+      <h2>GitHub Actions${current.account ? ` · ${esc(current.account)}` : ""}</h2>
+      <span class="vm-spec">${thousands(current.used)} of ${thousands(current.limit)} free minutes · private repos · ${esc(monthName(current.month))}</span>
+      <span class="effort effort-${GITHUB_EFFORT[current.level]}" title="${esc(githubWhy(current))}">${GITHUB_LABEL[current.level]}</span>
+    </header>
+    <div class="vm-meter gh-meter">
+      <span class="vm-label">Used</span>
+      ${githubBar(current, "Free minutes used")}
+      <span class="vm-num">${current.pct}%</span>
+    </div>
+    <p class="vm-foot muted small">${esc(githubWhy(current))} ${esc(foot.join(" · "))}${foot.length && when ? " · " : ""}<span class="vm-when">${esc(when)}</span></p>
+    ${githubHistory(current, earlier)}
+    <p class="muted small gh-note">An estimate from GitHub's billing usage. GitHub's own meter decides and can read higher.</p>
   </section>`;
 }
 
@@ -1451,6 +1527,7 @@ export function vibeView() {
   return `${head}
     ${recapBand()}
     ${machineStrip()}
+    ${githubStrip()}
     ${overview(sessions)}
     ${liveCards()}
     ${figures(stats)}
