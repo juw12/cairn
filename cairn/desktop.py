@@ -353,7 +353,9 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
     inside one project only takes that project's sessions (the CLI default). Vector sessions are left
     to the assistant's own reports unless turned on: process detection can only guess. The closing
     reply of a finished OpenCode turn is copied into its note only when `vibeWatchReplies` is on.
-    While a session is live, this computer's load is noted in machines/ unless `vibeWatchLaptop` is off."""
+    While a session is live, this computer's load is noted in machines/ unless `vibeWatchLaptop` is off.
+    The month's GitHub Actions minutes are noted in github-usage/ about once an hour unless
+    `vibeWatchGithub` is off; without it the figure on the Vibe page (and the phone) never moves."""
     everywhere = config.get("vibeWatchEverywhere")
     if everywhere is None:
         everywhere = (Path(root) / ".obsidian").is_dir()
@@ -363,6 +365,7 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
         "everywhere": bool(everywhere),
         "last_reply": bool(config.get("vibeWatchReplies", False)),
         "laptop": bool(config.get("vibeWatchLaptop", True)),
+        "github": bool(config.get("vibeWatchGithub", True)),
     }
 
 

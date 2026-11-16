@@ -616,6 +616,10 @@ class VibeWatchTests(unittest.TestCase):
         self.brain.root.mkdir()
         self.brain.init()
         self.no_db = self.tmp / "missing-opencode.db"
+        # The app's watcher also asks GitHub for the month's minutes; a test must not go online.
+        patcher = mock.patch.object(desktop.watch.github_usage, "sync", return_value=False)
+        self.github_sync = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_a_vault_takes_sessions_from_every_folder_a_project_only_its_own(self):
         self.assertFalse(desktop.vibe_watch_options(self.config, self.brain.root)["everywhere"])
@@ -629,6 +633,16 @@ class VibeWatchTests(unittest.TestCase):
         self.assertFalse(desktop.vibe_watch_options(self.config, self.brain.root)["laptop"])
         self.config.set("vibeWatchEverywhere", False)
         self.assertFalse(desktop.vibe_watch_options(self.config, self.brain.root)["everywhere"])
+
+    def test_the_app_keeps_the_github_minutes_fresh_unless_switched_off(self):
+        """Without this the figure on the Vibe page, and on the phone, only moved when someone ran the CLI."""
+        self.assertTrue(desktop.vibe_watch_options(self.config, self.brain.root)["github"])
+        desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db)
+        self.github_sync.assert_called_once_with(self.brain)
+        self.config.set("vibeWatchGithub", False)
+        self.assertFalse(desktop.vibe_watch_options(self.config, self.brain.root)["github"])
+        desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db)
+        self.github_sync.assert_called_once()
 
     def test_a_pass_runs_only_when_switched_on_and_unclaimed(self):
         self.assertEqual(desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db), [])
