@@ -96,7 +96,7 @@ class RelayTests(unittest.TestCase):
         self.patches = [
             mock.patch.object(chat, "find_opencode", return_value="opencode"),
             mock.patch.object(chat.subprocess, "Popen", side_effect=lambda command, **kw: FakeProcess(command)),
-            mock.patch.object(chat, "models", return_value=["pegaai/Pega-Chat"]),
+            mock.patch.object(chat, "models_soon", return_value=["pegaai/Pega-Chat"]),
             mock.patch.object(chat, "keep_normal_priority"),
         ]
         for patch in self.patches:
