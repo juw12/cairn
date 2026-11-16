@@ -3,7 +3,9 @@
 import io
 import json
 import os
+import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -97,6 +99,19 @@ class ChatTests(unittest.TestCase):
         self.assertTrue(listed["available"])
         self.assertEqual([c["title"] for c in listed["chats"]], ["second", "first"])
 
+    def test_saving_waits_out_a_page_that_is_reading_the_chat(self):
+        real_replace = os.replace
+        refusals = [PermissionError(13, "Access is denied")] * 2
+
+        def busy_then_free(source, target):
+            if refusals:
+                raise refusals.pop()
+            return real_replace(source, target)
+
+        with mock.patch.object(chat.os, "replace", side_effect=busy_then_free):
+            chat._save({"id": "20260101-abc", "title": "kept", "messages": []})
+        self.assertEqual(chat.load("20260101-abc")["title"], "kept")
+
     def test_rejects_empty_and_bad_ids(self):
         with self.assertRaises(ValueError):
             chat.send("", "   ", "")
@@ -172,6 +187,68 @@ class ChatTests(unittest.TestCase):
                 chat.about(brain, path, mode)
         with self.assertRaisesRegex(ValueError, "not a session"):
             chat.about(None, "sessions/ok.md", "continue")
+
+
+class ModelListTests(unittest.TestCase):
+    """The chat page never waits for `opencode models`, which can take a minute on a busy PC."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.runs = []
+        self.answer = threading.Event()  # set when the fake `opencode models` may finish
+        self.output = "pegaai/Pega-Chat\nloading plugins\n"
+
+        def fake_run(command, **kwargs):
+            self.runs.append(command)
+            self.answer.wait(5)
+            if self.output is None:
+                raise subprocess.TimeoutExpired(command, 60)
+            return mock.Mock(stdout=self.output)
+
+        for patcher in (
+            mock.patch.dict(os.environ, {"CAIRN_HOME": self.tmp.name}),
+            mock.patch.dict(chat._models_cache, {"at": 0.0, "models": []}),
+            mock.patch.object(chat, "find_opencode", return_value="opencode"),
+            mock.patch.object(chat.subprocess, "run", side_effect=fake_run),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def wait_for(self, condition, what):
+        for _ in range(250):
+            if condition():
+                return
+            time.sleep(0.02)
+        self.fail(what)
+
+    def test_summary_answers_at_once_and_the_list_arrives_later(self):
+        started = time.monotonic()
+        self.assertEqual(chat.summary()["models"], [])
+        self.assertLess(time.monotonic() - started, 2, "it must not wait for opencode")
+        self.wait_for(lambda: self.runs, "the list is never asked for")
+        chat.summary()
+        chat.summary()
+        self.assertEqual(len(self.runs), 1, "one run at a time, however often the page asks")
+        self.answer.set()
+        self.wait_for(lambda: chat.summary()["models"] == ["pegaai/Pega-Chat"], "the list never arrived")
+        self.assertEqual(len(self.runs), 1, "and a fresh list is not asked for again")
+
+    def test_a_failing_opencode_is_not_run_again_on_every_request(self):
+        self.output = None
+        self.answer.set()
+        chat.summary()
+        self.wait_for(lambda: chat._models_cache["at"] and not chat._models_refresh.locked(), "the run never ended")
+        self.assertEqual(chat.summary()["models"], [])
+        time.sleep(0.1)
+        self.assertEqual(len(self.runs), 1)
+
+    def test_a_failed_refresh_keeps_the_last_good_list(self):
+        chat._models_cache.update(at=0.0, models=["pegaai/Pega-Chat"])
+        self.output = None
+        self.answer.set()
+        self.assertEqual(chat.models(force=True), ["pegaai/Pega-Chat"])
+        self.assertEqual(len(self.runs), 1)
 
 
 if __name__ == "__main__":

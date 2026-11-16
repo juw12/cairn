@@ -25,6 +25,7 @@ MAX_MESSAGE_CHARS = 20_000
 _lock = threading.Lock()
 _running: dict[str, subprocess.Popen] = {}
 _models_cache: dict = {"at": 0.0, "models": []}
+_models_refresh = threading.Lock()
 
 
 def home() -> Path:
@@ -61,7 +62,7 @@ def models(force: bool = False) -> list[str]:
     exe = find_opencode()
     if not exe:
         return []
-    if not force and _models_cache["models"] and time.time() - _models_cache["at"] < MODELS_TTL_S:
+    if not force and time.time() - _models_cache["at"] < MODELS_TTL_S:
         return list(_models_cache["models"])
     try:
         result = subprocess.run(
@@ -71,8 +72,23 @@ def models(force: bool = False) -> list[str]:
         found = [line.strip() for line in result.stdout.splitlines() if "/" in line.strip() and " " not in line.strip()]
     except (OSError, subprocess.SubprocessError):
         found = []
-    _models_cache.update(at=time.time(), models=found)
-    return found
+    # A failed run keeps the last good list, and still counts as a try: no re-run on every request.
+    _models_cache.update(at=time.time(), models=found or _models_cache["models"])
+    return list(_models_cache["models"])
+
+
+def models_soon() -> list[str]:
+    """The models known right now. Asking OpenCode can take a minute on a busy PC, so the chat page
+    never waits for it: a stale list is refreshed in the background, one run at a time."""
+    if time.time() - _models_cache["at"] >= MODELS_TTL_S and _models_refresh.acquire(blocking=False):
+        def refresh() -> None:
+            try:
+                models()
+            finally:
+                _models_refresh.release()
+
+        threading.Thread(target=refresh, daemon=True).start()
+    return list(_models_cache["models"])
 
 
 # ============================================================ storage
@@ -96,7 +112,13 @@ def _save(chat: dict) -> None:
     target = _path(chat["id"])
     temp = target.with_suffix(".tmp")
     temp.write_text(json.dumps(chat, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(temp, target)
+    for attempt in range(20):
+        try:
+            return os.replace(temp, target)
+        except PermissionError:  # Windows refuses while the page is reading the file this instant
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def summary() -> dict:
@@ -109,7 +131,8 @@ def summary() -> dict:
                 continue
             items.append({k: chat.get(k) for k in ("id", "title", "model", "status", "updated")})
     items.sort(key=lambda item: item.get("updated") or 0, reverse=True)
-    return {"available": bool(find_opencode()), "models": models(), "chats": items}
+    available = bool(find_opencode())
+    return {"available": available, "models": models_soon() if available else [], "chats": items}
 
 
 def delete(chat_id: str) -> None:

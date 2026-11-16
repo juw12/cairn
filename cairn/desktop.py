@@ -250,9 +250,29 @@ def app_git(*args: str, timeout: int = 120) -> subprocess.CompletedProcess | Non
         return None
 
 
+def head_from_files() -> str:
+    """The checked-out commit, read straight from .git: a busy PC can make git itself time out."""
+    git_dir = APP_ROOT / ".git"
+    try:
+        commit = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if commit.startswith("ref:"):
+            ref = commit[4:].strip()
+            if (git_dir / ref).is_file():
+                commit = (git_dir / ref).read_text(encoding="utf-8").strip()
+            else:
+                packed = (git_dir / "packed-refs").read_text(encoding="utf-8").splitlines()
+                commit = next((line.split()[0] for line in packed if line.split()[1:] == [ref]), "")
+    except OSError:  # a linked worktree keeps HEAD elsewhere; git knows where
+        return ""
+    return commit[:7] if re.fullmatch(r"[0-9a-f]{40,64}", commit) else ""
+
+
 def app_head() -> str:
-    result = app_git("rev-parse", "--short", "HEAD")
-    return result.stdout.strip() if result and result.returncode == 0 else ""
+    head = head_from_files()
+    if head:
+        return head
+    result = app_git("rev-parse", "HEAD")
+    return result.stdout.strip()[:7] if result and result.returncode == 0 else ""
 
 
 def changed_files(old: str, new: str) -> list[str] | None:
@@ -680,8 +700,10 @@ class DesktopHooks:
     def pending_update(self) -> str:
         """What it takes to run the build on disk: "" (nothing), "reload" (page only) or "restart"."""
         head = app_head()
-        if not head or not self.loaded_head or head == self.loaded_head == self.page_head:
+        if not head or head == self.loaded_head == self.page_head:
             return ""
+        if not self.loaded_head:
+            return "restart"  # the build couldn't be read at start, so only a restart is known to be right
         files = changed_files(self.loaded_head, head)
         if files is None or needs_restart(files):
             return "restart"  # when in doubt, a restart is always correct

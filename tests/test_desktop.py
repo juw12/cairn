@@ -541,6 +541,21 @@ class AutoUpdateTests(unittest.TestCase):
         self.assertEqual(self.hooks.act("auto-update", {"on": False}), {"autoUpdate": False})
         self.assertFalse(self.hooks.state()["autoUpdate"])
 
+    def test_build_is_read_without_running_git(self):
+        build = git(self.app, "rev-parse", "HEAD")[:7]
+        with mock.patch.object(desktop, "app_git", return_value=None) as busy_git:  # git timing out on a busy PC
+            self.assertEqual(desktop.app_head(), build)
+            git(self.app, "pack-refs", "--all")
+            self.assertEqual(desktop.app_head(), build, "packed refs")
+            git(self.app, "checkout", "-q", "--detach")
+            self.assertEqual(desktop.app_head(), build, "detached HEAD")
+        busy_git.assert_not_called()
+
+    def test_update_still_applies_when_the_build_was_unknown_at_start(self):
+        self.hooks.loaded_head = self.hooks.page_head = ""  # what a git timeout during start used to leave behind
+        self.assertEqual(self.hooks.pending_update(), "restart")
+        self.assertTrue(self.hooks.update_waiting())
+
     def make_app(self, visible):
         app = desktop.DesktopApp.__new__(desktop.DesktopApp)
         app.hooks = self.hooks

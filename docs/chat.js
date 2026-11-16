@@ -226,6 +226,10 @@ async function refreshList() {
       }
       paint();
     }
+    if (data.available && !data.models.length && !c.modelsRetried) {
+      c.modelsRetried = true; // the PC is still asking OpenCode for its models; look once more
+      setTimeout(refreshList, 15000);
+    }
   } catch (error) {
     c.list = c.list || [];
     if (direct()) toast(error.message);
