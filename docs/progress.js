@@ -184,6 +184,7 @@ export function machineFromNote(note) {
     ram_pct: numberOrNull(meta.load_ram),
     commit_pct: numberOrNull(meta.load_commit),
     power: String(meta.load_power || ""),
+    uptime: String(meta.machine_uptime || ""),
     level: meta.load,
     reasons: listOf(meta.load_why),
     top: listOf(meta.load_top),

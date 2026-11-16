@@ -828,6 +828,7 @@ def machine_note(reading: dict) -> tuple[str, str]:
         "load_ram": text(reading.get("ram_pct")),
         "load_commit": text(reading.get("commit_pct")),
         "load_power": text(reading.get("power")),
+        "machine_uptime": text(reading.get("uptime")),
         "load_why": reasons,
         "load_top": top,
     }
@@ -839,6 +840,7 @@ def machine_note(reading: dict) -> tuple[str, str]:
         f"- {meta['load'].capitalize()} load at {meta['machine_at'].replace('T', ' ')}" + (f": {reasons}" if reasons else ""),
     ]
     lines += [f"- {meta['load_power'].capitalize()}"] if meta["load_power"] else []
+    lines += [f"- {meta['machine_uptime'].capitalize()}"] if meta["machine_uptime"] else []
     lines += [f"- Using the most: {top}"] if top else []
     path = f"{MACHINE_FOLDER}/{core.slugify(name) or 'this-computer'}.md"
     return path, core.serialize_note(meta, "\n".join(lines) + "\n")

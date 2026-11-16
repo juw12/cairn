@@ -69,6 +69,14 @@ class ProcessTests(unittest.TestCase):
         self.assertEqual(machine.top_text(python), "python x2: 2.0 GB, 60% CPU")
         self.assertEqual(machine.top_text(groups[0]), "llama-server: 12.0 GB")
 
+    def test_uptime_reads_in_minutes_then_hours_then_hours_with_days(self):
+        self.assertEqual(machine.uptime_text(12 * 60 + 59), "up 12 min since restart")
+        self.assertEqual(machine.uptime_text(5 * 3600 + 3599), "up 5 h since restart")
+        self.assertEqual(machine.uptime_text(47 * 3600), "up 47 h since restart")
+        self.assertEqual(machine.uptime_text(76 * 3600 + 60), "up 76 h (3 d 4 h) since restart")
+        self.assertEqual(machine.uptime_text(None), "")
+        self.assertEqual(machine.uptime_text(-1), "")
+
     def test_a_first_look_has_memory_but_no_processor_share(self):
         groups = machine.group_processes([(1, "node.exe", 2 * GB, 99.0)], {}, 0, 8)
         self.assertEqual(groups, [{"name": "node", "count": 1, "ram_gb": 2.0, "cpu_pct": 0}])
@@ -104,6 +112,7 @@ class SnapshotTests(unittest.TestCase):
             mock.patch.object(machine, "_cpu_times", side_effect=cpu_times),
             mock.patch.object(machine, "_process_rows", return_value=[(1, "python.exe", 3 * GB, 1.0)]),
             mock.patch.object(machine, "_power", return_value="on battery 62%"),
+            mock.patch.object(machine, "_uptime_seconds", return_value=76 * 3600.0),
             mock.patch.object(machine, "_registry", side_effect=lambda key, name: registry[name]),
             mock.patch.object(machine.time, "sleep"),
         )
@@ -121,12 +130,13 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(reading["level"], "heavy")
         self.assertEqual(reading["reasons"], ["CPU 90% busy", "memory 94% full"])
         self.assertEqual(reading["power"], "on battery 62%")
+        self.assertEqual(reading["uptime"], "up 76 h (3 d 4 h) since restart")
         self.assertEqual(reading["top"], ["python: 3.0 GB"])
         self.assertRegex(reading["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d$")
         # Nothing that names the person or this one computer.
         self.assertEqual(
             set(reading),
-            {"name", "cpu", "cores", "ram_gb", "at", "cpu_pct", "ram_pct", "ram_free_gb", "commit_pct", "power", "level", "reasons", "top"},
+            {"name", "cpu", "cores", "ram_gb", "at", "cpu_pct", "ram_pct", "ram_free_gb", "commit_pct", "power", "uptime", "level", "reasons", "top"},
         )
 
     def test_no_reading_where_memory_cannot_be_read(self):

@@ -78,6 +78,7 @@ const noted = {
   meta: {
     title: "ACME Roadrunner 14", machine_at: "2026-03-04T10:00", machine_cpu: "Intel Core i5", machine_cores: "8", machine_ram_gb: "15.8",
     load: "heavy", load_cpu: "91", load_ram: "80", load_commit: "", load_power: "on battery 62%",
+    machine_uptime: "up 76 h (3 d 4 h) since restart",
     load_why: "CPU 91% busy; memory 80% full", load_top: "python x3: 2.0 GB, 60% CPU; node: 1.1 GB",
   },
 };
@@ -88,6 +89,8 @@ assert.deepEqual(
 );
 assert.deepEqual(fromNote.reasons, ["CPU 91% busy", "memory 80% full"]);
 assert.deepEqual(fromNote.top, ["python x3: 2.0 GB, 60% CPU", "node: 1.1 GB"]);
+assert.equal(fromNote.uptime, "up 76 h (3 d 4 h) since restart");
+assert.equal(machineFromNote({ meta: { load: "light", machine_at: "2026-03-04T10:00" } }).uptime, "");
 assert.equal(machineFromNote({ meta: { title: "Plain note" } }), null);
 assert.equal(machineFromNote({ meta: { load: "heavy" } }), null);
 

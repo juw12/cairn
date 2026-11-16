@@ -525,7 +525,7 @@ function machineStrip() {
   const when = reading.live
     ? "measured now"
     : `as of ${machineWhen(reading)}${reading.fresh ? "" : ", may have changed since"}`;
-  const foot = [reading.power, reading.top?.length ? `Using the most: ${reading.top.slice(0, 4).join(" · ")}` : ""].filter(Boolean);
+  const foot = [reading.power, reading.uptime, reading.top?.length ? `Using the most: ${reading.top.slice(0, 4).join(" · ")}` : ""].filter(Boolean);
   return `<section class="vibe-machine${reading.fresh ? "" : " stale"}" aria-label="This ${machineWord(reading).toLowerCase()}">
     <header>
       <h2>${esc(reading.name || `This ${machineWord(reading).toLowerCase()}`)}</h2>

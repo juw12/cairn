@@ -110,6 +110,19 @@ def group_processes(rows, previous_times: dict, seconds: float, cores: int, limi
     return sorted(by_ram + by_cpu, key=lambda g: (-g["ram_gb"], -g["cpu_pct"]))
 
 
+def uptime_text(seconds) -> str:
+    """"up 12 min since restart", "up 5 h since restart", "up 76 h (3 d 4 h) since restart", or ""."""
+    if seconds is None or seconds < 0:
+        return ""
+    minutes = int(seconds // 60)
+    hours = minutes // 60
+    if hours < 1:
+        return f"up {minutes} min since restart"
+    if hours < 48:
+        return f"up {hours} h since restart"
+    return f"up {hours} h ({hours // 24} d {hours % 24} h) since restart"
+
+
 def top_text(group: dict) -> str:
     """"opencode x15: 5.2 GB, 20% CPU"."""
     count = f" x{group['count']}" if group.get("count", 1) > 1 else ""
@@ -202,6 +215,17 @@ def _power() -> str:
     if status.ACLineStatus == 1:
         return f"plugged in{percent}"
     return f"on battery{percent}" if status.ACLineStatus == 0 else ""
+
+
+def _uptime_seconds() -> float | None:
+    """Seconds since Windows last started, sleep included: the figure Task Manager calls "Up time"."""
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    kernel32 = _kernel32()
+    kernel32.GetTickCount64.restype = ctypes.c_ulonglong  # the default int would cut it off after 24.9 days
+    return kernel32.GetTickCount64() / 1000
 
 
 def _process_rows() -> list[tuple[int, str, int, float]]:
@@ -344,6 +368,7 @@ def snapshot() -> dict | None:
                 "ram_free_gb": round(memory["free"] / 2**30, 1),
                 "commit_pct": memory["commit_pct"],
                 "power": _power(),
+                "uptime": uptime_text(_uptime_seconds()),
                 "level": level,
                 "reasons": reasons,
                 "top": [top_text(group) for group in _top_processes(now, reading["cores"])],

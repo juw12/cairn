@@ -628,7 +628,7 @@ class MachineNoteTests(unittest.TestCase):
     READING = {
         "name": "ACME Roadrunner 14", "cpu": "Intel Core i5", "cores": 8, "ram_gb": 15.8,
         "at": "2026-03-04T10:00", "cpu_pct": 91, "ram_pct": 80, "ram_free_gb": 3.1, "commit_pct": 70,
-        "power": "on battery 62%", "level": "heavy",
+        "power": "on battery 62%", "uptime": "up 76 h (3 d 4 h) since restart", "level": "heavy",
         "reasons": ["CPU 91% busy", "memory 80% full"],
         "top": ["python x3: 2.0 GB, 60% CPU", "node: 1.1 GB"],
     }
@@ -653,6 +653,8 @@ class MachineNoteTests(unittest.TestCase):
         self.assertEqual((meta["machine_at"], meta["machine_cpu"], meta["machine_cores"], meta["machine_ram_gb"]), ("2026-03-04T10:00", "Intel Core i5", "8", "15.8"))
         self.assertEqual((meta["load"], meta["load_cpu"], meta["load_ram"], meta["load_commit"]), ("heavy", "91", "80", "70"))
         self.assertEqual(meta["load_power"], "on battery 62%")
+        self.assertEqual(meta["machine_uptime"], "up 76 h (3 d 4 h) since restart")
+        self.assertIn("- Up 76 h (3 d 4 h) since restart", parsed["body"])
         self.assertEqual(meta["load_why"], "CPU 91% busy; memory 80% full")
         self.assertEqual(meta["load_top"], "python x3: 2.0 GB, 60% CPU; node: 1.1 GB")
         self.assertNotIn("publish", meta)
@@ -663,6 +665,12 @@ class MachineNoteTests(unittest.TestCase):
         self.assertEqual(path, "machines/this-computer.md")
         meta = core.parse_note(text)["meta"]
         self.assertEqual((meta["title"], meta["load"], meta["load_cpu"]), ("This computer", "light", ""))
+
+    def test_a_reading_from_before_uptime_was_measured_still_gets_a_note(self):
+        reading = {key: value for key, value in self.READING.items() if key != "uptime"}
+        parsed = core.parse_note(watch.machine_note(reading)[1])
+        self.assertEqual(parsed["meta"]["machine_uptime"], "")
+        self.assertNotIn("since restart", parsed["body"])
 
     def test_nothing_is_written_without_a_live_session(self):
         self.assertFalse(watch.sync_machine(self.brain, self.READING))
