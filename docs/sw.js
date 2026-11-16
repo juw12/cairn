@@ -58,7 +58,10 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  // "reload": straight from the server. The browser's own HTTP cache may still hold the previous version
+  // (GitHub Pages lets it reuse a file for 10 minutes), and a new worker must not store that as the new one.
+  const fresh = SHELL.map((url) => new Request(url, { cache: "reload" }));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(fresh)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -69,11 +72,23 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// "no-cache": ask the server every time (an unchanged file is a tiny 304), so an update shows the next
+// time the app opens instead of whenever the browser's HTTP cache lets go. Range requests (audio, video)
+// keep their own headers.
+function freshRequest(request) {
+  if (request.headers.has("range")) return request;
+  try {
+    return new Request(request, { cache: "no-cache" });
+  } catch {
+    return request;
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== location.origin || url.pathname.includes("/api/")) return;
   event.respondWith(
-    fetch(event.request)
+    fetch(freshRequest(event.request))
       .then((response) => {
         const copy = response.clone();
         caches.open(CACHE).then((cache) => cache.put(event.request, copy));

@@ -574,22 +574,25 @@ export class GitHubStore {
     const files = [];
     const top = await gh.listFolderIfChanged(this.repo, this.root.replace(/\/$/, ""), this.rootEtag || "");
     if (!top) return { files, git: { available: false, github: true } };
-    this.rootEtag = top.etag;
     for (const folder of ["sessions", "feedback"]) {
       const dir = top.items.find((item) => item.type === "dir" && item.name === folder);
       if (!dir || this.folderShas.get(folder) === dir.sha) continue;
       const listing = await gh.listFolderIfChanged(this.repo, dir.path);
       if (!listing) continue;
-      this.folderShas.set(folder, dir.sha);
-      for (const item of listing.items.filter((entry) => entry.type === "file" && entry.name.endsWith(".md"))) {
-        const path = item.path.slice(this.root.length);
-        if (this.shas.get(path) === item.sha) continue;
-        const latest = await gh.readFile(this.repo, item.path);
-        if (!latest) continue;
-        this.shas.set(path, latest.sha);
-        files.push({ path, text: latest.text, mtime: Date.now() });
+      const moved = listing.items.filter((entry) => entry.type === "file" && entry.name.endsWith(".md")
+        && this.shas.get(entry.path.slice(this.root.length)) !== entry.sha);
+      // Keep each text together with its sha (100 notes a request). A sha remembered without its text
+      // made live sync skip the note, so it vanished on the next reload and from the device copy.
+      const fetched = await gh.blobFiles(this.repo.owner, this.repo.name, this.repo.branch, this.root, moved);
+      for (const file of fetched.filter(Boolean)) {
+        this.keepFile(file.path, file.text, file.sha);
+        files.push({ path: file.path, text: file.text, mtime: Date.now() });
       }
+      this.folderShas.set(folder, dir.sha);
     }
+    // Remembered only once every folder went through, so a pass that failed halfway is tried again.
+    this.rootEtag = top.etag;
+    if (files.length) this.persist();
     return { files, git: { available: false, github: true } };
   }
 

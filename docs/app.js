@@ -792,7 +792,24 @@ window.addEventListener("cairn:signed-out", (event) => {
 });
 
 if ("serviceWorker" in navigator && location.protocol === "https:") {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  // A phone's home-screen app stays in memory for days, so it kept running the old version after an
+  // update. When a new worker takes over an open page, reload into it once you pause (applyUpdate saves
+  // first and reopens the same view). Not on the very first install, when no worker ran this page.
+  const hadWorker = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadWorker || reloading) return;
+    reloading = true;
+    applyUpdate();
+  });
+  navigator.serviceWorker.register("sw.js")
+    .then((registration) => {
+      // Coming back to the app is the moment to look for a new version.
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) registration.update().catch(() => {});
+      });
+    })
+    .catch(() => {});
 }
 
 // ============================================================ desktop auto-update

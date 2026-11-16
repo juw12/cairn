@@ -465,6 +465,78 @@ class SignInTests(unittest.TestCase):
         self.assertLessEqual(fetches, 1, "only the changed note is downloaded, not the whole vault")
         self.assertEqual(self.errors, [])
 
+    def test_vibe_poll_keeps_the_note_for_live_sync_and_the_device_copy(self):
+        # The Vibe poll used to remember a session's sha without its text. Live sync then skipped the
+        # note, so it vanished on the next reload of the notes and never reached the device copy:
+        # the phone showed 2 live sessions while the PC showed 30.
+        page = self.open(f"?brain={REPO}#/board", session=session_json())
+        page.wait_for_selector(".board")
+        path = "sessions/2026-11-07-remote-agent.md"
+        self.mock.set_text(REPO, "brain/" + path, "---\ntitle: Remote agent\ntype: session\nstatus: live\nstarted: 2026-11-07T09:00\n---\n## Log\n\n- 09:00 start: Remote agent\n")
+        go_to(page, "vibe")
+        page.wait_for_function("() => document.querySelector('.vibe-live h2')?.innerText.includes('Remote agent')", timeout=8000)
+        kept = page.evaluate("async (path) => (await window.cairn.state.store.list()).find((file) => file.path === path)?.text || ''", path)
+        self.assertIn("status: live", kept, "the store keeps the text, not only the sha")
+        page.wait_for_function("""async (path) => {
+            const { readBrain, brainKey } = await import('./brain-cache.js');
+            const copy = await readBrain(brainKey('juw12', 'juw12/cairn'));
+            return Boolean(copy?.files.some((file) => file.path === path && file.sha && file.text.includes('status: live')));
+        }""", arg=path, timeout=8000)
+        self.assertEqual(self.errors, [])
+
+    def test_a_device_copy_from_an_older_version_is_loaded_again(self):
+        # A copy saved by an older Cairn stopped at 2,000 notes. It is ignored, so the phone loads the
+        # whole vault once instead of showing that short copy for ever.
+        page = self.open(f"?brain={REPO}#/board", session=session_json())
+        page.wait_for_selector(".board")
+        total = page.evaluate("window.cairn.state.files.length")
+        self.assertGreater(total, 1)
+        # The device copy is saved a moment after loading: wait for it inside the page.
+        saved = page.evaluate("""async () => {
+            const { readBrain, brainKey } = await import('./brain-cache.js');
+            for (let tries = 0; tries < 150; tries += 1) {
+                if (await readBrain(brainKey('juw12', 'juw12/cairn'))) return true;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            return false;
+        }""")
+        self.assertTrue(saved, "the device copy was saved")
+        # Turn it into an old copy: no format stamp, one note only.
+        page.evaluate("""() => {
+            window.oldCopy = '';
+            const fail = (error) => { window.oldCopy = 'failed: ' + (error?.message || error); };
+            const opening = indexedDB.open('cairn-brains');
+            opening.onerror = () => fail(opening.error);
+            opening.onsuccess = () => {
+                const db = opening.result;
+                const tx = db.transaction('brains', 'readwrite');
+                const table = tx.objectStore('brains');
+                const read = table.get('juw12:juw12/cairn');
+                read.onsuccess = () => {
+                    try {
+                        const { format, ...old } = read.result;
+                        table.put({ ...old, files: old.files.slice(0, 1) }, 'juw12:juw12/cairn');
+                    } catch (error) {
+                        fail(error);
+                    }
+                };
+                tx.oncomplete = () => { db.close(); window.oldCopy ||= 'saved'; };
+                tx.onerror = () => fail(tx.error);
+                tx.onabort = () => fail(tx.error || 'aborted');
+            };
+        }""")
+        page.wait_for_function("() => window.oldCopy", timeout=15000)
+        self.assertEqual(page.evaluate("window.oldCopy"), "saved")
+        context = page.context
+        page.close()
+        again = context.new_page()
+        again.on("pageerror", lambda e: self.errors.append(str(e)))
+        again.add_init_script(f"sessionStorage.setItem('cairn.session', {json.dumps(session_json())});")
+        again.goto(self.url + f"?brain={REPO}#/board")
+        again.wait_for_selector(".board")
+        self.assertEqual(again.evaluate("window.cairn.state.files.length"), total)
+        self.assertEqual(self.errors, [])
+
     def test_signing_out_forgets_the_device_copy(self):
         page = self.open(f"?brain={REPO}#/board", session=session_json())
         page.wait_for_selector(".board")

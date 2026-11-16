@@ -32,8 +32,16 @@ async function run(mode, action) {
 
 export const brainKey = (login, fullName) => `${login}:${fullName}`.toLowerCase();
 
-export const readBrain = (key) => run("readonly", (table) => table.get(key));
+// Raise this when copies already on devices can't be trusted any more; they are then ignored and the
+// vault loads from GitHub once. 2: older copies stopped at 2,000 notes (which cut off most of sessions/)
+// and could hold a new sha next to old text.
+const FORMAT = 2;
 
-export const saveBrain = (key, snapshot) => run("readwrite", (table) => table.put(snapshot, key));
+export const readBrain = async (key) => {
+  const snapshot = await run("readonly", (table) => table.get(key));
+  return snapshot?.format === FORMAT ? snapshot : null;
+};
+
+export const saveBrain = (key, snapshot) => run("readwrite", (table) => table.put({ ...snapshot, format: FORMAT }, key));
 
 export const forgetBrains = () => run("readwrite", (table) => table.clear());
