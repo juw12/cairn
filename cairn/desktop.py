@@ -39,6 +39,7 @@ from pathlib import Path
 from . import __version__, watch
 from .brain import NO_WINDOW, Brain, SyncError, clone_repo, repo_folder_name
 from .phone import PHONE_PORT, PhoneAccess
+from .priority import keep_normal_priority
 from .server import attach_autopilot, make_server, switch_brain
 from .winshell import AUMID, stamp_shortcut, start_menu_shortcut
 
@@ -1166,6 +1167,7 @@ class DesktopApp:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    keep_normal_priority()  # also done by Cairn.pyw; this covers `python -m cairn desktop`
     DesktopApp(start_hidden="--hidden" in args).run()
     return 0
 

@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 import http.client
@@ -250,6 +251,59 @@ class GitActivitySoonTests(unittest.TestCase):
         self.assertEqual(vibe.git_activity_soon(self.brain)["head"], "good")
         self._settle()
         self.assertEqual(vibe.git_activity_soon(self.brain)["head"], "good")
+
+
+class VibeFilesTests(unittest.TestCase):
+    """The Vibe page polls every few seconds: notes that did not change must not be opened again."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.brain = Brain(Path(self.tmp.name))
+        self.brain.write("sessions/2026-01-02-beta.md", "---\ntype: session\n---\nbeta\n")
+        self.brain.write("sessions/2026-01-01-Alpha.md", "---\ntype: session\n---\nalpha\r\n")
+        self.brain.write("feedback/good.md", "---\ntype: feedback\n---\ngood\n")
+        (self.brain.dir / "sessions" / "notes.txt").write_text("not a note", encoding="utf-8")
+        vibe._files_cache.clear()
+
+    def tearDown(self):
+        vibe._files_cache.clear()
+        self.tmp.cleanup()
+
+    def expected(self) -> list[dict]:
+        out = []
+        for folder in ("sessions", "feedback"):
+            for path in sorted((self.brain.dir / folder).glob("*.md")):
+                out.append(self.brain.read(self.brain.relative(path)))
+        return out
+
+    def test_unchanged_notes_are_served_without_reading_them_again(self):
+        first = vibe.vibe_files(self.brain)
+        self.assertEqual(first, self.expected())
+        self.assertEqual(len(first), 3)
+        first[0]["text"] = "changed by the caller"
+        with mock.patch.object(self.brain, "read", wraps=self.brain.read) as read:
+            second = vibe.vibe_files(self.brain)
+        self.assertEqual(read.call_count, 0)
+        self.assertEqual(second, self.expected())  # and the caller's edit did not leak into the cache
+
+    def test_edits_new_notes_and_deletions_show_up_on_the_next_poll(self):
+        vibe.vibe_files(self.brain)
+        edited = self.brain.dir / "sessions" / "2026-01-02-beta.md"
+        edited.write_bytes("---\ntype: session\n---\nbeta, with one more step\r\n".encode("utf-8"))
+        self.brain.write("feedback/new.md", "---\ntype: feedback\n---\nnew\n")
+        (self.brain.dir / "sessions" / "2026-01-01-Alpha.md").unlink()
+        with mock.patch.object(self.brain, "read", wraps=self.brain.read) as read:
+            after = vibe.vibe_files(self.brain)
+        self.assertEqual(read.call_count, 2)  # the edited note and the new one, nothing else
+        self.assertEqual(after, self.expected())
+        self.assertEqual(
+            [item["path"] for item in after],
+            ["sessions/2026-01-02-beta.md", "feedback/good.md", "feedback/new.md"],
+        )
+
+    def test_a_missing_folder_is_simply_empty(self):
+        shutil.rmtree(self.brain.dir / "feedback")
+        self.assertEqual([item["path"].split("/")[0] for item in vibe.vibe_files(self.brain)], ["sessions", "sessions"])
 
 
 if __name__ == "__main__":

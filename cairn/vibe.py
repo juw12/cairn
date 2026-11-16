@@ -27,6 +27,7 @@ GIT_FIRST_WAIT_S = 2
 
 _git_lock = threading.Lock()
 _git_cache: dict[tuple, dict] = {}
+_files_cache: dict[str, dict[str, tuple[tuple[int, int], dict]]] = {}  # folder -> name -> ((mtime, size), note)
 
 
 class VibeError(RuntimeError):
@@ -49,17 +50,40 @@ def _one_line(text: str) -> str:
 
 
 def vibe_files(brain: Brain) -> list[dict]:
-    """Only the session and feedback notes: cheap enough to poll every few seconds."""
+    """Only the session and feedback notes: cheap enough to poll every few seconds.
+
+    The folder listing already carries every note's size and modified time, so a note is opened again
+    only when one of those changed. Hundreds of notes then cost one listing per folder, not hundreds of
+    reads on every poll.
+    """
     out = []
     for folder in (core.FOLDERS["session"], core.FOLDERS["feedback"]):
         base = brain.dir / folder
-        if not base.is_dir():
+        try:
+            with os.scandir(base) as listing:
+                entries = sorted(
+                    (entry for entry in listing if entry.name.endswith(".md")),
+                    key=lambda entry: os.path.normcase(entry.name),
+                )
+        except OSError:
             continue
-        for path in sorted(base.glob("*.md")):
+        known = _files_cache.get(str(base), {})
+        fresh: dict[str, tuple[tuple[int, int], dict]] = {}
+        for entry in entries:
+            relative = f"{folder}/{entry.name}"
             try:
-                out.append(brain.read(brain.relative(path)))
+                if entry.is_symlink():
+                    item = brain.read(relative)  # read() checks that the link stays inside the brain
+                else:
+                    info = entry.stat()
+                    stamp = (info.st_mtime_ns, info.st_size)
+                    cached = known.get(entry.name)
+                    item = cached[1] if cached and cached[0] == stamp else brain.read(relative)
+                    fresh[entry.name] = (stamp, item)
             except (OSError, UnicodeDecodeError):
                 continue
+            out.append(dict(item))
+        _files_cache[str(base)] = fresh
     return out
 
 
