@@ -75,6 +75,53 @@ class NoteTests(unittest.TestCase):
         self.assertNotIn("Starts again", text)
 
 
+class CalibrationTests(unittest.TestCase):
+    """GitHub's own figure, once given, is where the count starts."""
+
+    AT = dt.datetime(2026, 11, 16, 14, 51)
+    ROWS = [row("2026-11-10", "vault", 1000), row("2026-11-16", "vault", 440)]
+
+    def reading(self, extra: int = 0, day: int = 16) -> dict:
+        rows = self.ROWS + ([row(f"2026-11-{day:02d}", "jobs", extra)] if extra else [])
+        return github_usage.quota(rows, set(), 2026, 11, day, 2000)
+
+    def test_it_counts_on_from_githubs_figure(self):
+        anchor = {"used": 1801, "at": self.AT, "api": 1440}
+        same = github_usage.calibrate(self.reading(), anchor, self.AT + dt.timedelta(hours=1))
+        self.assertEqual((same["used"], same["pct"], same["since"], same["api_used"], same["level"]), (1801, 90, 0, 1440, "critical"))
+        later = github_usage.calibrate(self.reading(extra=8), anchor, self.AT + dt.timedelta(hours=3))
+        self.assertEqual((later["api_used"], later["since"], later["used"]), (1448, 10, 1811), "8 new minutes count as 10: the rows were a quarter behind")
+        self.assertEqual((later["pace"], later["projected"]), (None, 1811), "no month-end figure within a day of the reading")
+
+    def test_after_a_day_the_month_end_figure_paces_from_the_reading(self):
+        anchor = {"used": 1801, "at": self.AT, "api": 1440}
+        now = self.AT + dt.timedelta(days=2)
+        reading = github_usage.calibrate(self.reading(extra=16, day=18), anchor, now)
+        days_left = (dt.datetime(2026, 12, 1, tzinfo=dt.timezone.utc) - now.astimezone(dt.timezone.utc)).total_seconds() / 86400
+        self.assertEqual((reading["since"], reading["used"], reading["pace"]), (20, 1821, 10.0))
+        self.assertEqual(reading["projected"], round(1821 + 10 * days_left))
+
+    def test_a_figure_far_from_the_rows_is_not_trusted_as_a_ratio(self):
+        wild = github_usage.calibrate(self.reading(extra=10), {"used": 1801, "at": self.AT, "api": 100}, self.AT)
+        self.assertEqual(wild["scale"], 3.0)
+        none = github_usage.calibrate(self.reading(extra=10), {"used": 50, "at": self.AT, "api": 0}, self.AT)
+        self.assertEqual((none["scale"], none["used"]), (1.0, 1500))
+
+    def test_the_note_says_where_the_figure_comes_from(self):
+        reading = github_usage.calibrate(self.reading(extra=8), {"used": 1801, "at": self.AT, "api": 1440}, self.AT + dt.timedelta(hours=3))
+        text = github_usage.usage_note({**reading, "account": "ada", "at": "2026-11-16T17:51"})[1]
+        meta = core.parse_note(text)["meta"]
+        self.assertEqual(
+            (meta["gh_used"], meta["gh_anchor_used"], meta["gh_anchor_at"], meta["gh_anchor_api"], meta["gh_api_used"], meta["gh_since"], meta["gh_scale"], meta["gh_pace"]),
+            ("1811", "1801", "2026-11-16T14:51", "1440", "1448", "10", "1.251", ""),
+        )
+        self.assertIn("1,811 of 2,000 free minutes used (91%), 189 left", text)
+        self.assertIn("GitHub's own count: 1,801 at 2026-11-16 14:51, and 10 more since", text)
+        self.assertEqual(github_usage.anchor_of(meta, "2026-11"), {"used": 1801, "at": self.AT, "api": 1440})
+        self.assertIsNone(github_usage.anchor_of(meta, "2026-12"), "a reading belongs to its month")
+        self.assertIsNone(github_usage.anchor_of({"gh_used": "5"}, "2026-11"))
+
+
 class SyncTests(unittest.TestCase):
     NOW = dt.datetime(2026, 11, 15, 12, 0)
 
@@ -119,6 +166,37 @@ class SyncTests(unittest.TestCase):
         self.assertTrue(github_usage.sync(self.brain, self.NOW + dt.timedelta(minutes=61), self.http))
         self.assertEqual(self.meta("2026-11")["gh_used"], "325")
         self.assertEqual([path for path in self.calls if "billing" in path], ["/users/ada/settings/billing/usage?year=2026&month=11"])
+
+    def test_githubs_figure_survives_the_hourly_rewrite_and_closes_the_month(self):
+        self.usage[11] = [row("2026-11-14", "vault", 1440)]
+        reading = github_usage.set_anchor(self.brain, 1801, now=self.NOW, http=self.http)
+        self.assertEqual((reading["used"], reading["anchor"]["api"]), (1801, 1440), "a fresh figure pairs with the rows of this moment")
+        self.assertIn("1,801 of 2,000 minutes (90%), 199 left", github_usage.summary(reading))
+        self.usage[11].append(row("2026-11-15", "vault", 4))
+        self.assertTrue(github_usage.sync(self.brain, self.NOW + dt.timedelta(minutes=61), self.http))
+        meta = self.meta("2026-11")
+        self.assertEqual((meta["gh_used"], meta["gh_api_used"], meta["gh_since"], meta["gh_anchor_used"], meta["gh_anchor_at"]), ("1806", "1444", "5", "1801", "2026-11-15T12:00"))
+        december = dt.datetime(2026, 12, 2, 12, 0)
+        self.assertTrue(github_usage.sync(self.brain, december, self.http))
+        closed = self.meta("2026-11")
+        self.assertEqual((closed["gh_final"], closed["gh_used"], closed["gh_anchor_used"]), ("yes", "1806", "1801"), "history keeps the counted figure")
+        self.assertNotIn("gh_anchor_used", self.meta("2026-12"))
+
+    def test_setting_the_figure_does_not_wait_for_the_hour_and_takes_an_older_reading(self):
+        self.usage[11] = [row("2026-11-14", "vault", 1442)]
+        github_usage.sync(self.brain, self.NOW, self.http)
+        at = self.NOW - dt.timedelta(hours=3)
+        reading = github_usage.set_anchor(self.brain, 1801, at=at, api=1440, now=self.NOW + dt.timedelta(minutes=5), http=self.http)
+        self.assertEqual((reading["used"], reading["since"]), (1804, 3))
+        self.assertEqual(self.meta("2026-11")["gh_anchor_api"], "1440")
+
+    def test_a_figure_from_another_month_or_the_future_is_refused(self):
+        for at in (dt.datetime(2026, 10, 20, 9, 0), self.NOW + dt.timedelta(hours=2)):
+            with self.assertRaises(ValueError):
+                github_usage.set_anchor(self.brain, 1801, at=at, now=self.NOW, http=self.http)
+        with self.assertRaises(ValueError):
+            github_usage.set_anchor(self.brain, -1, now=self.NOW, http=self.http)
+        self.assertEqual(self.calls, [], "nothing was asked of GitHub")
 
     def test_a_refusal_writes_nothing_and_waits(self):
         def refused(method: str, path: str):

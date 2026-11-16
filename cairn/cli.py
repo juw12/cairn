@@ -316,11 +316,47 @@ def cmd_vibe(brain: Brain, args) -> int:
             print(f"Ended as {args.result}: brain/{note['path']}")
         elif args.action == "watch":
             return _vibe_watch(brain, args)
+        elif args.action == "github":
+            return _vibe_github(brain, args)
         else:
             print(vibe.stats_text(brain))
     except vibe.VibeError as error:
         print(error, file=sys.stderr)
         return 2
+    return 0
+
+
+def _vibe_github(brain: Brain, args) -> int:
+    """`cairn vibe github 1801 --at 2026-11-16T14:51`: count the month's Actions minutes on from the
+    figure GitHub itself shows or mails. With no number, say what the month's note holds."""
+    import datetime as dt
+
+    from . import core, github_usage, publish
+
+    if not args.text:
+        month = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m")
+        path = github_usage.note_path(month)
+        if not brain.resolve(path).exists():
+            print(f"No reading for {month} yet. `cairn vibe watch` notes one every hour; `cairn vibe github <minutes>` sets GitHub's own figure.")
+            return 0
+        meta = core.parse_note(brain.read(path)["text"])["meta"]
+        line = f"GitHub Actions {month}: {meta.get('gh_used', '?')} of {meta.get('gh_limit', '?')} minutes ({meta.get('gh_pct', '?')}%), read {str(meta.get('gh_at', '')).replace('T', ' ')}."
+        if meta.get("gh_anchor_used"):
+            line += f" GitHub's count of {meta['gh_anchor_used']} at {str(meta.get('gh_anchor_at', '')).replace('T', ' ')}, plus {meta.get('gh_since', '0')} since."
+        print(line)
+        return 0
+    try:
+        used = int(args.text[0].replace(",", ""))
+        at = dt.datetime.fromisoformat(args.at) if args.at else None
+        reading = github_usage.set_anchor(brain, used, at=at, api=args.api)
+    except ValueError as error:
+        message = str(error)
+        print(message if message.startswith(("That", "Minutes")) else "Usage: cairn vibe github 1801 [--at 2026-11-16T14:51]", file=sys.stderr)
+        return 2
+    except publish.PublishError as error:
+        print(error, file=sys.stderr)
+        return 1
+    print(github_usage.summary(reading))
     return 0
 
 
@@ -593,11 +629,11 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     vibe_parser = sub.add_parser(
         "vibe",
-        help="track a coding session live: start, log, check, end, status",
+        help="track a coding session live: start, log, check, end, status (and github: set the month's Actions minutes)",
         description="Live progress for AI-assisted coding, kept in brain/sessions/. Tell your assistant to run "
         "`cairn vibe log` after each step and `cairn vibe check -- <tests>` to record results; the app shows it as it happens.",
     )
-    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch"])
+    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github"])
     vibe_parser.add_argument("text", nargs="*", help="goal / log text / end summary; for check, the command after --")
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
@@ -615,6 +651,8 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--no-vector", action="store_true", help="watch: skip Vector detection")
     vibe_parser.add_argument("--no-laptop", action="store_true", help="watch: do not note this computer's load in machines/")
     vibe_parser.add_argument("--no-github", action="store_true", help="watch: do not note the month's GitHub Actions minutes in github-usage/")
+    vibe_parser.add_argument("--at", metavar="WHEN", help="github: when GitHub showed that figure, e.g. 2026-11-16T14:51 (default: now)")
+    vibe_parser.add_argument("--api", type=int, metavar="MINUTES", help="github: what the billing rows summed to at that moment, for a figure that is not fresh")
     vibe_parser.add_argument("--vector-process", action="append", help="watch: process name(s) that mean Vector is open (default Vector.exe)")
     vibe_parser.add_argument("--install", action="store_true", help="watch: start the watcher when you sign in to Windows")
     vibe_parser.add_argument("--uninstall", action="store_true", help="watch: stop starting it at sign-in")

@@ -8,7 +8,7 @@ import { escapeHtml as esc } from "./md.js";
 import { $, $$, ask, icon, pageHead, plural, statusPill, toast, today } from "./ui.js";
 import { createNote, fileByPath, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { renderNav, renderView } from "./app.js";
-import { estimateEffort, estimateProgress, formatMinutes, githubUsage, machineReading } from "./progress.js";
+import { agentGroup, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubUsage, machineReading } from "./progress.js";
 import { compact, minutesText, recap, sessionState } from "./recap.js";
 import { chatReady } from "./chat.js";
 import { openShare } from "./share.js";
@@ -40,6 +40,8 @@ let ovSeen = null;
 let ovEnterAt = -Infinity;
 const ENTER_MS = 700;
 const LANES = 6;
+// With several AIs running at once, each shows this many lanes.
+const LANES_EACH = 3;
 const TRACK = 30;
 const PEEK = 5;
 
@@ -86,6 +88,23 @@ export function sessionSource(note) {
   return source in SOURCES && source !== "logged" ? source : "logged";
 }
 
+// Which AI ran a session, as the filter chips and the live groups name it.
+function groupOf(note) {
+  const group = agentGroup(note.meta);
+  return group.key === "all" ? { key: "agent:all", label: group.label } : group;
+}
+
+// Live sessions bucketed by AI. Given newest first, the AI holding the newest session leads.
+function liveGroups(live) {
+  const groups = new Map();
+  for (const note of live) {
+    const group = groupOf(note);
+    if (!groups.has(group.key)) groups.set(group.key, { ...group, notes: [] });
+    groups.get(group.key).notes.push(note);
+  }
+  return [...groups.values()];
+}
+
 function folderName(note) {
   const folder = typeof note.meta.folder === "string" ? note.meta.folder.replace(/[\\/]+$/, "") : "";
   return folder ? folder.split(/[\\/]/).pop() : "";
@@ -110,21 +129,28 @@ function sessionNotes() {
   return state.notes.filter((n) => n.type === "session").sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
 }
 
-// The source and outcome filters as the list applies them: one that matches nothing falls back to "all".
+// The AI and outcome filters as the list applies them: one that matches nothing falls back to "all".
 function vibeFilters(sessions) {
-  const counts = { all: sessions.length };
-  for (const note of sessions) counts[sessionSource(note)] = (counts[sessionSource(note)] || 0) + 1;
-  const present = Object.keys(SOURCES).filter((source) => counts[source]);
-  const filter = state.vibeFilter in SOURCES && counts[state.vibeFilter] ? state.vibeFilter : "all";
-  const fromSource = filter === "all" ? sessions : sessions.filter((note) => sessionSource(note) === filter);
+  const counts = Object.create(null);
+  const labels = Object.create(null);
+  counts.all = sessions.length;
+  for (const note of sessions) {
+    const group = groupOf(note);
+    counts[group.key] = (counts[group.key] || 0) + 1;
+    labels[group.key] = group.label;
+  }
+  // Busiest AI first; sessions that name no AI go last.
+  const present = Object.keys(labels).sort((a, b) => (a === "other") - (b === "other") || counts[b] - counts[a] || (a < b ? -1 : 1));
+  const filter = state.vibeFilter !== "all" && labels[state.vibeFilter] ? state.vibeFilter : "all";
+  const fromSource = filter === "all" ? sessions : sessions.filter((note) => groupOf(note).key === filter);
   const outcomeCounts = {};
   for (const note of fromSource) outcomeCounts[outcomeOf(note)] = (outcomeCounts[outcomeOf(note)] || 0) + 1;
   const outcome = state.vibeOutcome in OUTCOMES && outcomeCounts[state.vibeOutcome] ? state.vibeOutcome : "all";
-  return { counts, present, filter, fromSource, outcomeCounts, outcome };
+  return { counts, labels, present, filter, fromSource, outcomeCounts, outcome };
 }
 
 export function setVibeFilter(source) {
-  state.vibeFilter = source in SOURCES ? source : "all";
+  state.vibeFilter = typeof source === "string" && source ? source : "all";
   state.vibeLimit = PAGE;
   renderView();
 }
@@ -188,8 +214,9 @@ export function jumpToDay(day) {
   const folded = state.vibeFolded || (state.vibeFolded = new Set());
   folded.delete(day);
   const onDay = state.notes.filter((note) => note.type === "session" && sessionDayOf(note) === day);
+  const { filter } = vibeFilters(sessionNotes());
   const passes = (note) =>
-    (!(state.vibeFilter in SOURCES) || state.vibeFilter === "all" || sessionSource(note) === state.vibeFilter) &&
+    (filter === "all" || groupOf(note).key === filter) &&
     (!(state.vibeOutcome in OUTCOMES) || outcomeOf(note) === state.vibeOutcome);
   if (!onDay.some(passes)) {
     state.vibeFilter = "all";
@@ -568,7 +595,7 @@ function githubHistory(current, earlier) {
     ? `<div class="gh-days" role="img" aria-label="Minutes used on each day of ${esc(monthName(current.month))}">
         ${current.days.map((minutes, index) => `<span title="${esc(`${current.month}-${String(index + 1).padStart(2, "0")}: ${thousands(minutes)} min`)}"><i style="height:${Math.round((minutes * 100) / peak)}%"></i></span>`).join("")}
       </div>
-      <p class="muted small gh-days-foot">Each bar is a day of ${esc(monthName(current.month))}, 1 to ${current.days.length}. The busiest took ${thousands(peak)} minutes.</p>`
+      <p class="muted small gh-days-foot">Each bar is a day of ${esc(monthName(current.month))}, 1 to ${current.days.length}${current.anchor ? ", as the billing rows itemise it" : ""}. The busiest took ${thousands(peak)} minutes.</p>`
     : "";
   const months = earlier
     .filter((reading) => reading.used || reading.public)
@@ -588,17 +615,53 @@ function githubHistory(current, earlier) {
     </details>`;
 }
 
+// "14:51" for a stamp from today, else the day as well.
+function stampLabel(at) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(at)) return "";
+  return at.slice(0, 10) === today() ? at.slice(11, 16) : `${dayLabel(at.slice(0, 10))} ${at.slice(11, 16)}`;
+}
+
+// What is left and how thin to spread it, as three figures under the meter.
+function githubStats(current, budget) {
+  if (budget.days === null) return "";
+  const stats = [
+    ["Left", `${thousands(budget.left)} min`, budget.left ? "" : "private workflows are stopped"],
+    ["Starts again", budget.days === 1 ? "tomorrow" : `in ${budget.days} days`, current.resets],
+    ["Stays under at", `${thousands(budget.perDay)} min a day`, budget.runsOut ? `at the pace now, gone by ${dayLabel(budget.runsOut)}` : ""],
+  ];
+  return `<dl class="gh-stats">${stats
+    .map(([label, value, hint]) => `<div><dt>${label}</dt><dd>${esc(value)}${hint ? ` <span class="muted">${esc(hint)}</span>` : ""}</dd></div>`)
+    .join("")}</dl>`;
+}
+
 // How much of the month's free GitHub Actions minutes are gone, from the notes the watcher leaves in github-usage/.
 function githubStrip() {
   const [current, ...earlier] = githubUsage(state.notes);
   if (!current) return "";
-  const foot = [
-    !current.final && current.resets ? `Starts again from zero on ${current.resets}` : "",
-    !current.final ? `about ${thousands(current.projected)} by the end of the month at the last 7 days' pace (${current.projectedPct}%)` : "",
-    current.repos.length ? `Most: ${current.repos.slice(0, 4).map((repo) => `${repo.name} ${thousands(repo.minutes)}`).join(" · ")}` : "",
-    current.public ? `public repos ${thousands(current.public)} min, free` : "",
-  ].filter(Boolean);
-  const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(current.at) ? `as of ${current.at.slice(0, 10) === today() ? current.at.slice(11, 16) : `${dayLabel(current.at.slice(0, 10))} ${current.at.slice(11, 16)}`}` : "";
+  const budget = githubBudget(current);
+  const anchor = current.anchor;
+  const repos = current.repos.slice(0, 4).map((repo) => `${repo.name} ${thousands(repo.minutes)}`).join(" · ");
+  let foot;
+  if (anchor) {
+    const scale = current.scale !== 1 ? `, billing rows ×${current.scale.toFixed(2)} to match it` : "";
+    foot = [
+      `GitHub's own count: ${thousands(anchor.used)} at ${stampLabel(anchor.at) || anchor.at}, plus ${thousands(current.since)} since${scale}`,
+      !current.final && current.pace !== null ? `about ${thousands(current.projected)} by the end of the month at ${thousands(Math.round(current.pace))} a day since that count (${current.projectedPct}%)` : "",
+      repos ? `Billing rows itemise ${thousands(current.apiUsed)}: ${repos}` : "",
+    ];
+  } else {
+    foot = [
+      !current.final ? `about ${thousands(current.projected)} by the end of the month at the last 7 days' pace (${current.projectedPct}%)` : "",
+      !current.final && current.resets && budget.days === null ? `Starts again from zero on ${current.resets}` : "",
+      repos ? `Most: ${repos}` : "",
+    ];
+  }
+  foot = [...foot, current.public ? `public repos ${thousands(current.public)} min, free` : ""].filter(Boolean);
+  const read = stampLabel(current.at);
+  const when = read ? `${anchor ? "checked" : "as of"} ${read}` : "";
+  const note = anchor
+    ? "Counts on from the number GitHub gave. When GitHub shows or mails a new one, run: cairn vibe github <minutes>"
+    : "Summed from GitHub's billing rows, which can read lower than GitHub's own meter. To count on from the number GitHub shows or mails, run: cairn vibe github <minutes>";
   return `<section class="vibe-github" aria-label="GitHub Actions minutes">
     <header>
       <h2>GitHub Actions${current.account ? ` · ${esc(current.account)}` : ""}</h2>
@@ -610,9 +673,10 @@ function githubStrip() {
       ${githubBar(current, "Free minutes used")}
       <span class="vm-num">${current.pct}%</span>
     </div>
+    ${githubStats(current, budget)}
     <p class="vm-foot muted small">${esc(githubWhy(current))} ${esc(foot.join(" · "))}${foot.length && when ? " · " : ""}<span class="vm-when">${esc(when)}</span></p>
     ${githubHistory(current, earlier)}
-    <p class="muted small gh-note">An estimate from GitHub's billing usage. GitHub's own meter decides and can read higher.</p>
+    <p class="muted small gh-note">${esc(note)}</p>
   </section>`;
 }
 
@@ -832,7 +896,11 @@ function liveCards() {
       <p>${icon("activity")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here or from your terminal with <code>cairn vibe start "add dark mode"</code>. <code>cairn vibe watch</code> picks up OpenCode and Vector sessions on its own.`}${sample}</p>
     </section>`;
   }
-  return live.map((session, index) => liveCard(session, index === 0, live.length)).join("");
+  const groups = liveGroups(live);
+  if (groups.length < 2) return live.map((session, index) => liveCard(session, index === 0, live.length)).join("");
+  return groups
+    .map((group) => `<h3 class="live-agent">${esc(group.label)} <span class="muted">${group.notes.length} live</span></h3>${group.notes.map((session) => liveCard(session, session.path === live[0].path, live.length)).join("")}`)
+    .join("");
 }
 
 function liveCard(live, newest = true, total = 1) {
@@ -925,25 +993,30 @@ function peekRow(note) {
   return `<li><a href="#" data-open="${esc(note.path)}">${esc(note.title)}</a><span class="ov-meta">${esc(when)} · ${duration(minutes)}</span></li>`;
 }
 
+// Whole days since a live session started; 0 inside its first day. Steps carry only a clock time, so the start is all there is to go on.
+function staleDays(note) {
+  return Math.floor(liveSeconds(note.meta.started) / 86400);
+}
+
 function lane(note) {
   const log = core.sessionLog(note.body);
   const passed = log.filter((e) => e.kind === "pass").length;
   const failed = log.filter((e) => e.kind === "fail").length;
   const last = log.at(-1);
-  const source = sessionSource(note);
-  const agent = typeof note.meta.agent === "string" && note.meta.agent ? note.meta.agent : source === "logged" ? "" : SOURCES[source];
-  const who = [agent, folderName(note)].filter(Boolean).join(" · ");
+  const who = folderName(note);
+  const days = staleDays(note);
   const checks = passed || failed
     ? `<span class="ov-checks"><span class="check-pass" title="${passed} checks passed">${icon("check", "sm")}${passed}</span> <span class="check-fail" title="${failed} checks failed">${icon("x", "sm")}${failed}</span></span>`
     : "";
   const step = last
     ? `<span class="ov-step k-${last.kind}"><span class="t">${esc(last.time)}</span><span class="kind">${last.kind}</span><span class="txt">${esc(last.text)}</span></span>`
     : `<span class="ov-step muted">No steps yet</span>`;
-  return `<li class="ov-lane" data-path="${esc(note.path)}" data-steps="${log.length}">
+  return `<li class="ov-lane${days ? " stale" : ""}" data-path="${esc(note.path)}" data-steps="${log.length}">
       <div class="ov-lane-head">
         <i class="ov-pulse" aria-hidden="true"></i>
         <a class="ov-title" href="#" data-open="${esc(note.path)}">${esc(note.title)}</a>
         ${who ? `<span class="ov-who">${esc(who)}</span>` : ""}
+        ${days ? `<span class="ov-stale" title="Still marked live. Open it and end it if the work is over.">started ${plural(days, "day")} ago</span>` : ""}
         ${checks}
         <span class="sr-only">running for </span><span class="ov-clock" data-started="${esc(String(note.meta.started || ""))}" title="Time since it started">${clockText(liveSeconds(note.meta.started))}</span>
       </div>
@@ -953,6 +1026,23 @@ function lane(note) {
         ${step}
       </button>
     </li>`;
+}
+
+// What is running, one block per AI: a few lanes each so one busy AI cannot push the others off the screen.
+function liveLanes(live) {
+  if (!live.length) return "";
+  const groups = liveGroups(live);
+  const cap = groups.length > 1 ? LANES_EACH : LANES;
+  const blocks = groups.map((group) => {
+    const old = group.notes.filter(staleDays).length;
+    const more = group.notes.length - cap;
+    return `<section class="ov-agent" data-agent="${esc(group.key)}">
+        <h3><span class="ov-agent-name">${esc(group.label)}</span><span class="ov-agent-count">${group.notes.length} live</span>${old ? `<span class="ov-agent-old" title="Still marked live. Open one and end it if the work is over.">${old} started over a day ago</span>` : ""}</h3>
+        <ol class="ov-lanes" aria-label="${esc(group.label)}, running now">${group.notes.slice(0, cap).map(lane).join("")}</ol>
+        ${more > 0 ? `<p class="ov-more muted small">+${more} more${groups.length > 1 ? ` in ${esc(group.label)}` : " live"}, listed below</p>` : ""}
+      </section>`;
+  });
+  return `<div class="ov-agents">${blocks.join("")}</div>`;
 }
 
 function overview(sessions) {
@@ -984,9 +1074,7 @@ function overview(sessions) {
         <button type="button" class="btn sm ghost ov-to-list" data-action="vibe-to-list">${icon("chevron", "sm")} ${matching.length > PEEK ? `All ${matching.length} in the list` : "See in the list"}</button>
       </div>`
     : "";
-  const lanes = live.length
-    ? `<ol class="ov-lanes" aria-label="Running now">${live.slice(0, LANES).map(lane).join("")}</ol>${live.length > LANES ? `<p class="ov-more muted small">+${live.length - LANES} more live, listed below</p>` : ""}`
-    : "";
+  const lanes = liveLanes(live);
   return `<section class="vibe-overview" aria-label="Overview">
     <header>
       <h2>Overview</h2>
@@ -1126,10 +1214,9 @@ function recapActions(entry) {
 function recapRow(entry) {
   const note = entry.note;
   const live = note.status === "live";
-  const source = sessionSource(note);
-  const agent = typeof note.meta.agent === "string" && note.meta.agent ? note.meta.agent : source === "logged" ? "" : SOURCES[source];
+  const group = groupOf(note);
   const facts = [
-    agent ? esc(agent) : "",
+    group.key === "other" ? "" : esc(group.label),
     folderName(note) ? esc(folderName(note)) : "",
     entry.model ? `<span class="rc-model" title="Model">${esc(entry.model)}</span>` : "",
     entry.effort ? `<span class="rc-effort" title="Reasoning effort">${esc(entry.effort)} effort</span>` : "",
@@ -1361,7 +1448,7 @@ function sessionRow(note, showSource = true) {
   const folder = folderName(note);
   const bits = [
     /T\d{2}:\d{2}/.test(started) ? `<span class="when">${esc(started.slice(11, 16))}${endClock(note, started)}</span>` : "",
-    showSource ? `<span class="src">${SOURCES[sessionSource(note)]}</span>` : "",
+    showSource ? `<span class="src">${esc(groupOf(note).label)}</span>` : "",
     folder ? `<span class="folder" title="${esc(String(note.meta.folder))}">${icon("folder", "sm")}${esc(folder)}</span>` : "",
     duration(minutes),
     commits ? `<span title="Commits in this folder while it ran">${icon("branch", "sm")}${commits}</span>` : "",
@@ -1378,7 +1465,7 @@ function sessionRow(note, showSource = true) {
 }
 
 function sessionsBlock(sessions, stats) {
-  const { counts, present, filter, fromSource, outcomeCounts, outcome } = vibeFilters(sessions);
+  const { counts, labels, present, filter, fromSource, outcomeCounts, outcome } = vibeFilters(sessions);
   const shown = outcome === "all" ? fromSource : fromSource.filter((note) => outcomeOf(note) === outcome);
   const limit = state.vibeLimit || PAGE;
   if (!state.vibeFolded && shown.length > PAGE) {
@@ -1416,11 +1503,11 @@ function sessionsBlock(sessions, stats) {
   }
   const rest = shown.length - accounted;
   const sourceChips = present.length > 1
-    ? `<div class="vibe-chip-group" role="group" aria-label="Show sessions from">
-        ${["all", ...present].map((source) => `<button class="chip${source === filter ? " on" : ""}" data-action="vibe-filter" data-source="${source}" aria-pressed="${source === filter}">${source === "all" ? "All" : SOURCES[source]} <b>${counts[source]}</b></button>`).join("")}
+    ? `<div class="vibe-chip-group" role="group" aria-label="Show sessions by AI">
+        ${["all", ...present].map((key) => `<button class="chip${key === filter ? " on" : ""}" data-action="vibe-filter" data-source="${esc(key)}" aria-pressed="${key === filter}">${key === "all" ? "All" : esc(labels[key])} <b>${counts[key]}</b></button>`).join("")}
       </div>`
-    : present.length
-      ? `<span class="chip static" title="${present[0] === "logged" ? "Every session was started by hand with cairn vibe start." : "Every session here was detected automatically. Sessions you start with cairn vibe start show up as Logged."}">All from ${SOURCES[present[0]]} <b>${counts[present[0]]}</b></span>${present[0] === "logged" ? "" : `<span class="chip static empty" title="Sessions you start with cairn vibe start or the Start session button land here.">Logged by hand <b>0</b></span>`}`
+    : present.length && present[0] !== "other"
+      ? `<span class="chip static" title="Every session here ran in ${esc(labels[present[0]])}.">All from ${esc(labels[present[0]])} <b>${counts[present[0]]}</b></span>`
       : "";
   const outcomesHere = Object.keys(OUTCOMES).filter((key) => outcomeCounts[key]);
   const outcomeChips = outcomesHere.length

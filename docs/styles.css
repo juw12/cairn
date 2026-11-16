@@ -1929,6 +1929,16 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .ov-step.k-skill .kind { color: var(--feedback); font-weight: 600; }
 .ov-step.k-start .kind, .ov-step.k-end .kind { color: var(--accent-ink); }
 .ov-more { margin: 6px 0 0; }
+/* what is running, one block per AI */
+.ov-agent { margin-top: 16px; }
+.ov-agent > h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; font-size: 13px; font-weight: 600; }
+.ov-agent-count, .ov-agent-old { font-size: 12.5px; font-weight: 400; color: var(--muted); }
+.ov-agent .ov-lanes { margin-top: 6px; }
+.ov-stale { flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.ov-lane.stale .ov-pulse { animation: none; background: var(--line-strong); }
+.ov-lane.stale .ov-clock { color: var(--muted); font-weight: 400; }
+.live-agent { margin: 22px 0 0; font-size: 13px; font-weight: 600; }
+.live-agent .muted { font-weight: 400; }
 /* the band draws itself in when the page opens; after that only what changed moves */
 .vibe-overview.ov-enter .ov-bar { animation: ov-reveal .7s cubic-bezier(.2, .7, .2, 1) var(--ov-into, 0s) both; }
 @keyframes ov-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
@@ -2255,7 +2265,14 @@ details.rc-fold[open] > summary { margin-bottom: 6px; }
 .gh-days-foot { margin: 0 0 8px; }
 .gh-month { grid-template-columns: 112px minmax(0, 1fr) auto; margin-top: 4px; }
 .gh-note { margin: 8px 0 0; }
+/* what is left, when it starts again, and the daily pace that stays under the limit */
+.gh-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 24px; margin: 10px 0 0; }
+.gh-stats > div { min-width: 0; }
+.gh-stats dt { font-size: 12px; color: var(--muted); }
+.gh-stats dd { margin: 1px 0 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.gh-stats dd .muted { display: block; font-size: 12px; font-weight: 400; }
 @media (max-width: 600px) {
+  .gh-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .vm-meters { grid-template-columns: minmax(0, 1fr); }
   .vm-spec { flex-basis: 100%; order: 3; }
   .rc-total { margin-left: 0; flex-basis: 100%; }

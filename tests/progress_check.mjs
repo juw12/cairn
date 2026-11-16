@@ -1,6 +1,6 @@
 // Checks for docs/progress.js; run by tests/test_progress.py (needs Node).
 import assert from "node:assert/strict";
-import { MACHINE_FRESH_MIN, estimateEffort, estimateProgress, formatMinutes, githubFromNote, githubUsage, historyRemaining, machineFromNote, machineReading, reportedProgress } from "../docs/progress.js";
+import { MACHINE_FRESH_MIN, agentGroup, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubFromNote, githubUsage, historyRemaining, machineFromNote, machineReading, reportedProgress } from "../docs/progress.js";
 
 const log = (...entries) => entries.map(([time, kind, text]) => ({ time, kind, text }));
 
@@ -125,6 +125,38 @@ assert.equal(githubFromNote({ meta: { title: "Plain note" } }), null);
 assert.equal(githubFromNote({ meta: { gh_month: "2026-11", gh_used: "12" } }), null);
 assert.equal(githubFromNote({ meta: { gh_month: "November", gh_used: "12", gh_limit: "2000" } }), null);
 assert.deepEqual(githubUsage([{ meta: {} }, { meta: { gh_month: "2026-10", gh_used: "68", gh_limit: "2000" } }, november]).map((month) => month.month), ["2026-11", "2026-10"]);
+assert.deepEqual([usage.anchor, usage.apiUsed, usage.since, usage.scale, usage.pace], [null, 1440, 0, 1, null]);
+
+// A month counted on from GitHub's own figure: the note carries that figure, when it was read and what has come since.
+const counted = githubFromNote({
+  meta: {
+    ...november.meta, gh_used: "1804", gh_pct: "90", gh_level: "critical", gh_projected: "1804", gh_projected_pct: "90",
+    gh_anchor_used: "1801", gh_anchor_at: "2026-11-16T14:51", gh_anchor_api: "1440", gh_api_used: "1442", gh_since: "3", gh_scale: "1.25069", gh_pace: "",
+  },
+});
+assert.deepEqual([counted.used, counted.level, counted.apiUsed, counted.since, counted.scale, counted.pace], [1804, "critical", 1442, 3, 1.25069, null]);
+assert.deepEqual(counted.anchor, { used: 1801, at: "2026-11-16T14:51", api: 1440 });
+
+// What is left, spread over the days to the reset (00:00 UTC on the first): 196 over 15 days is 13 a day.
+const evening = Date.parse("2026-11-16T10:41:00Z");
+assert.deepEqual(githubBudget(counted, evening), { left: 196, days: 15, perDay: 13, runsOut: null });
+assert.deepEqual(githubBudget({ ...counted, pace: 10 }, evening), { left: 196, days: 15, perDay: 13, runsOut: null });
+assert.deepEqual(githubBudget({ ...counted, pace: 49 }, evening), { left: 196, days: 15, perDay: 13, runsOut: "2026-11-20" });
+assert.deepEqual(githubBudget({ ...counted, used: 2100 }, evening), { left: 0, days: 15, perDay: 0, runsOut: null });
+assert.deepEqual(githubBudget(counted, Date.parse("2026-11-30T23:30:00Z")), { left: 196, days: 1, perDay: 196, runsOut: null });
+assert.deepEqual(githubBudget(october, evening), { left: 100, days: null, perDay: null, runsOut: null });
+
+// Sessions group by the AI that ran them: the agent a note names, else its source; spelling and case do not split a group.
+assert.deepEqual(agentGroup({ agent: "opencode", source: "opencode" }), { key: "opencode", label: "OpenCode" });
+assert.deepEqual(agentGroup({ agent: "vector" }), { key: "vector", label: "Vector" });
+assert.deepEqual(agentGroup({ agent: " Vector " }), { key: "vector", label: "Vector" });
+assert.deepEqual(agentGroup({ source: "opencode" }), { key: "opencode", label: "OpenCode" });
+assert.deepEqual(agentGroup({ agent: "claude-code" }), agentGroup({ agent: "Claude" }));
+assert.deepEqual(agentGroup({ agent: "claude code" }), { key: "claude", label: "Claude Code" });
+assert.deepEqual(agentGroup({ agent: "aider" }), { key: "aider", label: "Aider" });
+assert.deepEqual(agentGroup({ source: "logged" }), { key: "other", label: "Other" });
+assert.deepEqual(agentGroup({}), { key: "other", label: "Other" });
+assert.deepEqual(agentGroup(undefined), { key: "other", label: "Other" });
 
 assert.equal(formatMinutes(0), "under a minute");
 assert.equal(formatMinutes(45), "45 min");

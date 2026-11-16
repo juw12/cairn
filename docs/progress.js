@@ -219,6 +219,9 @@ export function githubFromNote(note) {
   if (!/^\d{4}-\d{2}$/.test(String(meta.gh_month || "")) || used === null || !limit || limit < 0) return null;
   const pct = numberOrNull(meta.gh_pct) ?? Math.round((used * 100) / limit);
   const projected = numberOrNull(meta.gh_projected) ?? used;
+  // Set when the count starts from the figure GitHub itself gave (cairn vibe github <minutes>).
+  const anchorUsed = numberOrNull(meta.gh_anchor_used);
+  const anchor = anchorUsed === null ? null : { used: anchorUsed, at: String(meta.gh_anchor_at || ""), api: numberOrNull(meta.gh_anchor_api) };
   const repos = listOf(meta.gh_repos)
     .map((part) => /^(.*\S)\s+(\d+)$/.exec(part))
     .filter(Boolean)
@@ -238,7 +241,53 @@ export function githubFromNote(note) {
     days: listOf(meta.gh_days).map(Number).filter(Number.isFinite),
     public: numberOrNull(meta.gh_public) ?? 0,
     final: meta.gh_final === "yes" || meta.gh_final === true,
+    anchor,
+    apiUsed: numberOrNull(meta.gh_api_used) ?? used,
+    since: numberOrNull(meta.gh_since) ?? 0,
+    scale: numberOrNull(meta.gh_scale) ?? 1,
+    pace: anchor ? numberOrNull(meta.gh_pace) : null,
   };
+}
+
+/**
+ * What is left of a month's minutes and how thin to spread it: `left`, whole `days` until the reset
+ * (it happens at 00:00 UTC), `perDay` that keeps the month under the limit, and `runsOut`, the day
+ * the minutes end at the pace since GitHub's own count, when that is before the reset.
+ */
+export function githubBudget(reading, nowMs = Date.now()) {
+  const left = Math.max(0, reading.limit - reading.used);
+  const reset = Date.parse(`${reading.resets}T00:00:00Z`);
+  if (reading.final || !Number.isFinite(reset)) return { left, days: null, perDay: null, runsOut: null };
+  const days = Math.max(1, Math.ceil((reset - nowMs) / 86400000));
+  const lasts = reading.pace > 0 ? left / reading.pace : Infinity;
+  const runsOut = lasts < days ? new Date(nowMs + lasts * 86400000).toISOString().slice(0, 10) : null;
+  return { left, days, perDay: Math.floor(left / days), runsOut };
+}
+
+// ------------------------------------------------------------ which AI ran a session
+
+const AGENT_LABELS = {
+  opencode: "OpenCode",
+  vector: "Vector",
+  codex: "Codex",
+  claude: "Claude Code",
+  "claude-code": "Claude Code",
+  "claude code": "Claude Code",
+  copilot: "Copilot",
+  cursor: "Cursor",
+  gemini: "Gemini",
+};
+
+/**
+ * The AI a session belongs to, for grouping: the agent it names, else the source that wrote the note.
+ * Spelling and case do not split a group ("Vector" and "vector" are one); no name at all is "Other".
+ */
+export function agentGroup(meta) {
+  const name = String(meta?.agent || meta?.source || "").trim().toLowerCase();
+  if (!name || name === "logged") return { key: "other", label: "Other" };
+  const label = AGENT_LABELS[name] || name.replace(/^./, (letter) => letter.toUpperCase());
+  const key = label === "Claude Code" ? "claude" : name;
+  return { key, label };
 }
 
 /** Every month the watcher noted, newest first. */

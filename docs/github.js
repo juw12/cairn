@@ -14,7 +14,7 @@ export const BRAIN_TOPIC = "cairn-brain";
 const MAX_FILES = 5000;
 // A vault over the cap keeps the folders Cairn works in first, so what is left out is the tail of an
 // archive folder, never live sessions or open tasks.
-const KEEP_FIRST = ["sessions/", "feedback/", "tasks/", "ideas/", "decisions/"];
+const KEEP_FIRST = ["sessions/", "github-usage/", "machines/", "feedback/", "tasks/", "ideas/", "decisions/"];
 
 export class GitHubError extends Error {}
 
