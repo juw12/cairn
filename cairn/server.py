@@ -203,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({
                     "files": vibe.vibe_files(brain),
                     "git": vibe.git_activity_soon(brain, since, base),  # None until git has answered once
-                    "machine": machine.snapshot(),  # this computer and its load now; None where it cannot be read
+                    "machine": machine.snapshot_soon(),  # this computer and its load; None at first or where it cannot be read
                 })
             elif route == "/api/chat":
                 self._send_json(chat.summary())

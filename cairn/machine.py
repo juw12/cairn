@@ -23,6 +23,8 @@ CPU_WINDOW_SECONDS = 30  # the CPU figure is an average over this long, so one s
 CPU_BASELINE_MAX_SECONDS = 120  # the watcher looks once a minute: its average runs from its previous look
 FIRST_SAMPLE_SECONDS = 0.25
 PROCESS_REFRESH_SECONDS = 15  # listing every process is the costly part: reuse it between page polls
+SOON_TTL_SECONDS = 5  # the live page asks every few seconds: one reading serves that long
+SOON_FIRST_WAIT_SECONDS = 2
 TOP_GROUPS = 4
 CPU_MEDIUM, CPU_HEAVY = 50, 85
 RAM_MEDIUM, RAM_HEAVY = 75, 90
@@ -33,6 +35,8 @@ _lock = threading.Lock()
 _cpu_samples: collections.deque = collections.deque(maxlen=64)  # (monotonic seconds, busy, total)
 _processes: dict = {"at": 0.0, "times": {}, "top": []}
 _specs: dict | None = None
+_soon_lock = threading.Lock()
+_soon: dict = {"at": float("-inf"), "value": None, "thread": None}
 
 
 # ------------------------------------------------------------ the level (pure)
@@ -347,3 +351,28 @@ def snapshot() -> dict | None:
             return reading
     except Exception:  # a reading is a nicety: it must never take the watcher or a request down
         return None
+
+
+def snapshot_soon() -> dict | None:
+    """`snapshot` for the live page, which must never wait on it.
+
+    The laptop this exists for is the busy one, and there a reading (listing every process, the first
+    ctypes import) can take many seconds. So the last reading is returned at once and refreshed in the
+    background, one run at a time. None until the first reading is in; a failed run keeps the last one."""
+    with _soon_lock:
+        thread = _soon["thread"]
+        if thread is None and time.monotonic() - _soon["at"] >= SOON_TTL_SECONDS:
+            def refresh() -> None:
+                try:
+                    reading = snapshot()
+                    if reading is not None:
+                        _soon["value"] = reading
+                finally:
+                    _soon["at"] = time.monotonic()
+                    _soon["thread"] = None
+
+            thread = _soon["thread"] = threading.Thread(target=refresh, daemon=True)
+            thread.start()
+    if _soon["value"] is None and thread is not None:
+        thread.join(SOON_FIRST_WAIT_SECONDS)
+    return _soon["value"]

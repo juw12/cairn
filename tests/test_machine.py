@@ -1,5 +1,7 @@
 """The computer under the sessions: what it is and how loaded it is (cairn/machine.py)."""
 
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -137,6 +139,51 @@ class SnapshotTests(unittest.TestCase):
     def test_a_failing_reader_never_raises(self):
         with mock.patch.object(machine, "_memory", side_effect=OSError("denied")):
             self.assertIsNone(machine.snapshot())
+
+
+class SnapshotSoonTests(unittest.TestCase):
+    """The live page must not wait on a reading: `snapshot` is replaced by a slow one."""
+
+    def setUp(self):
+        saved = dict(machine._soon)
+        self.addCleanup(machine._soon.update, saved)
+        machine._soon.update(at=float("-inf"), value=None, thread=None)
+
+    def _settle(self):
+        for _ in range(200):
+            if machine._soon["thread"] is None:
+                return
+            time.sleep(0.01)
+        self.fail("background reading did not finish")
+
+    def test_a_slow_reading_does_not_block_and_arrives_later(self):
+        release = threading.Event()
+        calls = []
+
+        def slow():
+            calls.append(1)
+            release.wait(5)
+            return {"level": "heavy"}
+
+        with mock.patch.object(machine, "snapshot", slow), mock.patch.object(machine, "SOON_FIRST_WAIT_SECONDS", 0.05):
+            started = time.monotonic()
+            self.assertIsNone(machine.snapshot_soon())
+            self.assertIsNone(machine.snapshot_soon())
+            self.assertLess(time.monotonic() - started, 2)
+            self.assertEqual(len(calls), 1)  # one run at a time, however often the page asks
+            release.set()
+            self._settle()
+            self.assertEqual(machine.snapshot_soon(), {"level": "heavy"})
+            self.assertEqual(len(calls), 1)  # fresh: served from the last reading
+
+    def test_a_failed_reading_keeps_the_last_one(self):
+        with mock.patch.object(machine, "snapshot", return_value={"level": "light"}):
+            self.assertEqual(machine.snapshot_soon(), {"level": "light"})
+            self._settle()
+        machine._soon["at"] = float("-inf")  # stale: the next call reads again
+        with mock.patch.object(machine, "snapshot", return_value=None):
+            self.assertEqual(machine.snapshot_soon(), {"level": "light"})
+            self._settle()
 
 
 if __name__ == "__main__":
