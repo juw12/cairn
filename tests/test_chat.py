@@ -27,6 +27,7 @@ class FakeProcess:
         self.stdout = io.StringIO("".join(json.dumps(event) + "\n" for event in events))
         self.stderr = io.StringIO("")
         self.returncode = None
+        self.pid = 4321
 
     def wait(self):
         self.returncode = 0
@@ -56,6 +57,7 @@ class ChatTests(unittest.TestCase):
             mock.patch.object(chat, "find_opencode", return_value="opencode"),
             mock.patch.object(chat.subprocess, "Popen", side_effect=fake_popen),
             mock.patch.object(chat, "models", return_value=["pegaai/Pega-Chat"]),
+            mock.patch.object(chat, "keep_normal_priority"),
         ]
         for patch in self.patches:
             patch.start()
@@ -89,6 +91,20 @@ class ChatTests(unittest.TestCase):
         again = self.wait_idle(first["id"])
         self.assertEqual(len(again["messages"]), 4)
         self.assertIn("ses_test", self.commands[1])  # continues the same OpenCode session
+
+    def test_a_reply_run_is_watched_for_a_priority_drop(self):
+        with mock.patch.object(chat, "_keep_normal") as watcher:
+            started = chat.send("", "hi there", "")
+            self.wait_idle(started["id"])
+        (process,), _ = watcher.call_args
+        self.assertEqual(process.command, self.commands[0])
+
+    def test_a_run_is_put_back_to_normal_until_it_ends(self):
+        process = mock.Mock(pid=4321)
+        process.poll.side_effect = [None, None, 0]
+        with mock.patch.object(chat, "PRIORITY_CHECK_S", 0):
+            chat._keep_normal(process)
+        self.assertEqual(chat.keep_normal_priority.call_args_list, [mock.call(4321), mock.call(4321)])
 
     def test_summary_lists_chats_newest_first(self):
         a = chat.send("", "first", "")

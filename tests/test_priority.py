@@ -1,6 +1,7 @@
 """The app puts itself back to normal priority when it was started low."""
 
 import ctypes
+import subprocess
 import sys
 import unittest
 
@@ -34,6 +35,23 @@ class PriorityTests(unittest.TestCase):
         self.assertTrue(self.kernel.SetPriorityClass(self.process, NORMAL))
         keep_normal_priority()
         self.assertEqual(self.current(), NORMAL)
+
+    def test_another_process_is_put_back_to_normal(self):
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            creationflags=subprocess.BELOW_NORMAL_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW,
+        )
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        handle = int(child._handle)
+        self.assertEqual(self.kernel.GetPriorityClass(handle), BELOW_NORMAL)
+        keep_normal_priority(child.pid)
+        self.assertEqual(self.kernel.GetPriorityClass(handle), NORMAL)
+
+    def test_a_process_that_is_gone_is_ignored(self):
+        child = subprocess.Popen([sys.executable, "-c", "pass"], creationflags=subprocess.CREATE_NO_WINDOW)
+        child.wait()
+        keep_normal_priority(child.pid)  # must not raise
 
 
 if __name__ == "__main__":

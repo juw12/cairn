@@ -18,7 +18,10 @@ import threading
 import time
 from pathlib import Path
 
+from .priority import keep_normal_priority
+
 CHAT_TIMEOUT_S = 15 * 60
+PRIORITY_CHECK_S = 2
 MODELS_TTL_S = 600
 MAX_MESSAGE_CHARS = 20_000
 
@@ -225,7 +228,16 @@ def send(chat_id: str, text: str, model: str = "", session: str = "", folder: st
         )
         _running[chat["id"]] = process
     threading.Thread(target=_collect, args=(chat["id"], process), daemon=True).start()
+    threading.Thread(target=_keep_normal, args=(process,), daemon=True).start()
     return chat
+
+
+def _keep_normal(process: subprocess.Popen) -> None:
+    """On a busy PC a reply run was seen dropped to below-normal priority some 20 s after it started; it
+    then gets almost no processor time and the reply takes minutes or never comes. Put it back while it runs."""
+    while process.poll() is None:
+        keep_normal_priority(process.pid)
+        time.sleep(PRIORITY_CHECK_S)
 
 
 def _collect(chat_id: str, process: subprocess.Popen) -> None:

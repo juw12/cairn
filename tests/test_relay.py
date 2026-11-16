@@ -26,6 +26,7 @@ class FakeProcess:
         self.stdout = io.StringIO("".join(json.dumps(event) + "\n" for event in events))
         self.stderr = io.StringIO("")
         self.returncode = None
+        self.pid = 4321
 
     def wait(self):
         self.returncode = 0
@@ -96,6 +97,7 @@ class RelayTests(unittest.TestCase):
             mock.patch.object(chat, "find_opencode", return_value="opencode"),
             mock.patch.object(chat.subprocess, "Popen", side_effect=lambda command, **kw: FakeProcess(command)),
             mock.patch.object(chat, "models", return_value=["pegaai/Pega-Chat"]),
+            mock.patch.object(chat, "keep_normal_priority"),
         ]
         for patch in self.patches:
             patch.start()
