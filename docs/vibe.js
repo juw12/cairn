@@ -556,7 +556,7 @@ function githubBar(reading, label) {
 function githubWhy(reading) {
   if (reading.level === "over") return "Workflows in private repos stop running until the minutes start again.";
   if (reading.level === "critical") return "GitHub mails at 90% and stops private workflows at 100%.";
-  if (reading.level === "warn" && reading.pct < 75) return `At the last 7 days' pace the month ends at about ${reading.projectedPct}%.`;
+  if (reading.level === "warn" && reading.pct < 75) return "On course to pass the limit before the month ends.";
   if (reading.level === "warn") return "GitHub mails at 75%, 90% and 100%.";
   return "Private workflows have room to run.";
 }
