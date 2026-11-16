@@ -290,7 +290,7 @@ function reachStatus(phone) {
   const ts = phone?.tailscale || {};
   if (ts.running) return { anywhere: true, text: `From any network through Tailscale (${ts.dns || ts.ip}).` };
   if (ts.installed) return { anywhere: false, text: "Same Wi-Fi only: Tailscale is installed but not signed in." };
-  return { anywhere: false, text: "Same Wi-Fi only. Add Tailscale to reach this PC from mobile data or any Wi-Fi." };
+  return { anywhere: false, text: "Pairing needs the same Wi-Fi. On mobile data or another Wi-Fi, use Sign in a phone (any network)." };
 }
 
 // The QR code a phone scans to pair (Settings > Pair a phone, or the tray icon).
@@ -304,7 +304,8 @@ export async function openPairPhone() {
       <h2 id="pair-title">Pair a phone</h2>
       <p>Scan this with your phone's camera. ${result.anywhere
         ? "It works from any network while Tailscale is on in your phone (same account as this PC)."
-        : "Your phone and this PC need to be on the same Wi-Fi. For any network, set up Tailscale in Settings first."}</p>
+        : "Your phone and this PC need to be on the same Wi-Fi."}</p>
+      ${result.anywhere ? "" : `<p class="pair-url"><button type="button" class="btn sm" data-any-network>${icon("github", "sm")} Not on the same Wi-Fi? Sign in from any network</button></p>`}
       ${result.qr ? `<div class="pair-qr">${result.qr}</div>` : `<p class="muted">Open this address on your phone:</p>`}
       <p class="pair-url"><code>${esc(result.url)}</code> <button type="button" class="btn sm ghost" data-copy-url>${icon("copy", "sm")} Copy</button></p>
       ${result.others.length ? `<details class="pair-others"><summary>Phone can't connect? Try another address</summary>${result.others.map((url) => `<p><code>${esc(url)}</code></p>`).join("")}</details>` : ""}
@@ -328,6 +329,11 @@ export async function openPairPhone() {
       }
     }, 2000);
     wrap.addEventListener("click", (e) => {
+      if (e.target.closest("[data-any-network]")) {
+        clearInterval(timer);
+        close();
+        return openPhoneSignin();
+      }
       if (!e.target.closest("[data-copy-url]")) return;
       navigator.clipboard.writeText(result.url).then(() => toast("Address copied."), () => toast("Couldn't copy.", { error: true }));
     });
@@ -343,7 +349,8 @@ export async function openPhoneSignin() {
     <div class="modal pair-phone" role="dialog" aria-modal="true" aria-labelledby="signin-title">
       <h2 id="signin-title">Sign in a phone</h2>
       <p>Scan with the phone's camera and open it in your normal browser. It signs in to GitHub and opens
-        <strong>${esc(result.repo)}</strong> on the Map, from any network. The browser remembers it.</p>
+        <strong>${esc(result.repo)}</strong> on the Vibe page, from any network. The browser remembers it.
+        Sessions there update each time this PC syncs to GitHub, about every 10 minutes.</p>
       ${result.qr ? `<div class="pair-qr">${result.qr}</div>` : ""}
       <p class="pair-url"><button type="button" class="btn sm ghost" data-copy-signin>${icon("copy", "sm")} Copy link for another browser</button></p>
       <p class="hint">This code carries this PC's GitHub sign-in: show it only to your own devices. To cut a device off,

@@ -598,7 +598,7 @@ class DesktopHooks:
         repo = github_repo_of(root) if root is not None else ""
         if not repo:
             raise ValueError("This brain isn't on GitHub yet. Link it to a GitHub repo and Sync once, then try again.")
-        url = f"{WEB_APP}?brain={repo}#/map?signin={token}"
+        url = f"{WEB_APP}?brain={repo}#/vibe?signin={token}"
         log(f"phone sign-in code shown for {repo}")
         return {"url": url, "qr": qr_svg(url), "repo": repo}
 
