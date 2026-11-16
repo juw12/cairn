@@ -1496,6 +1496,31 @@ class EndToEndTests(unittest.TestCase):
         self.assertIsNone(results[6])
         self.assertIsNone(results[7])
 
+    def test_github_brain_keeps_sessions_past_the_cap(self):
+        # A git tree is alphabetical, so a plain "first N notes" cut dropped sessions/ and tasks/ of a big vault:
+        # the phone showed 2 live sessions while the PC showed 32.
+        page = self.open()
+        result = page.evaluate(
+            """async () => {
+                const gh = await import('./github.js');
+                const blob = (path) => ({ type: 'blob', path, sha: 'x' });
+                const tree = (archive) => ({ tree: [
+                    ...Array.from({ length: archive }, (_, i) => blob(`Archive/${String(i).padStart(5, '0')}.md`)),
+                    ...Array.from({ length: 900 }, (_, i) => blob(`sessions/${String(i).padStart(5, '0')}.md`)),
+                    ...Array.from({ length: 150 }, (_, i) => blob(`tasks/${i}.md`)),
+                ] });
+                const count = (items, folder) => items.filter((item) => item.path.startsWith(folder)).length;
+                const under = gh.brainItems(tree(1500), 'a', 'b').items;
+                const over = gh.brainItems(tree(6000), 'a', 'b').items;
+                return {
+                    under: [under.length, count(under, 'sessions/'), count(under, 'tasks/'), under[0].path],
+                    over: [over.length, count(over, 'sessions/'), count(over, 'tasks/')],
+                };
+            }"""
+        )
+        self.assertEqual(result["under"], [2550, 900, 150, "Archive/00000.md"])  # the old cap of 2,000 cut these
+        self.assertEqual(result["over"], [5000, 900, 150])
+
     def test_profile_shows_proof_of_work(self):
         page = self.open("?u=juw12")
         page.wait_for_selector(".proof-grid")

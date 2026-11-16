@@ -11,7 +11,10 @@ const API = "https://api.github.com";
 const RAW = "https://raw.githubusercontent.com";
 const CACHE_MS = 10 * 60 * 1000;
 export const BRAIN_TOPIC = "cairn-brain";
-const MAX_FILES = 2000;
+const MAX_FILES = 5000;
+// A vault over the cap keeps the folders Cairn works in first, so what is left out is the tail of an
+// archive folder, never live sessions or open tasks.
+const KEEP_FIRST = ["sessions/", "feedback/", "tasks/", "ideas/", "decisions/"];
 
 export class GitHubError extends Error {}
 
@@ -167,7 +170,7 @@ export async function loadBrainFiles(owner, repo, branch) {
 const treeUrl = (owner, repo, branch) => `${API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
 
 // The note blobs of a tree under `root` (found from the tree when not given).
-function brainItems(tree, owner, repo, root) {
+export function brainItems(tree, owner, repo, root) {
   const blobs = (tree.tree || []).filter((item) => item.type === "blob");
   const paths = blobs.map((item) => item.path);
   root ??= ["brain/", ".brain/"].find((prefix) => paths.some((p) => p.startsWith(prefix)));
@@ -175,10 +178,11 @@ function brainItems(tree, owner, repo, root) {
   if (!root && paths.some((p) => p.startsWith(".obsidian/") || p.endsWith(".md"))) root = "";
   if (root === undefined) throw new GitHubError(`${owner}/${repo} has no brain/ folder or notes yet.`);
   const hidden = (path) => path.split("/").some((part) => part.startsWith(".") && part !== ".brain");
-  const items = blobs
-    .filter((item) => item.path.startsWith(root) && /\.(md|canvas)$/i.test(item.path) && !hidden(item.path))
-    .slice(0, MAX_FILES);
-  return { root, items };
+  const notes = blobs.filter((item) => item.path.startsWith(root) && /\.(md|canvas)$/i.test(item.path) && !hidden(item.path));
+  if (notes.length <= MAX_FILES) return { root, items: notes };
+  // A git tree is alphabetical, so a plain cut would drop sessions/ and tasks/ before an archive folder.
+  const kept = (item) => KEEP_FIRST.some((folder) => item.path.startsWith(root + folder));
+  return { root, items: [...notes.filter(kept), ...notes.filter((item) => !kept(item))].slice(0, MAX_FILES) };
 }
 
 // Live sync: the brain's note blobs, or null when the tree is unchanged since `etag`. Signed in, a 304
