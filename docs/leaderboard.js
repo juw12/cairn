@@ -275,7 +275,7 @@ export function leaderboardView() {
     ? ""
     : published
       ? `<div class="lb-publish"><span class="muted">Your totals are in brain/${STATS_PATH} as of ${esc(published.updated || "an earlier save")}.</span><button class="btn sm" data-action="stats-publish">Update</button><button class="btn sm ghost" data-action="stats-unpublish">Stop publishing</button></div>`
-      : `<div class="lb-publish"><span class="muted">Friends can't see you until you publish your totals. Nothing leaves this device before you do.</span><button class="btn sm primary" data-action="stats-publish">Publish my totals</button></div>`;
+      : `<div class="lb-publish"><span class="muted">Friends can't see you until you publish your totals. Nothing leaves this device before you do.</span><button class="btn sm" data-action="stats-publish">Publish my totals</button></div>`;
   return `
     <section class="lb" id="leaderboard">
       <div class="lb-head">

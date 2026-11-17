@@ -147,7 +147,8 @@ export function initVoiceLog() {
   fab.title = "Log your day (L)";
   fab.innerHTML = `${MIC}<span class="log-fab-label">Log</span>`;
   if (!localStorage.getItem(HINT_KEY)) {
-    fab.insertAdjacentHTML("beforeend", `<span class="log-fab-hint" aria-hidden="true">Tap or press <kbd>L</kbd>, then just talk</span>`);
+    const how = matchMedia("(pointer: coarse)").matches ? "Tap, then just talk" : "Tap or press <kbd>L</kbd>, then just talk";
+    fab.insertAdjacentHTML("beforeend", `<span class="log-fab-hint" aria-hidden="true">${how}</span>`);
   }
   fab.addEventListener("click", () => openLogSheet());
   placeFab(fab);

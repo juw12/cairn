@@ -19,7 +19,7 @@ import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createM
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { startLiveSync } from "./live.js";
-import { chatView, glowView, startChatAbout, wireChat } from "./chat.js";
+import { chatView, glowView, startChatAbout, wireChat, wireGlow } from "./chat.js";
 import { showShortcuts } from "./shortcuts.js";
 import { initVoiceLog, journalView, openLogSheet, syncLogFab, wireJournal } from "./voicelog.js";
 import { showWelcome } from "./welcome.js";
@@ -239,6 +239,7 @@ function afterRender() {
   else leaveVibe();
   if (state.view === "autopilot") wireAutopilot();
   if (state.view === "chat") wireChat();
+  if (state.view === "glow") wireGlow();
   if (state.view === "founder") wireFounder();
   else syncFounderStage();
 }

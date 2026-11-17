@@ -454,6 +454,16 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .map-dot.link-target circle { stroke: var(--accent); stroke-width: 4px; }
 .map-dot, .map-edge { transition: opacity .35s ease; }
 .map-dot.future, .map-edge.future { opacity: 0 !important; }
+/* A big map (hundreds of dots and up): the picture slides under a finger as one layer, nothing fades
+   (a fade repaints every dot on every frame), and dimming is done with fill and stroke opacity, which
+   needs no layer per dot. */
+.map-wrap.big svg { transform-origin: 0 0; will-change: transform; }
+.map-wrap.big .map-dot, .map-wrap.big .map-edge, .map-wrap.big .map-dot circle, .map-wrap.big .map-dot rect, .map-wrap.big .map-dot text { transition: none; }
+.map-wrap.big.focus .map-dot:not(.lit), .map-wrap.big.pathing .map-dot:not(.on-path) { opacity: 1; fill-opacity: .2; stroke-opacity: .2; }
+.map-wrap.big.focus .map-edge:not(.lit), .map-wrap.big.pathing .map-edge:not(.on-path) { opacity: 1; stroke-opacity: .1; }
+/* There, a hidden label is not painted at all (visibility), not just see-through: there are thousands. */
+.map-wrap.big .map-dot text.quiet, .map-wrap.big.moving .map-dot:not(.lit):not(.selected) text { visibility: hidden; }
+.map-wrap.big .map-dot:hover text.quiet, .map-wrap.big .map-dot:focus text.quiet, .map-wrap.big .map-dot.selected text.quiet { visibility: visible; }
 .map-growth { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; box-shadow: var(--shadow-sm); pointer-events: none; }
 .map-growth[hidden] { display: none; }
 .map-tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
@@ -1351,8 +1361,8 @@ body.log-open .log-fab { display: none; }
 .log-help summary { cursor: pointer; color: var(--accent-ink); font-weight: 500; margin-top: 4px; }
 .log-help ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.7; }
 
-.memory-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
-.stat-card { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.memory-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0 24px; margin-bottom: 22px; }
+.stat-card { display: flex; flex-direction: column; gap: 4px; padding: 12px 0 14px; border-top: 1px solid var(--line); }
 .stat-num { font-family: var(--display); font-size: 34px; line-height: 1; }
 .stat-label { font-size: 12.5px; color: var(--muted); }
 .memory-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; margin-bottom: 14px; }
@@ -1790,6 +1800,13 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 @media (max-width: 600px) {
   .main .view { padding-bottom: 104px; }
   .toasts { right: 16px; left: 16px; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 68px); }
+  /* the Log button owns the bottom-right corner, so the map's zoom buttons take the left one */
+  .map-zoom { right: auto; left: 12px; }
+  .chat-unavailable h1 { font-size: 36px; }
+  /* list rows: the title gets the whole line, status and tags sit under it */
+  .list-row { grid-template-columns: 22px minmax(0, 1fr); gap: 6px 14px; align-items: start; }
+  .list-row .tags { grid-column: 2; }
+  .list-row .tags:empty { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .log-fab.thumb { transition: none; }
@@ -2171,10 +2188,16 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
 .chat-form textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .chat-form .btn { height: 40px; }
 .chat-unavailable { max-width: 520px; }
+.chat-unavailable h1 { margin: 0 0 14px; font: 400 44px/1 var(--display); letter-spacing: -0.015em; }
+.chat-unavailable p:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
 .glow-page { display: flex; flex-direction: column; height: calc(100dvh - 190px); min-height: 420px; border: 1px solid var(--line);
   border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); }
 .glow-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
-.glow-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+.glow-body { position: relative; flex: 1; display: flex; min-height: 0; }
+.glow-frame { position: relative; z-index: 1; flex: 1; width: 100%; border: 0; background: transparent; }
+.glow-frame.loaded { background: #fff; }
+.glow-wait { position: absolute; inset: 0; margin: 0; display: grid; place-content: center; padding: 24px; text-align: center; font-size: 14px; }
+.glow-frame.loaded + .glow-wait { display: none; }
 @media (max-width: 900px) {
   .chat-page, .glow-page { height: calc(100dvh - 150px); border-radius: var(--radius); }
   .chat-page { grid-template-columns: 1fr; position: relative; }
