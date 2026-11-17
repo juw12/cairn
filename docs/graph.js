@@ -440,18 +440,22 @@ function collide(nodes, pad) {
   let maxR = 0;
   for (const n of nodes) maxR = Math.max(maxR, n.r);
   const cell = 2 * maxR + pad;
+  // Cells are keyed by one number (not a "x,y" string): this runs for every dot on every tick.
+  const SPAN = 1 << 20;
+  const keyOf = (gx, gy) => (gx + SPAN) * 2 * SPAN + gy + SPAN;
   const grid = new Map();
   for (const n of nodes) {
-    const key = `${Math.floor(n.x / cell)},${Math.floor(n.y / cell)}`;
-    if (!grid.has(key)) grid.set(key, []);
-    grid.get(key).push(n);
+    const key = keyOf(Math.floor(n.x / cell), Math.floor(n.y / cell));
+    const held = grid.get(key);
+    if (held) held.push(n);
+    else grid.set(key, [n]);
   }
   for (const n of nodes) {
     const cx = Math.floor(n.x / cell);
     const cy = Math.floor(n.y / cell);
     for (let gx = cx - 1; gx <= cx + 1; gx++) {
       for (let gy = cy - 1; gy <= cy + 1; gy++) {
-        for (const m of grid.get(`${gx},${gy}`) || []) {
+        for (const m of grid.get(keyOf(gx, gy)) || []) {
           if (m === n || m.id < n.id) continue;
           let dx = m.x + m.vx - n.x - n.vx;
           let dy = m.y + m.vy - n.y - n.vy;

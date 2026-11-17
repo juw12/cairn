@@ -220,5 +220,3 @@ function finish({ capture = false } = {}) {
   active = null;
   if (capture && !readOnly()) $("#capture-input")?.focus();
 }
-
-export const tourOpen = () => Boolean(active);

@@ -167,7 +167,7 @@ def check(brain: Brain, command: list[str], echo=print, session_slug: str = "") 
     started = time.monotonic()
     last = ""
     process = subprocess.Popen(
-        shown, shell=True, cwd=str(brain.root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        shown, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace",
     )
     assert process.stdout is not None

@@ -118,20 +118,3 @@ def stamp_shortcut(lnk: Path, target: str, args: str, icon: Path, workdir: Path,
     )
     if result.returncode != 0:
         raise OSError((result.stderr or result.stdout).strip()[-400:] or "could not write the shortcut")
-
-
-def read_app_id(lnk: Path) -> str | None:
-    """The AppUserModelID stored in a shortcut, or None (used by the tests and the self-check)."""
-    if sys.platform != "win32" or not lnk.exists():
-        return None
-    script = (
-        "$shell = New-Object -ComObject Shell.Application; "
-        f"$item = $shell.Namespace({_ps_quote(str(lnk.parent))}).ParseName({_ps_quote(lnk.name)}); "
-        "$item.ExtendedProperty('System.AppUserModel.ID')"
-    )
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True, text=True, timeout=60, creationflags=NO_WINDOW,
-    )
-    value = result.stdout.strip()
-    return value or None

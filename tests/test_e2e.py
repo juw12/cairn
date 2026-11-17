@@ -1128,6 +1128,62 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(node.locator("text").evaluate("(t) => getComputedStyle(t).opacity"), "1")
             self.assertEqual(self.errors, [])
 
+    def test_map_big_brain_hides_orphans_and_pans_without_redrawing(self):
+        # A brain the size of a real vault on a phone: only linked notes are drawn until "Show all",
+        # and dragging slides the picture already painted instead of redrawing every dot per move.
+        page = self.open(query="?demo=1#/map", viewport=(390, 844), wait="#map-svg text")
+        page.evaluate(r"""() => {
+            const { state, core } = window.cairn;
+            const name = (i) => 'n' + String(i).padStart(4, '0');
+            const files = [];
+            for (let i = 0; i < 1600; i += 1) {
+                // The first 600 notes link in a ring; the other 1000 have no links at all.
+                const link = i < 600 ? ` [[${name((i + 1) % 600)}]]` : '';
+                files.push({ path: `notes/${name(i)}.md`, text: `---\ntitle: Entry ${name(i)}\ntype: note\n---\n\nText.${link}\n`, mtime: 1 });
+            }
+            state.files = files;
+            state.notes = files.map((f) => core.noteFromFile(f.path, f.text, f.mtime));
+            window.cairn.rerender();
+        }""")
+        page.wait_for_selector("#map-wrap.big #map-svg .map-dot")
+        self.assertEqual(page.locator("#map-svg .map-node").count(), 600)
+        self.assertIn("600 notes shown of 1600", page.inner_text(".map-chip"))
+
+        page.wait_for_function("() => !document.querySelector('#map-wrap').classList.contains('moving')", timeout=60000)
+        before = page.get_attribute("#map-svg", "viewBox")
+        start = page.evaluate("""() => {
+            const box = document.querySelector('#map-svg').getBoundingClientRect();
+            for (let y = box.top + 20; y < box.bottom - 20; y += 12) {
+                for (let x = box.left + 20; x < box.right - 20; x += 12) {
+                    const hit = document.elementFromPoint(x, y);
+                    if (hit && hit.closest('#map-svg') && !hit.closest('.map-dot')) return [x, y];
+                }
+            }
+            return null;
+        }""")
+        self.assertIsNotNone(start, "no empty spot on the map to drag from")
+        page.evaluate("""() => {
+            const svg = document.querySelector('#map-svg');
+            window.__slid = 0;
+            const first = svg.getAttribute('viewBox');
+            const watch = () => {
+                if (svg.style.transform && svg.getAttribute('viewBox') === first) window.__slid += 1;
+                window.__watch = requestAnimationFrame(watch);
+            };
+            watch();
+        }""")
+        page.mouse.move(*start)
+        page.mouse.down()
+        page.mouse.move(start[0] + 60, start[1] + 40, steps=12)
+        page.wait_for_function("() => window.__slid > 0")  # slid as a picture: same viewBox, a transform on top
+        page.mouse.up()
+        page.wait_for_function("(old) => { const svg = document.querySelector('#map-svg'); return !svg.style.transform && svg.getAttribute('viewBox') !== old; }", arg=before)
+        page.evaluate("cancelAnimationFrame(window.__watch)")
+
+        page.click('.map-chip [data-map="clear-filters"]')
+        page.wait_for_function("() => document.querySelectorAll('#map-svg .map-node').length === 1600")
+        self.assertTrue(page.evaluate("JSON.parse(localStorage.getItem('cairn.map')).orphansSet"))
+        self.assertEqual(self.errors, [])
 
     # ------------------------------------------------------------ map: Obsidian-plus features
 

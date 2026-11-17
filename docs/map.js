@@ -11,6 +11,16 @@ import { renderView } from "./app.js";
 import { createView3D, reset3D } from "./map3d.js";
 
 const LAYOUT_BUDGET_MS = 350;
+// Past this many dots the map takes the cheap paths: unlinked notes ring the linked core instead of
+// being simulated, the layout settles in slices, and a finger slides the picture instead of repainting it.
+const BIG_MAP = 500;
+// Past this many notes, unlinked ones start hidden: thousands of loose dots bury the links.
+const CROWDED = 1000;
+const SLICE_MS = 8;
+const BIG_DRAW_MS = 160;
+const RING_GAP = 48;
+const RING_AREA = 18 * 18;
+const TAP_REACH = 17;
 
 // ------------------------------------------------------------ settings and session
 
@@ -20,6 +30,7 @@ const DEFAULTS = {
   types: [],
   folder: "",
   orphans: true,
+  orphansSet: false,
   unresolved: false,
   attachments: false,
   canvases: true,
@@ -48,6 +59,10 @@ function saveSettings(changes) {
 }
 
 // What the person is doing on the map; survives re-renders (saving a note, changing a filter).
+// A crowded vault opens without its unlinked notes until the person asks for them (the chip on the map
+// and the Orphans box both do). Turning them off always sticks.
+const showOrphans = (total) => settings.orphans && (settings.orphansSet || total <= CROWDED);
+
 const session = { selected: null, local: null, path: null, pathEnds: ["", ""], pathMessage: "" };
 // Where every dot was last time, so filters and edits never reshuffle the map.
 const positions = new Map();
@@ -90,11 +105,24 @@ async function openCanvasNode(id) {
   openCanvas(node.path);
 }
 
+// The graph, its clusters and the unlinked mentions depend only on the notes, so one copy serves every
+// filter, selection and re-render until a note is added, removed or replaced. Notes are compared one by
+// one (each change makes a new note object) because the list itself is sometimes changed in place.
+let derived = { notes: [], graph: null };
+function derive() {
+  const notes = state.notes;
+  const same = derived.graph && derived.notes.length === notes.length && derived.notes.every((note, i) => note === notes[i]);
+  if (!same) {
+    const graph = core.buildGraph(notes);
+    const adj = G.adjacency(graph);
+    derived = { notes: notes.slice(), graph, adj, clusters: G.communities(adj), mentions: G.unlinkedMentions(notes, graph) };
+  }
+  return derived;
+}
+
 function buildModel() {
-  const graph = core.buildGraph(state.notes);
-  const adj = G.adjacency(graph);
+  const { graph, adj, clusters, mentions } = derive();
   const degree = (id) => adj.get(id)?.size || 0;
-  const clusters = G.communities(adj);
   let visible = graph.nodes;
   if (session.local && !adj.has(session.local)) session.local = null;
   if (session.selected && !adj.has(session.selected)) session.selected = null;
@@ -105,7 +133,8 @@ function buildModel() {
   if (settings.types.length) visible = visible.filter((n) => settings.types.includes(n.type) || n.id === session.local);
   if (settings.folder) visible = visible.filter((n) => n.folder === settings.folder || n.folder.startsWith(`${settings.folder}/`) || n.id === session.local);
   if (settings.query.trim()) visible = visible.filter((n) => matchesQuery(n, settings.query, degree(n.id)) || n.id === session.local);
-  if (!settings.orphans) visible = visible.filter((n) => degree(n.id) > 0 || n.id === session.local);
+  const orphans = showOrphans(graph.nodes.length);
+  if (!orphans) visible = visible.filter((n) => degree(n.id) > 0 || n.id === session.local);
   const shown = new Set(visible.map((n) => n.id));
   for (const id of session.path || []) shown.add(id);
   const nodes = graph.nodes.filter((n) => shown.has(n.id)).map((n) => ({ ...n, kind: "note", r: nodeRadius(degree(n.id)) }));
@@ -132,8 +161,7 @@ function buildModel() {
       edges.push({ source: id, target: note, both: false, kind: "canvas" });
     }
   }
-  const mentions = G.unlinkedMentions(state.notes, graph);
-  return { graph, adj, degree, clusters, nodes, edges, mentions, mode: colourMode(graph), byId: new Map(nodes.map((n) => [n.id, n])) };
+  return { graph, adj, degree, clusters, nodes, edges, mentions, orphans, mode: colourMode(graph), byId: new Map(nodes.map((n) => [n.id, n])) };
 }
 
 function layout(m) {
@@ -145,7 +173,12 @@ function layout(m) {
     neighbours.get(e.source).push(e.target);
     neighbours.get(e.target).push(e.source);
   }
-  for (const node of m.nodes) {
+  // A big map simulates only the notes that have links; the rest ring the core (ringLoose).
+  m.big = m.nodes.length > BIG_MAP;
+  m.loose = m.big ? m.nodes.filter((n) => !neighbours.has(n.id)) : [];
+  const bodies = m.big ? m.nodes.filter((n) => neighbours.has(n.id)) : m.nodes;
+  if (m.big && !positions.size && restorePlaces(signature)) lastSignature = signature;
+  for (const node of bodies) {
     const known = positions.get(node.id);
     if (known) {
       node.x = known.x;
@@ -159,9 +192,9 @@ function layout(m) {
       node.y = anchor.y + 12;
     }
   }
-  const known = m.nodes.filter((n) => positions.has(n.id)).length;
-  m.sim = G.createSimulation(m.nodes, m.edges, { alpha: known === m.nodes.length ? 0 : known > m.nodes.length * 0.6 ? 0.4 : 1 });
-  if (signature !== lastSignature || known !== m.nodes.length) {
+  const known = bodies.filter((n) => positions.has(n.id)).length;
+  m.sim = G.createSimulation(bodies, m.edges, { alpha: known === bodies.length ? 0 : known > bodies.length * 0.6 ? 0.4 : 1 });
+  if (signature !== lastSignature || known !== bodies.length) {
     if (m.sim.alpha === 0) m.sim.alpha = 0.3;
     const start = performance.now();
     // A short blocking pass places small vaults outright; big ones finish settling on screen
@@ -170,11 +203,78 @@ function layout(m) {
     m.layoutMs = performance.now() - start;
   }
   lastSignature = signature;
+  m.signature = signature;
+  ringLoose(m);
   savePositions(m);
 }
 
+// Unlinked notes on a big map: an even ring just outside the linked core, the way they drift in a
+// force layout, without paying for thousands of bodies that pull on nothing. A dot the person dragged
+// stays where they left it.
+function ringLoose(m) {
+  if (!m.loose.length) return;
+  let reach = 0;
+  for (const n of m.sim.nodes) reach = Math.max(reach, Math.hypot(n.x, n.y) + n.r);
+  const inner = reach ? reach + RING_GAP : 0;
+  const turn = Math.PI * (3 - Math.sqrt(5));
+  m.loose.forEach((n, i) => {
+    const held = positions.get(n.id);
+    if (held?.held) {
+      Object.assign(n, held);
+      return;
+    }
+    const radius = Math.sqrt(inner * inner + ((i + 0.5) * RING_AREA) / Math.PI);
+    n.x = radius * Math.cos(i * turn);
+    n.y = radius * Math.sin(i * turn);
+  });
+}
+
 function savePositions(m) {
-  for (const node of m.nodes) positions.set(node.id, { x: node.x, y: node.y });
+  for (const node of m.nodes) positions.set(node.id, node.held ? { x: node.x, y: node.y, held: true } : { x: node.x, y: node.y });
+}
+
+// A big map's settled layout is kept on this device, so opening the map again shows it at once instead
+// of simulating it again. Only linked notes are kept (the ring is recomputed), per brain.
+const PLACES_KEY = "cairn.map.places";
+const placesBrain = () => `${state.info?.mode || ""}:${state.info?.owner || ""}/${state.info?.project || ""}`;
+
+function storePlaces(m) {
+  if (!m.big) return;
+  const at = {};
+  for (const n of m.sim.nodes) at[n.id] = [Math.round(n.x), Math.round(n.y)];
+  try {
+    localStorage.setItem(PLACES_KEY, JSON.stringify({ brain: placesBrain(), signature: hashText(m.signature), at }));
+  } catch {
+    // Storage full or private mode: the map simply settles again next time.
+  }
+}
+
+// Fills `positions` from the saved layout of this brain. True when it was saved for exactly the map
+// about to be shown, so an unchanged map isn't re-heated.
+function restorePlaces(signature) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PLACES_KEY) || "null");
+    if (!saved || saved.brain !== placesBrain()) return false;
+    for (const [id, [x, y]] of Object.entries(saved.at)) positions.set(id, { x, y });
+    return saved.signature === hashText(signature);
+  } catch {
+    return false;
+  }
+}
+
+// Reset view starts the layout over; signing out leaves no trace of a private vault's note names.
+export function forgetPlaces() {
+  try {
+    localStorage.removeItem(PLACES_KEY);
+  } catch {
+    // Nothing was kept.
+  }
+}
+
+function hashText(text) {
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
+  return hash;
 }
 
 // ------------------------------------------------------------ colours and legend
@@ -249,13 +349,13 @@ export function mapView() {
   const sub = `${plural(m.graph.nodes.length, "note")} · ${plural(m.graph.edges.length, "link")} · ${plural(facts.orphans.length, "orphan")} · ${plural(facts.islands, "island")}`;
   return `${pageHead("Map", sub, `<button class="btn" data-action="map-reset">${icon("refresh")} Reset view</button>`)}
     <div class="map-layout">
-      <div class="card map-wrap${session.path ? " pathing" : ""}${is3d ? " is-3d" : ""}" id="map-wrap">
+      <div class="card map-wrap${session.path ? " pathing" : ""}${is3d ? " is-3d" : ""}${m.big ? " big" : ""}" id="map-wrap">
         ${is3d ? `<canvas id="map-canvas" tabindex="0" role="img" aria-label="3D note map. Drag to turn it any way, right-drag or Shift-drag to pan, scroll to zoom. Arrow keys move between linked notes, Enter opens, Escape clears." aria-describedby="map-help"></canvas>
         <p id="map-help" class="sr-only">Drag to turn the map in any direction; it keeps turning briefly after a flick. Right-drag or Shift-drag pans, scroll or pinch zooms. Click a dot to select it, double-click or press Enter to open it. Press 2 for the flat map.</p>
         ${hinted3d() ? "" : `<div class="map-hint" id="map-hint">Drag to turn · Right-drag to pan · Scroll to zoom</div>`}`
         : `<svg id="map-svg" aria-label="Note map. Arrow keys move between linked notes, Enter opens, L shows the local map, Escape clears." aria-describedby="map-help">
           <defs><marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1L9,5L0,9z"/></marker></defs>
-          <g class="map-edges${settings.arrows ? " arrows" : ""}">${edgeSvg}</g><g class="map-suggest"></g><g class="map-nodes">${nodeSvg}</g><line class="map-link-draft" id="map-link-draft" visibility="hidden"/>
+          <g class="map-edges${settings.arrows ? " arrows" : ""}">${edgeSvg}</g><g class="map-suggest"></g><g class="map-nodes" id="map-nodes">${nodeSvg}</g><line class="map-link-draft" id="map-link-draft" visibility="hidden"/>
         </svg>
         <p id="map-help" class="sr-only">Click a dot to select it, double-click or press Enter to open it. Drag dots to rearrange, scroll or pinch to zoom. Alt-drag one note onto another to link them. Press 3 for the 3D map.</p>`}
         <div class="map-growth" id="map-growth" aria-live="polite" hidden></div>
@@ -294,7 +394,7 @@ function sidePanel(m) {
   }).join("");
   const folders = [...new Set(m.graph.nodes.map((n) => n.folder).filter(Boolean))].sort();
   const folderOptions = [`<option value="">All folders</option>`, ...folders.map((f) => `<option value="${esc(f)}"${settings.folder === f ? " selected" : ""}>${esc(f)}</option>`)].join("");
-  const check = (key, label) => `<label class="check"><input type="checkbox" data-map-setting="${key}"${settings[key] ? " checked" : ""}> ${label}</label>`;
+  const check = (key, label) => `<label class="check"><input type="checkbox" data-map-setting="${key}"${(key === "orphans" ? m.orphans : settings[key]) ? " checked" : ""}> ${label}</label>`;
   const colourOptions = [["auto", "Automatic"], ["type", "Type"], ["folder", "Folder"], ["cluster", "Cluster"], ["tag", "First tag"]]
     .map(([value, label]) => `<option value="${value}"${settings.colour === value ? " selected" : ""}>${label}</option>`).join("");
   const f = m.facts;
@@ -385,7 +485,34 @@ function scale() {
 }
 
 function setBox() {
+  cancelAnimationFrame(dom.slideFrame);
+  clearTimeout(dom.restTimer);
+  dom.slideFrame = 0;
   dom.svg.setAttribute("viewBox", `${dom.box.x} ${dom.box.y} ${dom.box.w} ${dom.box.h}`);
+  if (dom.svg.style.transform) dom.svg.style.transform = "";
+  dom.drawn = dom.box;
+}
+
+// Panning or pinching a big map: changing the viewBox repaints every dot on every finger move, which
+// is what made the map crawl on a phone. The picture already painted is slid and scaled instead (a
+// compositor transform, no repaint) and drawn sharp again when the finger rests or lifts.
+function slideBox(size) {
+  if (!model.big) return setBox();
+  dom.touched = true;
+  clearTimeout(dom.restTimer);
+  dom.restTimer = setTimeout(() => {
+    setBox();
+    scheduleLabels();
+  }, 180);
+  if (dom.slideFrame) return;
+  dom.slideFrame = requestAnimationFrame(() => {
+    dom.slideFrame = 0;
+    const from = dom.drawn;
+    const to = dom.box;
+    const x = ((from.x - to.x) * size.width) / to.w;
+    const y = ((from.y - to.y) * size.height) / to.h;
+    dom.svg.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${(from.w / to.w).toFixed(4)})`;
+  });
 }
 
 function fit(ids = null) {
@@ -426,9 +553,19 @@ function fit(ids = null) {
 function draw() {
   if (is3d()) return;
   const m = model;
-  for (const n of m.nodes) dom.nodeEls.get(n.id)?.setAttribute("transform", `translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})`);
+  // Only dots and lines that moved are written: on a big map most stand still on most frames.
+  for (const n of m.nodes) {
+    const at = `translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})`;
+    if (n.at === at) continue;
+    n.at = at;
+    dom.nodeEls.get(n.id)?.setAttribute("transform", at);
+  }
   const arrows = settings.arrows;
-  for (const [line, a, b] of dom.edgeEls) {
+  for (const edge of dom.edgeEls) {
+    const [line, a, b, was] = edge;
+    const now = `${a.at}${b.at}${arrows}`;
+    if (was === now) continue;
+    edge[3] = now;
     let { x: x1, y: y1 } = a;
     let { x: x2, y: y2 } = b;
     if (arrows) {
@@ -482,6 +619,7 @@ function shortLabel(n) {
 // room stay hidden until their dot is hovered, focused or selected. Zooming in reveals more.
 function placeLabels() {
   if (is3d()) return;
+  if (dom.drawn !== dom.box) setBox();
   const m = model;
   const k = scale();
   const font = LABEL_FONT / k;
@@ -489,39 +627,73 @@ function placeLabels() {
   const pad = 2 / k;
   const view = dom.box;
   const inView = (n) => n.x > view.x - 20 / k && n.x < view.x + view.w + 20 / k && n.y > view.y - 20 / k && n.y < view.y + view.h + 20 / k;
-  const boxes = m.nodes.filter(inView).map((n) => ({ x1: n.x - n.r, y1: n.y - n.r, x2: n.x + n.r, y2: n.y + n.r }));
+  // Claimed boxes are filed in a grid of 80px cells, so a label is only tested against what is near it.
+  const cell = 80 / k;
+  const grid = new Map();
+  const cells = (a, visit) => {
+    const lastX = Math.floor((a.x2 - view.x) / cell);
+    const lastY = Math.floor((a.y2 - view.y) / cell);
+    for (let gx = Math.floor((a.x1 - view.x) / cell); gx <= lastX; gx += 1) {
+      for (let gy = Math.floor((a.y1 - view.y) / cell); gy <= lastY; gy += 1) {
+        if (visit((gx + 64) * 4096 + gy + 64)) return true;
+      }
+    }
+    return false;
+  };
+  const claim = (a) => cells(a, (key) => {
+    const held = grid.get(key);
+    if (held) held.push(a);
+    else grid.set(key, [a]);
+  });
+  const taken = (a) => cells(a, (key) => grid.get(key)?.some((b) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2));
+  const seen = m.nodes.filter(inView);
+  for (const n of seen) claim({ x1: n.x - n.r, y1: n.y - n.r, x2: n.x + n.r, y2: n.y + n.r });
   // Overlays (legend, zoom buttons, chips, the selection card) are no-go areas for labels.
   const svgRect = dom.svg.getBoundingClientRect();
   for (const el of $$(".map-legend, .map-zoom, .map-chip, .map-card:not([hidden])", dom.wrap)) {
     const r = el.getBoundingClientRect();
     if (!r.width || getComputedStyle(el).display === "none") continue;
-    boxes.push({
+    claim({
       x1: view.x + (r.left - svgRect.left) / k, y1: view.y + (r.top - svgRect.top) / k,
       x2: view.x + (r.right - svgRect.left) / k, y2: view.y + (r.bottom - svgRect.top) / k,
     });
   }
   const margin = 6 / k;
   const inside = (a) => a.x1 >= view.x + margin && a.x2 <= view.x + view.w - margin && a.y1 >= view.y + margin && a.y2 <= view.y + view.h - margin;
-  const overlaps = (a) => !inside(a) || boxes.some((b) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2);
+  const overlaps = (a) => !inside(a) || taken(a);
   const focusId = session.hover || session.selected;
   const near = new Set(focusId ? model.adj.get(focusId) || [] : []);
-  const priority = (n) => (n.id === focusId ? 1e6 : 0) + (session.path?.includes(n.id) ? 1e5 : 0) + (near.has(n.id) ? 1e4 : 0) + m.degree(n.id);
-  const order = [...m.nodes].sort((a, b) => priority(b) - priority(a) || a.title.localeCompare(b.title));
-  for (const n of order) {
-    const text = dom.nodeEls.get(n.id)?.querySelector("text");
+  const onPath = new Set(session.path || []);
+  const rank = new Map();
+  // A big map only works on the dots in view; the rest keep an empty, hidden label.
+  const pool = m.big ? seen : [...m.nodes];
+  for (const n of pool) rank.set(n, (n.id === focusId ? 1e6 : 0) + (onPath.has(n.id) ? 1e5 : 0) + (near.has(n.id) ? 1e4 : 0) + m.degree(n.id));
+  pool.sort((a, b) => rank.get(b) - rank.get(a) || a.title.localeCompare(b.title));
+  // One font size for every label, set on their group.
+  const size = font.toFixed(3);
+  if (dom.fontSize !== size) {
+    dom.nodesGroup.setAttribute("font-size", size);
+    dom.fontSize = size;
+  }
+  const phone = innerWidth <= 900;
+  const labelled = new Set();
+  for (const n of pool) {
+    const text = dom.nodeEls.get(n.id)?.lastElementChild;
     if (!text) continue;
-    const label = shortLabel(n);
-    if (text.textContent !== label) text.textContent = label;
-    text.setAttribute("font-size", font.toFixed(3));
-    // Invisible hit area: at least 34 screen px across on phones, the dot itself on desktop.
-    const hit = text.previousElementSibling?.previousElementSibling;
-    if (hit?.classList.contains("hit")) {
-      const half = innerWidth <= 900 ? Math.max(n.r, 17 / k) : n.r;
-      hit.setAttribute("x", (-half).toFixed(2));
-      hit.setAttribute("y", (-half).toFixed(2));
-      hit.setAttribute("width", (half * 2).toFixed(2));
-      hit.setAttribute("height", (half * 2).toFixed(2));
+    if (!m.big) {
+      // Invisible hit area: at least 34 screen px across on phones, the dot itself on desktop.
+      // (A big map finds the dot under a tap by distance instead: see nearestDot.)
+      const half = (phone ? Math.max(n.r, TAP_REACH / k) : n.r).toFixed(2);
+      if (n.hit !== half) {
+        n.hit = half;
+        const hit = text.previousElementSibling.previousElementSibling;
+        hit.setAttribute("x", -half);
+        hit.setAttribute("y", -half);
+        hit.setAttribute("width", half * 2);
+        hit.setAttribute("height", half * 2);
+      }
     }
+    const label = shortLabel(n);
     const w = label.length * char * (n.id === session.selected ? 1.1 : 1);
     const r = n.r;
     const gap = 3 / k;
@@ -535,20 +707,65 @@ function placeLabels() {
     let spot = null;
     if (inView(n)) {
       for (const c of candidates) {
-        const claim = { x1: n.x + c.box[0] - pad, y1: n.y + c.box[1] - pad, x2: n.x + c.box[2] + pad, y2: n.y + c.box[3] + pad };
-        if (!overlaps(claim)) {
-          boxes.push(claim);
+        const box = { x1: n.x + c.box[0] - pad, y1: n.y + c.box[1] - pad, x2: n.x + c.box[2] + pad, y2: n.y + c.box[3] + pad };
+        if (!overlaps(box)) {
+          claim(box);
           spot = c;
           break;
         }
       }
     }
-    const use = spot || candidates[0];
-    text.setAttribute("x", use.x.toFixed(2));
-    text.setAttribute("y", use.y.toFixed(2));
-    text.setAttribute("text-anchor", use.anchor);
-    text.classList.toggle("quiet", !spot);
+    // On a big map a label without room stays empty unless its dot is the one in focus: thousands of
+    // hidden labels would still be laid out again on every zoom.
+    const written = !m.big || spot || n.id === focusId || n.id === session.selected;
+    if (written) {
+      labelled.add(n);
+      const use = spot || candidates[0];
+      const place = `${use.x.toFixed(2)} ${use.y.toFixed(2)} ${use.anchor}`;
+      if (n.label !== label) {
+        text.textContent = label;
+        n.label = label;
+      }
+      if (n.place !== place) {
+        text.setAttribute("x", use.x.toFixed(2));
+        text.setAttribute("y", use.y.toFixed(2));
+        text.setAttribute("text-anchor", use.anchor);
+        n.place = place;
+      }
+    }
+    if (n.loud !== Boolean(spot)) {
+      text.classList.toggle("quiet", !spot);
+      n.loud = Boolean(spot);
+    }
   }
+  if (m.big) {
+    for (const n of dom.labelled || []) {
+      if (labelled.has(n)) continue;
+      const text = dom.nodeEls.get(n.id)?.lastElementChild;
+      if (!text) continue;
+      text.textContent = "";
+      text.classList.add("quiet");
+      n.label = "";
+      n.loud = false;
+    }
+    dom.labelled = labelled;
+  }
+}
+
+// The dot under a tap on a big map: the closest one within a fingertip. (Small maps give every dot
+// its own invisible hit area instead; thousands of those would be resized on every zoom.)
+function nearestDot(point, reach = TAP_REACH) {
+  const limit = reach / scale();
+  let best = null;
+  let bestGap = Infinity;
+  for (const n of model.nodes) {
+    const gap = Math.hypot(n.x - point.x, n.y - point.y) - n.r;
+    if (gap < bestGap && gap <= limit) {
+      best = n;
+      bestGap = gap;
+    }
+  }
+  return best;
 }
 
 // ------------------------------------------------------------ selection and highlighting
@@ -605,10 +822,13 @@ function select(id, { focus = true, centre = false } = {}) {
     return;
   }
   $$(".selected", dom.svg).forEach((el) => el.classList.remove("selected"));
-  for (const [nodeId, el] of dom.nodeEls) el.setAttribute("tabindex", nodeId === session.selected ? "0" : "-1");
-  if (!session.selected) {
-    dom.nodeEls.values().next().value?.setAttribute("tabindex", "0");
-  } else {
+  const tabStop = session.selected ? dom.nodeEls.get(session.selected) : dom.nodeEls.values().next().value;
+  if (dom.tabStop !== tabStop) {
+    dom.tabStop?.setAttribute("tabindex", "-1");
+    tabStop?.setAttribute("tabindex", "0");
+    dom.tabStop = tabStop;
+  }
+  if (session.selected) {
     const el = dom.nodeEls.get(session.selected);
     el.classList.add("selected");
     if (focus) el.focus({ preventScroll: true });
@@ -627,6 +847,7 @@ function centreOn(node) {
   const box = dom.box;
   const visible = node.x > box.x + box.w * 0.15 && node.x < box.x + box.w * 0.85 && node.y > box.y + box.h * 0.15 && node.y < box.y + box.h * 0.85;
   if (visible) return;
+  dom.touched = true;
   dom.box = { ...box, x: node.x - box.w / 2, y: node.y - box.h / 2 };
   setBox();
 }
@@ -908,14 +1129,21 @@ export function resetMap() {
   session.path = null;
   session.pathMessage = "";
   positions.clear();
+  forgetPlaces();
   reset3D();
   lastSignature = "";
   renderView();
 }
 
 const mapActions = {
-  "zoom-in": () => zoomBy(1 / 1.3),
-  "zoom-out": () => zoomBy(1.3),
+  "zoom-in": () => {
+    dom.touched = true;
+    zoomBy(1 / 1.3);
+  },
+  "zoom-out": () => {
+    dom.touched = true;
+    zoomBy(1.3);
+  },
   fit: () => {
     fit(session.path || null);
     placeLabels();
@@ -947,11 +1175,11 @@ const mapActions = {
     renderView();
   },
   "clear-filters": () => {
-    saveSettings({ query: "", types: [], folder: "", orphans: true });
+    saveSettings({ query: "", types: [], folder: "", orphans: true, orphansSet: true });
     renderView();
   },
   orphans: () => {
-    saveSettings({ query: "is:orphan", orphans: true });
+    saveSettings({ query: "is:orphan", orphans: true, orphansSet: true });
     renderView();
   },
   type: (el) => {
@@ -1001,16 +1229,34 @@ let frame = null;
 function animate() {
   if (frame || is3d()) return;
   dom.wrap.classList.add("moving");
-  const loop = () => {
+  let drawnAt = 0;
+  const loop = (now) => {
     if (!dom || !model) {
       frame = null;
       return;
     }
-    model.sim.tick();
-    draw();
+    if (model.big) {
+      // A tick of a big map can take longer than a frame. Each frame gives it a short slice and the
+      // dots are redrawn a few times a second (every frame while one is being dragged), so the page
+      // keeps answering touches while the layout settles.
+      model.sim.run(SLICE_MS);
+      if (model.sim.alphaTarget || now - drawnAt >= BIG_DRAW_MS) {
+        draw();
+        drawnAt = now;
+      }
+    } else {
+      model.sim.tick();
+      draw();
+    }
     if (model.sim.settled()) {
       frame = null;
       dom.wrap.classList.remove("moving");
+      if (model.big) {
+        ringLoose(model);
+        draw();
+        storePlaces(model);
+        if (!dom.touched) fit(session.local ? null : session.path || null);
+      }
       savePositions(model);
       placeLabels();
       return;
@@ -1087,7 +1333,7 @@ function wire2d(wrap) {
   if (window.cairn) window.cairn.map3d = null;
   const nodeEls = new Map($$(".map-dot", svg).map((el) => [el.dataset.node, el]));
   const edgeEls = $$(".map-edge", svg).map((line) => [line, model.byId.get(line.dataset.a), model.byId.get(line.dataset.b)]);
-  dom = { svg, wrap, nodeEls, edgeEls, suggest: $(".map-suggest", svg), draft: $("#map-link-draft"), card: $("#map-card"), box: { x: -400, y: -300, w: 800, h: 600 } };
+  dom = { svg, wrap, nodeEls, edgeEls, nodesGroup: $("#map-nodes", svg), suggest: $(".map-suggest", svg), draft: $("#map-link-draft"), card: $("#map-card"), box: { x: -400, y: -300, w: 800, h: 600 } };
   draw();
   fit(session.local ? null : session.path || null);
   applyPath();
@@ -1117,6 +1363,7 @@ function wire2d(wrap) {
     const rect = svg.getBoundingClientRect();
     const mx = dom.box.x + ((event.clientX - rect.left) / rect.width) * dom.box.w;
     const my = dom.box.y + ((event.clientY - rect.top) / rect.height) * dom.box.h;
+    dom.touched = true;
     zoomBy(event.deltaY > 0 ? 1.12 : 1 / 1.12, mx, my);
   }, { passive: false });
 
@@ -1124,12 +1371,18 @@ function wire2d(wrap) {
   const pointers = new Map();
   let drag = null;
   let pinch = null;
+  // The map's size on screen, read once per gesture (while it slides, its own rectangle moves with it).
+  let size = null;
   const toWorld = (event) => {
     const rect = svg.getBoundingClientRect();
     return { x: dom.box.x + ((event.clientX - rect.left) / rect.width) * dom.box.w, y: dom.box.y + ((event.clientY - rect.top) / rect.height) * dom.box.h };
   };
   svg.addEventListener("pointerdown", (event) => {
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 1) {
+      if (dom.drawn !== dom.box) setBox();
+      size = svg.getBoundingClientRect();
+    }
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), box: { ...dom.box } };
@@ -1157,7 +1410,7 @@ function wire2d(wrap) {
       const cx = pinch.box.x + pinch.box.w / 2;
       const cy = pinch.box.y + pinch.box.h / 2;
       dom.box = { x: cx - (pinch.box.w * factor) / 2, y: cy - (pinch.box.h * factor) / 2, w: pinch.box.w * factor, h: pinch.box.h * factor };
-      setBox();
+      slideBox(size);
       return;
     }
     if (!drag) return;
@@ -1183,9 +1436,13 @@ function wire2d(wrap) {
       return;
     }
     if (drag.kind === "pan") {
-      const rect = svg.getBoundingClientRect();
-      dom.box = { ...drag.box, x: drag.box.x - ((event.clientX - drag.x) / rect.width) * drag.box.w, y: drag.box.y - ((event.clientY - drag.y) / rect.height) * drag.box.h };
-      setBox();
+      dom.box = { ...drag.box, x: drag.box.x - ((event.clientX - drag.x) / size.width) * drag.box.w, y: drag.box.y - ((event.clientY - drag.y) / size.height) * drag.box.h };
+      slideBox(size);
+    } else if (model.loose.includes(model.byId.get(drag.id))) {
+      // An unlinked dot on a big map isn't in the simulation: it simply goes where the finger puts it.
+      const node = model.byId.get(drag.id);
+      Object.assign(node, toWorld(event), { held: true });
+      draw();
     } else {
       const node = model.byId.get(drag.id);
       const p = toWorld(event);
@@ -1203,6 +1460,7 @@ function wire2d(wrap) {
     if (pinch) {
       if (pointers.size < 2) {
         pinch = null;
+        setBox();
         scheduleLabels();
       }
       return;
@@ -1220,12 +1478,22 @@ function wire2d(wrap) {
       return;
     }
     if (done.kind === "pan") {
-      if (done.moved) scheduleLabels();
-      else if (event.type === "pointerup") select(null, { focus: false });
+      if (done.moved) {
+        setBox();
+        scheduleLabels();
+      } else if (event.type === "pointerup") {
+        // A tap between dots clears the selection; on a big map it picks the dot nearest the fingertip.
+        const hit = model.big ? nearestDot(toWorld(event)) : null;
+        if (hit) select(hit.id);
+        else select(null, { focus: false });
+      }
       return;
     }
     const node = model.byId.get(done.id);
-    if (done.moved) {
+    if (done.moved && model.loose.includes(node)) {
+      savePositions(model);
+      scheduleLabels();
+    } else if (done.moved) {
       node.fx = null;
       node.fy = null;
       model.sim.alphaTarget = 0;
@@ -1238,7 +1506,8 @@ function wire2d(wrap) {
   svg.addEventListener("pointerup", end);
   svg.addEventListener("pointercancel", end);
   svg.addEventListener("dblclick", (event) => {
-    const el = event.target.closest(".map-node");
+    const near = model.big && !event.target.closest(".map-dot") ? nearestDot(toWorld(event)) : null;
+    const el = near?.kind === "note" ? dom.nodeEls.get(near.id) : event.target.closest(".map-node");
     if (el) openNote(el.dataset.node);
     const board = event.target.closest(".map-canvas");
     if (board) openCanvasNode(board.dataset.node);
@@ -1318,7 +1587,7 @@ function wirePanel(wrap) {
     renderView();
   });
   $$("[data-map-setting]").forEach((input) => input.addEventListener("change", () => {
-    saveSettings({ [input.dataset.mapSetting]: input.checked });
+    saveSettings({ [input.dataset.mapSetting]: input.checked, ...(input.dataset.mapSetting === "orphans" ? { orphansSet: true } : {}) });
     renderView();
   }));
   $("#map-path")?.addEventListener("submit", (event) => {
@@ -1354,7 +1623,7 @@ function onDelegatedClick(event) {
       // The note is filtered out: clear filters so it can be shown, then select it.
       session.selected = id;
       session.local = null;
-      saveSettings({ query: "", types: [], folder: "", orphans: true });
+      saveSettings({ query: "", types: [], folder: "", orphans: true, orphansSet: true });
       renderView();
     }
     select(id, { centre: true });

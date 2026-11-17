@@ -269,6 +269,45 @@ and stays paired, so a home-screen bookmark keeps working: live sessions, autopi
   closes the port.
 - If the phone can't connect, Windows Firewall may be blocking Python: allow it on private networks.
 
+### Get a daily status report in Telegram
+
+A Telegram bot of your own tells you once a day whether Cairn is healthy and what the day held, and answers
+`/status` whenever you ask:
+
+```
+Cairn on MY-PC · Tue 17 Nov
+All good.
+
+Today
+6 AI sessions: 4 shipped, 1 partial, 1 still live
+3h 05m of session time · checks: 12 passed, 0 failed
+Live now: Fix the map on phones
+Tasks: 4 to do, 1 in progress
+
+Cairn
+Desktop app 1.0.0 (5ba5fd8): running
+Brain "brain": in sync with GitHub
+Session watcher: running
+Phone access: on, 1 phone paired
+```
+
+The first line under the date is the verdict: `All good.` or `Needs a look: ...` with what is wrong (the desktop
+app is not running, the brain has work that is not on GitHub, the session watcher stopped, checks failed, GitHub
+Actions minutes are running out). If the PC has been off or asleep, the report says since when.
+
+```bash
+cairn telegram setup <bot token>   # token from @BotFather's /newbot; then open the link it prints (--hour 8 for mornings)
+cairn telegram show                # print the report here, send nothing
+cairn telegram send                # send it now
+cairn telegram status              # what is connected
+cairn telegram off                 # forget the bot
+```
+
+The bot runs on a small free Cloudflare Worker rather than on the PC, because office networks often block
+Telegram and a PC that is off cannot say so. Deploying it takes about ten minutes:
+see [`worker/README.md`](worker/README.md). Only the report text leaves the PC (session titles, counts, sync
+state), and nothing is sent until you set a bot up.
+
 ### Hand over a goal: precedent and autopilot
 
 Say what you want once and get what you would have asked for next. `cairn precedent` learns from your own
@@ -502,6 +541,7 @@ cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
 cairn precedent brief "goal"             # a brief from your own history (learn, queue, next, log, install)
 cairn autopilot add "goal"               # your agent carries it to done (on, off, status, set)
+cairn telegram setup <bot token>         # a daily status report in Telegram (show, send, status, off)
 cairn serve --port 4777                  # the app (default command)
 ```
 
@@ -586,12 +626,13 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 * Signing in is optional. Your token is kept in this tab only (`sessionStorage`) unless you tick *Remember on this device*; it is sent only to `api.github.com` (tested), and *Sign out* deletes it. With the optional Worker, the device-flow token passes through your own Worker once on its way back to the browser.
 * The local server binds to `127.0.0.1` only, checks the `Host` header and requires a custom header on every API call, so other websites can't reach it.
 * Phone access is off until you pair a phone. It then adds a listener on port 47778 of your local network that answers only to paired devices (single-use QR code, then a device cookie) and has none of the desktop controls. It is plain HTTP, so use it on your own Wi-Fi or Tailscale, not on public Wi-Fi.
+* The Telegram report is off until you run `cairn telegram setup`. It then sends one short text (session titles, counts, sync state; no note bodies or paths) to your own Cloudflare Worker, which passes it to the one chat you paired.
 * It reads and writes only `.md` files inside the brain folder; paths that escape it are refused (tested).
 
 ## Development
 
 ```bash
-python -m unittest discover -s tests          # core, API, CLI, parity, e2e, Obsidian sync, map, sign-in, Worker
+python -m unittest discover -s tests          # core, API, CLI, parity, e2e, Obsidian sync, map, sign-in, Workers, Telegram
 pip install playwright && playwright install chromium   # for the parity and e2e tests
 python scripts/make_media.py                  # regenerate the banner and screenshot
 python scripts/live_github_check.py           # sign-in + edits against the real GitHub API on a throwaway repo

@@ -6,6 +6,7 @@ import { ServerStore, FolderStore, GitHubStore } from "./store.js";
 import * as gh from "./github.js";
 import * as auth from "./auth.js";
 import { forgetBrains } from "./brain-cache.js";
+import { forgetPlaces } from "./map.js";
 import { openSignIn as showSignInDialog } from "./signin.js";
 import { $, icon, pageHead, relativeTime, toast, today } from "./ui.js";
 import { LAST_BRAIN_KEY, readOnly, state } from "./state.js";
@@ -207,6 +208,7 @@ export async function afterSignOut() {
   // A private vault's device copy (brain-cache.js) goes with the sign-in.
   if (state.store instanceof GitHubStore) state.store.cacheKey = "";
   forgetBrains();
+  forgetPlaces();
   if (state.store instanceof GitHubStore && state.store.writable) {
     // Keep what's on screen, but stop offering edits that can't be saved.
     await flushPending().catch(() => {});
@@ -238,7 +240,7 @@ function myBrainsBlock() {
     return `
       <section class="signin-cta">
         <div><h3>Edit your own brain from any device</h3><p>Sign in with GitHub. Your notes stay in your repo; each save is a commit.</p></div>
-        <button class="btn primary" data-action="sign-in">${icon("github", "sm")} Sign in</button>
+        <button class="btn" data-action="sign-in">${icon("github", "sm")} Sign in</button>
       </section>`;
   }
   loadMine();

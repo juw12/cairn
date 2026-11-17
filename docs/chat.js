@@ -176,8 +176,17 @@ export function glowView() {
         <span><strong>Glow</strong> <span class="muted">Chat · Council · Arena</span></span>
         <a class="btn sm" href="${GLOW_URL}" target="_blank" rel="noopener">${icon("external", "sm")} Open in a new tab</a>
       </div>
-      <iframe class="glow-frame" src="${GLOW_URL}" title="Glow" allow="clipboard-write; microphone"></iframe>
+      <div class="glow-body">
+        <iframe class="glow-frame" src="${GLOW_URL}" title="Glow" allow="clipboard-write; microphone"></iframe>
+        <p class="glow-wait muted">Loading Glow… It needs the internet. If this stays empty, use “Open in a new tab”.</p>
+      </div>
     </div>`;
+}
+
+// Until Glow has loaded, the frame is see-through and the line behind it says what is going on.
+export function wireGlow() {
+  const frame = $(".glow-frame");
+  frame?.addEventListener("load", () => frame.classList.add("loaded"), { once: true });
 }
 
 // Re-render just the moving parts, so the message box keeps what you are typing.

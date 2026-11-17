@@ -1150,6 +1150,10 @@ class DesktopApp:
 
         # iPhone widget: live sessions within seconds of a change, once `cairn widget pair` was run
         widget.start_in_background(self.stopping, lambda: self.server.RequestHandlerClass.brain, log)
+        from . import telegram
+
+        # daily status in Telegram, once `cairn telegram setup` was run
+        telegram.start_in_background(self.stopping, lambda: self.server.RequestHandlerClass.brain, log, self.hooks)
         log(f"running {self.hooks.loaded_head or __version__} on {folder} ({'tray' if self.start_hidden else 'window'})")
 
         webview.start(private_mode=False, storage_path=str(config_dir() / "webview"))

@@ -492,6 +492,60 @@ def cmd_widget(brain: Brain, args) -> int:
         return 1
 
 
+def cmd_telegram(brain: Brain, args) -> int:
+    """Cairn's daily status in Telegram (see cairn/telegram.py)."""
+    from . import telegram
+
+    action = args.telegram_action
+    try:
+        if action == "show":
+            print(telegram.status_text(brain))
+            return 0
+        if action == "setup":
+            if args.worker or args.key:
+                telegram.save_worker(args.worker or telegram.load_config().get("worker", ""), args.key or "")
+                print("Saved the Worker's address and key for this PC.")
+            if not args.token:
+                if args.worker or args.key:
+                    return 0
+                print("Usage: cairn telegram setup <bot token>  (make the bot with @BotFather: /newbot)", file=sys.stderr)
+                return 2
+            result = telegram.setup(args.token, brain, hour=args.hour)
+            print(f"Connected @{result['bot']}. Open this on your phone and press Start to pair your chat:")
+            print(f"  {result['link']}")
+            print(f"After that it reports every day at {telegram._hour(telegram.load_config().get('hour')):02d}:00, and /status answers any time.")
+            return 0
+        if action == "off":
+            print("Forgot the bot: nothing more is sent." if telegram.off() else "No bot was connected.")
+            return 0
+        if action == "send":
+            result = telegram.send_now(brain)
+            if result.get("sent"):
+                print(result["text"])
+                print("\nSent to your Telegram chat.")
+                return 0
+            print(f"Not sent: {result.get('why')}", file=sys.stderr)
+            return 1
+        info = telegram.status()
+        if not info["worker"]:
+            print("Not set up. Deploy worker/cairn-telegram.js (see worker/README.md), then:")
+            print("  cairn telegram setup --worker https://cairn-telegram.<you>.workers.dev --key <CAIRN_KEY>")
+            print("  cairn telegram setup <bot token from @BotFather>")
+            return 0
+        print(f"Worker: {info['worker']}")
+        if not info["bot"]:
+            print("No bot yet. Make one with @BotFather (/newbot), then: cairn telegram setup <bot token>")
+            return 0
+        print(f"Bot: @{info['bot']}" + ("" if info.get("paired") else "  (no chat paired yet: run setup again and open its link)"))
+        print(f"Daily report: {info['hour']:02d}:00" + (f", last sent {info['sent']}" if info.get("sent") else ", none sent yet"))
+        if info.get("at"):
+            print(f"Worker last heard from this PC: {dt.datetime.fromtimestamp(info['at'] / 1000):%Y-%m-%d %H:%M}")
+        return 0
+    except telegram.TelegramError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
 def cmd_dashboards(brain: Brain, args) -> int:
     """Local dashboards on your phone from any network (see cairn/dashboards.py)."""
     from . import dashboards, relay
@@ -588,6 +642,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     widget_parser.add_argument("widget_action", nargs="?", default="status", choices=["pair", "send", "status", "unpair"])
     widget_parser.add_argument("code", nargs="?")
+    telegram_parser = sub.add_parser(
+        "telegram",
+        help="a Telegram bot that reports Cairn's status every day and answers /status",
+        description="setup <bot token> | show | send | status | off. The bot runs on worker/cairn-telegram.js.",
+    )
+    telegram_parser.add_argument("telegram_action", nargs="?", default="status", choices=["setup", "show", "send", "status", "off"])
+    telegram_parser.add_argument("token", nargs="?", help="setup: the bot token @BotFather gave you")
+    telegram_parser.add_argument("--worker", default="", help="setup: the Worker's address, https://cairn-telegram.<you>.workers.dev")
+    telegram_parser.add_argument("--key", default="", help="setup: the CAIRN_KEY secret the Worker was deployed with")
+    telegram_parser.add_argument("--hour", type=int, default=None, help="setup: hour of the daily report, 0-23 (default 21)")
     sub.add_parser("init", help="create the brain/ folder layout")
     add_parser = sub.add_parser("add", help='capture: cairn add "todo: ship v1 #release"')
     add_parser.add_argument("text", nargs="+")
@@ -842,6 +906,7 @@ def main(argv: list[str] | None = None) -> int:
         "relay": cmd_relay,
         "dashboards": cmd_dashboards,
         "widget": cmd_widget,
+        "telegram": cmd_telegram,
         None: cmd_serve,
     }
     if args.command is None:

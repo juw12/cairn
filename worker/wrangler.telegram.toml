@@ -1,0 +1,14 @@
+name = "cairn-telegram"
+main = "cairn-telegram.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+# Hourly: the Worker sends the day's report once the hour chosen on the PC has come.
+[triggers]
+crons = ["0 * * * *"]
+
+# Holds the bot token, the paired chat and the latest status. Make your own with
+# `npx wrangler kv namespace create cairn-telegram` and put its id here. The id is not a secret.
+[[kv_namespaces]]
+binding = "STORE"
+id = "f5dae6ce4e534490ad2e81e447e63473"

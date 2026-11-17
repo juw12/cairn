@@ -172,3 +172,47 @@ Found and fixed on the way: background re-render wiped text typed into People's 
 
 Self-score against the frozen rubric: 9/10 (all hard gates pass; not done: canvas renderer for 5k+ note vaults,
 editing wiki links inside properties from the Map).
+
+## 2026-11-17 scan, phone map, Telegram status bot, UI tidy
+
+Prompt: scan for odd / missing / unused things, tidy the UI, add a Telegram bot that reports Cairn's status
+daily, fix the map lagging on a phone. Self-judged; numbers below are measured, the scores are not re-run.
+
+## Run queue
+
+1. Static scan (handlers vs `data-action`, unused modules, unused `/api/*` routes, slop check) - done.
+2. Phone map: profile, fix, regression test - done.
+3. Telegram status bot (`cairn/telegram.py`, `worker/cairn-telegram.js`), deployed and keyed - done.
+4. UI tidy from a light / dark / phone screenshot sweep - done.
+5. Bot token from @BotFather and the first real daily message - **open, needs the owner**.
+
+Phone map, Chrome emulation 390x844 with 4x CPU throttle, synthetic brain of 2,780 notes / 626 links
+(the PC was busy, so absolute values are noisy; the ratios are the point):
+
+| | before | after (default) | after "Show all" |
+|---|---|---|---|
+| open, blocking / to paint | 8.6 s / 13.2 s | 2.1 s / 2.2 s | 2.1 s / 2.3 s |
+| DOM elements / dots | 11,783 / 2,780 | 2,509 / 461 | 11,783 / 2,780 |
+| settle | 51.7 s, frame p50 133 ms | 14.5 s, p50 16.7 ms | 1.8 s (restored), p50 16.7 ms |
+| pan frame p50 / p95 | 183 / 433 ms | 16.8 / 66.7 ms | 49.9 / 100 ms |
+| pinch frame p50 / p95 | 217 / 950 ms | 16.7 / 50 ms | 16.7 / 50 ms |
+| tap to select | 3,586 ms | 115 ms | 99 ms |
+
+Causes found: unlinked mentions recomputed on every render, label placement that scaled with notes x placed
+boxes, a `tabindex` write on every dot per selection, a viewBox repaint on every pointer move, and every
+orphan run through the force simulation. Lasting check: `test_map_big_brain_hides_orphans_and_pans_without_redrawing`.
+
+Scan result: all 78 `data-action` values have a handler and every handler has a caller; no module is
+unimported; every server `/api/*` route is used. Removed two unused functions (`tourOpen`, `read_app_id`).
+Slop check: 0 blockers, 0 warnings (62 files).
+
+## Assumptions
+
+- Assumed: above 1,000 notes the map hides unlinked notes until "Show all" or the Orphans box is ticked.
+- Assumed: unlinked notes sit on a ring instead of being simulated; the layout is cached per brain in localStorage.
+- Assumed: the bot runs on a Cloudflare Worker (hourly cron, 21:00 local by default) because the Telegram API
+  is blocked on the office network; only the report text goes PC -> Worker KV -> Telegram.
+- Assumed: the KV namespace id in `worker/wrangler.telegram.toml` is not a secret and may sit in the public repo.
+- Assumed: People keeps one primary action ("Look up"); zoom controls move bottom-left on phones.
+
+Not verified: a real daily Telegram message (no bot token yet), and the map on a physical phone (emulation only).
