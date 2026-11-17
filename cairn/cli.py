@@ -208,11 +208,24 @@ def cmd_publish(brain: Brain, args) -> int:
         print(f"No folder at {source}", file=sys.stderr)
         return 2
     try:
+        if args.site:
+            from . import site
+
+            folder = Path(args.site).expanduser()
+            report = site.build(source, folder, args.title or "")
+            for path in report["write"]:
+                print(f"  wrote: {path}")
+            for path in report["delete"]:
+                print(f"  removed: {path}")
+            count = report["notes"]
+            print(f"Public page ready: {folder / 'index.html'} ({count} public note{'s' if count != 1 else ''}).")
+            print("Open that file to see it, or put the folder on any web host to share it.")
+            return 0
         if args.folder:
             report = publish.publish_to_folder(source, Path(args.folder).expanduser())
         else:
             if not args.to:
-                print("Where to? Example: cairn publish --to YOUR-NAME/brain", file=sys.stderr)
+                print("Where to? Example: cairn publish --to YOUR-NAME/brain  (or --site FOLDER for a page you host anywhere)", file=sys.stderr)
                 return 2
             http = publish.make_http(publish.find_token())
             report = publish.publish_to_github(source, args.to, http, _today(), dry_run=args.dry_run)
@@ -690,6 +703,8 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--to", metavar="OWNER/REPO", help="public repo (created if missing), e.g. you/brain")
     publish_parser.add_argument("--source", help="folder to publish from (default: the brain; can be an Obsidian vault)")
     publish_parser.add_argument("--folder", help="write into this local clone instead of using the GitHub API")
+    publish_parser.add_argument("--site", metavar="FOLDER", help="build a public web page (plain HTML, no GitHub needed) into this folder")
+    publish_parser.add_argument("--title", help="--site: the name shown at the top of the page, e.g. your name")
     publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     vibe_parser = sub.add_parser(
         "vibe",
