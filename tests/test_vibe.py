@@ -71,6 +71,15 @@ class VibeCliTests(unittest.TestCase):
         stats = core.vibe_stats(self.brain.notes(), note["meta"]["created"])
         self.assertEqual((stats["sessions"], stats["partial"], stats["passed"], stats["failed"], stats["prompts"]), (1, 1, 1, 1, 1))
 
+    def test_check_runs_in_the_callers_folder_not_the_brain_root(self):
+        # `cairn --root <vault> vibe check -- <tests>` is run from the repo being tested.
+        run_cli(self.root, "vibe", "start", "Run the tests")
+        seen: list[str] = []
+        code, _ = vibe.check(self.brain, [sys.executable, "-c", "import os; print(os.getcwd())"], echo=seen.append)
+        self.assertEqual(code, 0)
+        self.assertEqual(Path(seen[-1]).resolve(), Path.cwd().resolve())
+        self.assertNotEqual(Path(seen[-1]).resolve(), self.root.resolve())
+
     def test_parallel_sessions_skills_and_session_targeting(self):
         run_cli(self.root, "vibe", "start", "Map tiles")
         code, out, _ = run_cli(self.root, "vibe", "start", "Share link")
