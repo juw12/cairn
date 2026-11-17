@@ -418,6 +418,22 @@ python -m cairn publish --to YOUR-NAME/brain --source "path/to/your/vault"
 
 The full format is in [PROOF.md](PROOF.md).
 
+### Share a page without GitHub
+
+Want a link you can send to anyone, with no repo, topic or token? Build a plain web page from the
+same `publish: true` notes:
+
+```sh
+python -m cairn publish --site my-page --title "Your Name"
+```
+
+`my-page/index.html` lists your work (each claim with the links that back it) and every public note
+gets its own page. It is plain HTML with no JavaScript and no calls to GitHub, so it opens straight
+from disk and has no rate limit. To put it online, upload the folder to any static host (Cloudflare
+Pages, Netlify, GitHub Pages, your own server). Run the command again after you change notes: pages of
+notes you un-publish are removed, and files you added to the folder yourself are left alone. This page
+shows your claims and evidence links as written; the checked proof levels stay in the Proof view.
+
 ### Edit your brain from any device
 
 Sign in with GitHub on the web app and your brain repo becomes editable from your phone, a borrowed laptop or
