@@ -362,7 +362,7 @@ class OpenCodeV2Tests(unittest.TestCase):
 
     def test_new_tables_give_model_effort_tokens_and_where_the_turn_stands(self):
         make_v2_db(self.db, [
-            self.row("ses_wait", "Waiting for me", 60, tokens_input=1000, tokens_output=200, tokens_reasoning=300, tokens_cache_read=5000),
+            self.row("ses_wait", "Turn finished", 60, tokens_input=1000, tokens_output=200, tokens_reasoning=300, tokens_cache_read=5000),
             self.row("ses_busy", "Still working", 20),
             self.row("ses_fail", "Broke", 300, idle_outcome="failed"),
             self.row("ses_cut", "Cut off", 300),
@@ -376,12 +376,14 @@ class OpenCodeV2Tests(unittest.TestCase):
         notes = self.notes()
         self.assertEqual(set(notes), {"ses_wait", "ses_busy", "ses_fail", "ses_cut"})
         waiting = notes["ses_wait"]["meta"]
-        self.assertEqual(notes["ses_wait"]["status"], "live")
+        # A finished turn ends the session there and then: nobody is asked to come back to it.
+        self.assertEqual((notes["ses_wait"]["status"], waiting["ended"]), ("done", watch._stamp(self.now - 5 * MINUTE)))
+        self.assertEqual(notes["ses_busy"]["status"], "live")
         self.assertEqual((waiting["model"], waiting["effort"]), ("big-model", "high"))
         # Read and written, reasoning included; what the cache served is kept apart.
         self.assertEqual((waiting["tokens"], waiting["tokens_in"], waiting["tokens_out"], waiting["tokens_cache"]), ("1500", "1000", "500", "5000"))
         self.assertEqual((waiting["prompts"], waiting["turn"]), ("2", "done"))
-        self.assertIn("turn finished, waiting for you", self.text(notes["ses_wait"]))
+        self.assertNotIn("waiting for you", self.text(notes["ses_wait"]))
         self.assertEqual(notes["ses_busy"]["meta"]["turn"], "working")
         self.assertNotIn("tokens", notes["ses_busy"]["meta"])
         self.assertEqual((notes["ses_fail"]["status"], notes["ses_fail"]["meta"]["turn"]), ("done", "failed"))
@@ -391,6 +393,72 @@ class OpenCodeV2Tests(unittest.TestCase):
         for note in notes.values():
             self.assertNotIn("SECRET", self.text(note))
         self.assertEqual(self.sync(), [], "a second pass rewrites nothing")
+
+    def test_a_new_prompt_opens_a_finished_session_again(self):
+        row = self.row("ses_a", "Back and forth", 60)
+        make_v2_db(self.db, [row], messages={"ses_a": self.turn(60, 50)})
+        self.sync()
+        self.assertEqual(self.notes()["ses_a"]["status"], "done")
+        self.db.unlink()
+        make_v2_db(self.db, [row], messages={"ses_a": self.turn(60, 50) + self.turn(3, 1, finished=False)})
+        self.sync()
+        note = self.notes()["ses_a"]
+        self.assertEqual((note["status"], note["meta"]["turn"]), ("live", "working"))
+        self.assertNotIn("ended", note["meta"])
+        self.db.unlink()
+        make_v2_db(self.db, [row], messages={"ses_a": self.turn(60, 50) + self.turn(3, 1)})
+        self.sync()
+        self.assertEqual(self.notes()["ses_a"]["status"], "done")
+
+    def test_a_prompt_in_the_minute_the_turn_ended_still_opens_it_again(self):
+        row = self.row("ses_a", "Quick follow-up", 60)
+        make_v2_db(self.db, [row], messages={"ses_a": self.turn(60, 5)})
+        self.sync()
+        self.assertEqual(self.notes()["ses_a"]["status"], "done")
+        self.db.unlink()
+        again = [(self.now - 5 * MINUTE, "user", {"text": "SECRET PROMPT TEXT"})]  # same minute as the idle marker
+        make_v2_db(self.db, [row], messages={"ses_a": self.turn(60, 5) + again})
+        self.sync()
+        self.assertEqual(self.notes()["ses_a"]["status"], "live")
+
+    def test_changes_landing_just_after_the_turn_still_count_as_shipped(self):
+        make_v2_db(self.db, [self.row("ses_a", "Edit then summarise", 60)], messages={"ses_a": self.turn(60, 5)})
+        self.sync()
+        self.assertEqual(self.notes()["ses_a"]["status"], "done")
+        connection = sqlite3.connect(self.db)
+        connection.execute("update session_v2 set summary_additions = 12, summary_files = 1 where id = 'ses_a'")
+        connection.commit()
+        connection.close()
+        self.sync()
+        self.assertEqual(self.notes()["ses_a"]["status"], "shipped")
+
+    def test_a_session_deleted_from_opencode_is_closed(self):
+        make_v2_db(self.db, [
+            self.row("ses_gone", "Script run, deleted after", 90, summary_additions=4, summary_files=1),
+            self.row("ses_fresh", "Deleted a moment ago", 20),
+            self.row("ses_here", "Still working", 20),
+        ], messages={
+            "ses_gone": self.turn(90, 40, finished=False),
+            "ses_fresh": self.turn(20, 2, finished=False),
+            "ses_here": self.turn(20, 2, finished=False),
+        })
+        watch.watch_once(self.brain, vector=False, now_ms=self.now - 35 * MINUTE, db_path=self.db, git="definitely-not-git")
+        self.assertEqual({n["status"] for n in self.notes().values()}, {"live"})
+        connection = sqlite3.connect(self.db)
+        connection.execute("delete from session_v2 where id in ('ses_gone', 'ses_fresh')")
+        connection.commit()
+        connection.close()
+        messages = self.sync()
+        notes = self.notes()
+        self.assertEqual({key: note["status"] for key, note in notes.items()}, {"ses_gone": "shipped", "ses_fresh": "live", "ses_here": "live"})
+        self.assertEqual(notes["ses_gone"]["meta"]["ended"], watch._stamp(self.now - 40 * MINUTE))
+        self.assertIn("no longer in OpenCode", self.text(notes["ses_gone"]))
+        self.assertIn("OpenCode: 1 session(s) ended, no longer in OpenCode", messages)
+        self.assertEqual(self.sync(), [], "a second pass rewrites nothing")
+        # A device without OpenCode leaves other devices' live sessions alone.
+        self.db.unlink()
+        watch.watch_once(self.brain, vector=False, now_ms=self.now + 120 * MINUTE, db_path=self.db, git="definitely-not-git")
+        self.assertEqual(self.notes()["ses_here"]["status"], "live")
 
     def test_model_comes_from_the_last_reply_when_the_session_has_none(self):
         make_v2_db(self.db, [self.row("ses_a", "No model on the row", 300, model=None)], messages={"ses_a": self.turn(300, 200)})
@@ -422,7 +490,7 @@ class OpenCodeV2Tests(unittest.TestCase):
         self.assertTrue(reply.startswith("> All 12 tests pass. Done and pushed."), reply)
         self.assertLessEqual(len(reply), watch.REPLY_CHARS + 2)
         self.assertNotIn("SECRET", text)  # the prompt and the reasoning stay out even then
-        self.assertEqual([e["kind"] for e in core.session_log(text)], ["start", "note", "note"])
+        self.assertEqual([e["kind"] for e in core.session_log(text)], ["start", "note", "end"])
 
     def test_a_script_firing_one_prompt_chats_becomes_one_note_a_day(self):
         def run(number, minute):
@@ -574,6 +642,55 @@ class VectorTests(unittest.TestCase):
             del os.environ["CAIRN_OPENCODE_DB"]
         self.assertEqual(code, 0, err.getvalue())
         self.assertIn("No new or changed sessions", out.getvalue())
+
+
+class SilentSessionTests(unittest.TestCase):
+    """A session somebody started by hand and never ended does not stay live for days."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.brain = Brain(self.root)
+        self.brain.init()
+        self.now = int(time.time() * 1000)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def later(self, minutes):
+        return watch.watch_once(
+            self.brain, opencode=False, vector=False, now_ms=self.now + minutes * MINUTE,
+            db_path=Path(self.tmp.name) / "no.db",
+        )
+
+    def test_a_reported_session_ends_after_hours_of_silence_and_reopens_on_its_next_step(self):
+        vibe.start(self.brain, "Refactor the parser", agent="vector")
+        vibe.log(self.brain, "split the module")
+        note = sessions(self.brain)[0]
+        self.assertEqual(self.later(watch.REPORTED_IDLE_MINUTES - 5), [])
+        self.assertEqual(sessions(self.brain)[0]["status"], "live")
+        self.assertEqual(self.later(watch.REPORTED_IDLE_MINUTES + 5), ["Sessions: 1 ended after 4 h without a step"])
+        [closed] = sessions(self.brain)
+        self.assertEqual((closed["status"], closed["meta"]["closed_by"]), ("done", "watcher"))
+        self.assertEqual(closed["meta"]["ended"][:16], closed["meta"]["started"][:16][:11] + core.session_log(closed["body"])[1]["time"])
+        self.assertIn("auto-ended, no step for 4 h", closed["body"])
+        self.assertEqual(self.later(watch.REPORTED_IDLE_MINUTES + 6), [], "closed once")
+        # The assistant comes back and reports to its session by name: it is live again, then ends properly.
+        vibe.log(self.brain, "picked it up again", session=note["slug"])
+        [reopened] = sessions(self.brain)
+        self.assertEqual(reopened["status"], "live")
+        self.assertNotIn("ended", reopened["meta"])
+        self.assertNotIn("closed_by", reopened["meta"])
+        vibe.end(self.brain, "shipped", "merged", session_slug=note["slug"])
+        with self.assertRaises(vibe.VibeError):
+            vibe.log(self.brain, "too late", session=note["slug"])  # ended on purpose: stays ended
+
+    def test_core_last_activity_follows_the_log_past_midnight(self):
+        note = {"meta": {"started": "2026-11-07T23:50"}, "body": "- 23:50 start: x\n- 23:58 note: a\n- 00:10 note: b\n"}
+        last = core.session_last_activity(note)
+        self.assertEqual(core.minutes_stamp(last), "2026-11-08T00:10")
+        self.assertEqual(core.session_last_activity({"meta": {"turn_at": "2026-11-07T09:30"}, "body": ""}), core.stamp_minutes("2026-11-07T09:30"))
+        self.assertIsNone(core.session_last_activity({"meta": {}, "body": ""}))
 
 
 class ProcessTests(unittest.TestCase):
