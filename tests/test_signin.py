@@ -84,6 +84,18 @@ class SignInTests(unittest.TestCase):
             page.wait_for_timeout(100)
         self.fail(f"{path} never reached the expected state on GitHub; last: {self.mock.text(REPO, path)!r}")
 
+    def open_vibe_row(self, page, title):
+        # A session is one row of the Live recap; its steps, code and controls show when the row is open.
+        page.wait_for_function("(title) => [...document.querySelectorAll('.rc-row .rc-title')].some((a) => a.textContent.includes(title))", arg=title, timeout=8000)
+        page.evaluate("""(title) => {
+            const row = [...document.querySelectorAll('.rc-row')].find((r) => r.querySelector('.rc-title')?.textContent.includes(title));
+            for (let fold = row.closest('details'); fold; fold = fold.parentElement?.closest('details')) {
+                if (!fold.open) fold.querySelector('summary').click();
+            }
+            if (!row.classList.contains('open')) row.querySelector('.rc-toggle').click();
+        }""", title)
+        page.wait_for_selector(".rc-row.open .vibe-live", timeout=8000)
+
     def sign_in_with_token(self, page, token=VALID_TOKEN, remember=False):
         page.click('#sidebar-foot [data-action="sign-in"]')
         page.wait_for_selector("#signin-dialog")
@@ -101,8 +113,8 @@ class SignInTests(unittest.TestCase):
         self.mock.set_text(REPO, "brain/sessions/2026-11-07-remote-agent.md",
                            "---\ntitle: Remote agent\ntype: session\nstatus: live\nstarted: 2026-11-07T09:00\n---\n## Log\n\n- 09:00 start: Remote agent\n- 09:05 skill: /refine 6.0 -> 8.8\n")
         go_to(page, "vibe")
-        page.wait_for_function("() => document.querySelector('.vibe-live h2')?.innerText.includes('Remote agent')", timeout=8000)
-        self.assertIn("Following GitHub", page.inner_text(".vibe-live"))
+        self.open_vibe_row(page, "Remote agent")
+        self.assertIn("Following GitHub", page.inner_text(".rc-row.open .vibe-live"))
         # Later polls are conditional: GitHub answers 304 for an unchanged folder, which costs no rate limit.
         for _ in range(50):
             if any(listing["conditional"] for listing in self.mock.listings):
@@ -474,7 +486,7 @@ class SignInTests(unittest.TestCase):
         path = "sessions/2026-11-07-remote-agent.md"
         self.mock.set_text(REPO, "brain/" + path, "---\ntitle: Remote agent\ntype: session\nstatus: live\nstarted: 2026-11-07T09:00\n---\n## Log\n\n- 09:00 start: Remote agent\n")
         go_to(page, "vibe")
-        page.wait_for_function("() => document.querySelector('.vibe-live h2')?.innerText.includes('Remote agent')", timeout=8000)
+        page.wait_for_function("() => [...document.querySelectorAll('.rc-row .rc-title')].some((a) => a.textContent.includes('Remote agent'))", timeout=8000)
         kept = page.evaluate("async (path) => (await window.cairn.state.store.list()).find((file) => file.path === path)?.text || ''", path)
         self.assertIn("status: live", kept, "the store keeps the text, not only the sha")
         page.wait_for_function("""async (path) => {
