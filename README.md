@@ -159,9 +159,14 @@ It opens `http://127.0.0.1:4777` with code scanning and one-click **Commit brain
 
 ### Watch your vibe coding live
 
-**Vibe** (sidebar → Project) shows what your AI assistant is doing right now, what came out of it, and what people
+**Vibe** (sidebar → Build) shows what your AI assistant is doing right now, what came out of it, and what people
 thought. A session is a plain file in `brain/sessions/` with `status: live` while you work and a log of timestamped
 steps; feedback lives in `brain/feedback/` with an optional 1-5 rating.
+
+Every block on the Vibe page (live recap, overview, live cards, numbers, activity, sessions, feedback...) folds to one
+line with a summary, and moves up or down with its arrows or by dragging its handle. The layout is saved in
+`brain/CAIRN-LAYOUT.md`, so the desktop app, the web app and your phone show the same page; with more than three
+sessions live the full live cards start folded, since the recap and the overview already list them.
 
 ```sh
 cairn vibe start "add dark mode" --agent claude   # opens a live session
@@ -346,20 +351,6 @@ until you turn it on, and its state and logs live in `~/.cairn/autopilot` (`CAIR
 Moving from the standalone precedent skill or Precedent Agent app:
 `cairn precedent init --import-skill <skill folder> --queue-file <Queue.md> --agent-app <app folder>` (safe to re-run).
 
-### Test a business idea: Founder Studio
-
-The **Founder Studio** page runs [Founder Studio](https://github.com/juw12/founder-studio) inside Cairn: describe
-an offer and a price, and a simulated panel of 20 buyers walks through a 3D market square, decides buy or pass and
-tells you why, with the price ladder and an A/B pitch test underneath. It runs entirely in your browser (Python via
-Pyodide, nothing sent anywhere), so it works on the hosted site and offline alike. Three steps above the studio follow
-you through it (describe the idea, run the panel, save to brain), and **write your own** opens the studio's
-setup so you can swap the example for your idea. When a run finishes, Cairn shows
-the buy rate against your target and **Save to brain** files it as a note tagged `founder-studio`, so the result sits
-next to your project notes and in Obsidian.
-
-The studio lives in `docs/founder/` and is developed there from now on; `docs/founder.js` is the small bridge that
-embeds it and receives each finished run.
-
 ### Keep a daily log by voice
 
 Press the **Log** button, or <kbd>L</kbd>. On a computer it sits in the top bar next to search; on a phone it floats bottom-right where your thumb is, and slides out of the way while you scroll down to read. The microphone starts (you can turn that off), you talk, and every sentence lands in today's page as a plain Markdown bullet:
@@ -519,7 +510,7 @@ The editor speaks Obsidian-flavoured Markdown, so a vault reads the same in both
 ### Keep a separate brain in sync with a vault
 
 When your notes live in a project's `brain/` folder (or a GitHub repo) and you also keep an Obsidian vault,
-open **Obsidian sync** in the sidebar or run `cairn obsidian ~/path/to/vault`. Cairn copies the vault into
+open **Obsidian sync** (the puzzle button at the foot of the sidebar, or Ctrl+K) or run `cairn obsidian ~/path/to/vault`. Cairn copies the vault into
 `brain/obsidian/` and from then on keeps both sides in sync: edit a note in either app and the next sync
 copies it over. (If Cairn opened the vault itself, there is nothing to sync and the page says so.)
 

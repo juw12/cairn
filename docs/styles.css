@@ -1525,7 +1525,6 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .commit-list .churn { font-family: var(--mono); font-size: 12px; }
 .vibe-figures { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .vibe-figures .figure .value { font-size: 34px; }
-.vibe-cols { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 32px; }
 .column-block > header .small { font-weight: 400; }
 .vibe-activity svg { display: block; width: 100%; height: 90px; }
 .vibe-activity .bar { fill: color-mix(in srgb, var(--session) 45%, transparent); }
@@ -1573,7 +1572,7 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
   .vibe-figures .figure:is(:nth-child(4), :nth-child(7)) { padding-left: 0; border-left: 0; }
 }
 @media (max-width: 900px) {
-  .vibe-live-grid, .vibe-cols { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .vibe-live-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .vibe-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .vibe-figures .figure:nth-child(odd) { padding-left: 0; border-left: 0; }
   .vibe-figures .figure:nth-child(4) { padding-left: 20px; border-left: 1px solid var(--line); }
@@ -1599,8 +1598,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .dist-row .star-label .icon { width: 11px; height: 11px; fill: currentColor; }
 .session-row .meta .check-pass .icon, .session-row .meta .check-fail .icon { width: 12px; height: 12px; stroke-width: 2.2; vertical-align: -1px; }
 /* vibe: secondary text one step louder than the app-wide --muted, still quieter than --ink-2 */
-.vibe-recap, .vibe-machine, .vibe-github, .vibe-overview, .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook { --muted: #59544b; }
-:root[data-theme="dark"] :is(.vibe-recap, .vibe-machine, .vibe-github, .vibe-overview, .vibe-live, .vibe-figures, .vibe-cols, .vibe-hook) { --muted: #a9a296; }
+.vibe-recap, .vibe-machine, .vibe-github, .vibe-overview, .vibe-live, .vibe-figures, .vibe-board, .vibe-hook { --muted: #59544b; }
+:root[data-theme="dark"] :is(.vibe-recap, .vibe-machine, .vibe-github, .vibe-overview, .vibe-live, .vibe-figures, .vibe-board, .vibe-hook) { --muted: #a9a296; }
 .vibe-figures .figure .label { font-size: 13px; }
 @media (max-width: 600px) {
   :is(.vibe-log-form, .fb-form, .fb-row, .vibe-end) :is(.input, .select, .btn) { min-height: 40px; }
@@ -1767,7 +1766,6 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .vibe-fold-row { display: flex; justify-content: flex-end; margin-top: 4px; }
 .vibe-fold-row .icon { width: 14px; height: 14px; }
 .vibe-activity .axis .peak { color: var(--ink-2, var(--ink)); }
-.vibe-cols > div + div > .vibe-skills { margin-top: 24px; }
 /* Two clear units: what ran last (link), then when it ended and how to start the next one. */
 .vibe-live.idle.compact .idle-meta { display: block; flex-basis: 100%; font-size: 12.5px; padding-left: 26px; margin-top: -4px; }
 
@@ -1976,67 +1974,6 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
   .ov-track { max-width: 30%; }
   .ov-lane-log { padding-left: 8px; min-height: 40px; }
   .ov-tile { min-height: 64px; }
-}
-
-/* ------------------------------------------------------------ founder studio */
-body.founder-open .view { padding-bottom: 16px; }
-body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; }
-.founder-stage { padding: 0 40px 40px; max-width: 1240px; width: 100%; }
-.founder-stage iframe { display: block; width: 100%; height: max(640px, calc(100vh - 230px)); border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
-.founder-hint { display: flex; align-items: flex-start; gap: 8px; margin: 0; }
-.founder-hint .icon { flex: none; margin-top: 3px; }
-.founder-strip { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--ink-3, var(--line-strong)); border-radius: 10px; }
-.founder-strip.good { border-left-color: #2f7d4f; }
-.founder-strip.bad { border-left-color: #b4452f; }
-.founder-figure { font-size: 15px; }
-.founder-meta { flex: 1 1 260px; color: var(--ink-2); font-size: 13px; }
-@media (max-width: 760px) {
-  .founder-stage { padding: 0 16px 24px; }
-  .founder-stage iframe { height: calc(100vh - 160px); min-height: 560px; border-radius: 10px; }
-}
-
-/* Founder Studio steps: three-stage tracker above the studio. */
-.founder-result { display: grid; gap: 10px; }
-.founder-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.founder-step { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink-2); min-width: 0; }
-.founder-step-mark { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; border: 1px solid var(--line-strong, var(--line)); color: var(--ink-3, var(--ink-2)); }
-.founder-step-text { display: grid; gap: 2px; min-width: 0; font-size: 13px; line-height: 1.35; }
-.founder-step-text b { color: var(--ink); font-weight: 600; font-size: 13.5px; }
-.founder-step.current { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.founder-step.current .founder-step-mark { background: var(--accent); border-color: var(--accent); color: #fff; }
-.founder-step.done .founder-step-mark { background: color-mix(in srgb, #2f7d4f 14%, transparent); border-color: transparent; color: #2f7d4f; }
-.founder-step.todo { opacity: .72; }
-.founder-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-@media (max-width: 760px) {
-  .founder-steps { grid-template-columns: 1fr; gap: 6px; }
-  .founder-step { padding: 8px 10px; }
-}
-
-/* Founder Studio: next step under the result, and past panels saved to the brain. */
-.founder-next { flex: 1 1 100%; font-size: 13px; color: var(--ink-2); }
-.founder-next b { color: var(--ink); font-weight: 600; }
-.founder-saved { display: flex; align-items: center; gap: 10px; min-width: 0; margin-top: 10px; font-size: 13px; }
-.founder-saved-head { flex: none; font-weight: 600; color: var(--ink); }
-.founder-saved-list { list-style: none; margin: 0; padding: 0 0 2px; display: flex; gap: 6px; overflow-x: auto; min-width: 0; scrollbar-width: thin; }
-.founder-saved-item { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); text-decoration: none; white-space: nowrap; }
-.founder-saved-item:hover { border-color: var(--accent); color: var(--ink); }
-.founder-saved-date { color: var(--ink-3, var(--ink-2)); font-variant-numeric: tabular-nums; }
-.founder-saved-name { color: var(--ink); }
-.founder-saved-rate { font-weight: 600; font-variant-numeric: tabular-nums; }
-.founder-saved-rate.good { color: #2f7d4f; }
-.founder-saved-rate.bad { color: #b4452f; }
-.founder-saved-rate .muted { font-weight: 400; }
-@media (max-width: 760px) {
-  .founder-saved { flex-wrap: wrap; gap: 6px; }
-  .founder-saved-list { flex: 1 1 100%; }
-}
-
-/* Founder Studio reads as one page: the studio sits on the page's paper with a single hairline above it. */
-.founder-stage iframe { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
-@media (max-width: 760px) {
-  body.founder-open .log-fab { display: none; }
-  .founder-saved-list { flex-wrap: wrap; overflow: visible; }
-  .founder-saved-list li:nth-child(n+4) { display: none; }
 }
 
 /* ============================================================ Projects: ranked GitHub repos */
@@ -2254,7 +2191,6 @@ body.founder-open .view .page-head { margin-bottom: 14px; padding-bottom: 14px; 
 details.rc-fold { margin-top: 8px; }
 details.rc-fold > summary { padding: 4px 0; font-size: 12.5px; color: var(--muted); cursor: pointer; }
 details.rc-fold[open] > summary { margin-bottom: 6px; }
-.vibe-cols > div + div > .vibe-models { margin-top: 24px; }
 .mu-list { list-style: none; margin: 0; padding: 0; }
 .mu-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .mu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
@@ -2348,4 +2284,42 @@ details.rc-fold[open] > summary { margin-bottom: 6px; }
   .lb-row { grid-template-columns: 22px 32px minmax(0, 1fr) auto 28px; gap: 8px 10px; }
   .lb-bar { grid-column: 3 / -1; grid-row: 2; }
   .lb-add .btn, .lb-publish .btn, .lb-tabs .chip, .lb-head .btn { min-height: 40px; }
+}
+
+/* ------------------------------------------------------------ Vibe: blocks you fold and arrange */
+.vibe-board { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 28px; align-items: start; }
+.vibe-panel { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--line); }
+.vibe-panel.half { grid-column: auto; }
+.vp-head { display: flex; align-items: center; gap: 6px; min-height: 38px; }
+.vp-toggle { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 10px; padding: 9px 0; border: 0; background: none; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.vp-toggle .icon { flex: none; align-self: center; transition: transform .15s; }
+.vibe-panel.folded .vp-toggle .icon { transform: rotate(-90deg); }
+.vp-title { flex: none; font-size: 13px; font-weight: 600; }
+.vp-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--muted, var(--ink-2)); }
+.vibe-panel:not(.folded) .vp-sum { display: none; }
+.vp-toggle:focus-visible, .vp-move:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.vp-tools { flex: none; display: flex; align-items: center; gap: 2px; opacity: .45; transition: opacity .15s; }
+.vp-head:hover .vp-tools, .vp-head:focus-within .vp-tools { opacity: 1; }
+.vp-move { width: 26px; height: 26px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.vp-move:hover:not(:disabled) { background: var(--hover, rgba(0, 0, 0, .06)); color: var(--ink); }
+.vp-move:disabled { opacity: .3; cursor: default; }
+.vp-grip { width: 22px; text-align: center; color: var(--ink-2); letter-spacing: -3px; cursor: grab; user-select: none; }
+.vibe-panel.dragging { opacity: .45; }
+.vibe-panel.drop-before { box-shadow: inset 0 3px 0 var(--accent); }
+.vibe-panel.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
+.vp-body { padding-bottom: 14px; }
+/* The block's own heading repeats the panel title, and its rule repeats the panel's. */
+.vp-body > :is(.vibe-recap, .vibe-overview, .column-block) > header > h2 { display: none; }
+.vp-body > :is(.vibe-recap, .vibe-overview, .vibe-machine, .vibe-github, .figures, .vibe-hook) { margin: 0; border-bottom: 0; }
+.vp-body > .column-block { padding-top: 0; }
+.vp-body > .vibe-hook { margin-top: 0; }
+.vp-body > .vibe-live:last-child { border-bottom: 0; }
+.vibe-layout-note { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+@media (max-width: 1000px) {
+  .vibe-board { grid-template-columns: minmax(0, 1fr); }
+  .vibe-panel.half { grid-column: 1 / -1; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .vp-tools { opacity: 1; }
+  .vp-grip { display: none; }
 }

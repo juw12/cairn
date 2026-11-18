@@ -58,8 +58,15 @@ def launch_browser(playwright):
 
 
 def go_to(page, view: str) -> None:
-    """Open a page the way a person does: its sidebar entry, then its tab when the entry holds several pages."""
+    """Open a page the way a person does: its sidebar entry, then its tab when the entry holds several pages.
+
+    Pages with no sidebar entry (Tools: context pack, Obsidian sync, plugins) open from their address.
+    """
     entry = f'#nav [data-views~="{view}"]'
+    if not page.locator(entry).count():
+        page.evaluate("(v) => { location.hash = `#/${v}`; }", view)
+        page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
+        return
     page.click(entry)
     page.wait_for_selector(f'{entry}[aria-current="page"]')
     tab = page.locator(f'.hub-tabs [data-go="{view}"]:not([aria-current="page"])')

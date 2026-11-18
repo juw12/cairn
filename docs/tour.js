@@ -20,12 +20,12 @@ const STEPS = [
   {
     target: '#nav [data-views~="ideas"]',
     title: "Brainstorm ideas",
-    text: "Plan holds three tabs: Board, Ideas and Decisions. On the Ideas tab, ideas move from Raw to Ready. Open one and press Spark for a prompt that pushes it further, then Promote it to a task.",
+    text: "Today holds the Board, Ideas and Decisions as tabs. On the Ideas tab, ideas move from Raw to Ready. Open one and press Spark for a prompt that pushes it further, then Promote it to a task.",
   },
   {
     target: '#nav [data-views~="board"]',
     title: "Get it done",
-    text: "Plan opens on the Board: your tasks. Drag cards between To do, Doing and Done; each move is a one-line change in the note's file.",
+    text: "The Board tab under Today: your tasks. Drag cards between To do, Doing and Done; each move is a one-line change in the note's file.",
   },
   {
     target: '#nav [data-views~="notes"]',
@@ -43,9 +43,9 @@ const STEPS = [
     text: "Ctrl+K searches every note and runs commands: new note from a template, open a random note, rename, bookmark and more.",
   },
   {
-    target: '#nav [data-views~="obsidian"]',
+    target: '#sidebar-foot [data-go="obsidian"]',
     title: "Works with Obsidian",
-    text: "Under Integrations, the Obsidian sync tab points Cairn at an Obsidian vault and keeps both in sync. Callouts, embeds, ==highlights==, footnotes and properties look the same here.",
+    text: "Tools (here, or Ctrl+K) holds Obsidian sync, the context pack and plugins. Obsidian sync points Cairn at an Obsidian vault and keeps both in sync. Callouts, embeds, ==highlights==, footnotes and properties look the same here.",
   },
   {
     target: '#nav [data-views~="proof"]',

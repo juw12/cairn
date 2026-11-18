@@ -22,7 +22,6 @@ export const VIEWS = [
   { id: "projects", label: "Projects", icon: "star", group: "Project" },
   { id: "vibe", label: "Vibe", icon: "activity", group: "Project" },
   { id: "autopilot", label: "Autopilot", icon: "route", group: "Project" },
-  { id: "founder", label: "Founder Studio", icon: "target", group: "Project" },
   { id: "context", label: "Context pack", icon: "sparkle", group: "Project" },
   { id: "obsidian", label: "Obsidian sync", icon: "vault", group: "Project" },
   { id: "plugins", label: "Plugins", icon: "puzzle", group: "Project" },
@@ -32,16 +31,15 @@ export const VIEWS = [
 
 // The sidebar shows one entry per hub. A hub with several pages shows them as tabs at the top of the page;
 // the first page is the one it opens on a fresh browser, and `count` names the page whose count the entry shows.
+// A `hidden` hub has no sidebar entry: its pages open from Ctrl+K (and old links) and still share one tab strip.
 export const HUBS = [
-  { id: "today", label: "Today", icon: "home", views: ["home"] },
+  { id: "today", label: "Today", icon: "home", views: ["home", "board", "ideas", "decisions"], count: "board" },
   { id: "chat", label: "Chat", icon: "chat", views: ["chat", "glow"] },
-  { id: "plan", label: "Plan", icon: "board", views: ["board", "ideas", "decisions"], count: "board" },
   { id: "notes", label: "Notes", icon: "note", views: ["notes", "journal"], count: "notes" },
   { id: "map", label: "Map", icon: "map", views: ["map", "canvas"] },
   { id: "build", label: "Build", icon: "code", views: ["vibe", "projects", "autopilot", "code"], count: "vibe" },
-  { id: "founder", label: "Founder Studio", icon: "target", views: ["founder"] },
-  { id: "integrations", label: "Integrations", icon: "puzzle", views: ["context", "obsidian", "plugins"] },
   { id: "people", label: "People", icon: "users", views: ["people", "proof"] },
+  { id: "tools", label: "Tools", icon: "puzzle", views: ["context", "obsidian", "plugins"], hidden: true },
 ];
 
 export const hubOf = (view) => HUBS.find((hub) => hub.views.includes(view)) || null;

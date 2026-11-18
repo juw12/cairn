@@ -29,7 +29,7 @@ import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
-import { founderView, syncFounderStage, wireFounder } from "./founder.js";
+import { movePanel, resetLayout, togglePanel } from "./vibelayout.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
 import { initDatabases } from "./database.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
@@ -57,7 +57,6 @@ function counts() {
     projects: "",
     vibe: ((n) => (n > 1 ? `${n} live` : n ? "live" : ""))(liveSessions().length),
     autopilot: autopilotCount() || queueItems().length || "",
-    founder: "",
     context: "",
     obsidian: "",
     canvas: canvasCount() || "",
@@ -115,6 +114,7 @@ export function renderNav() {
   const remembered = hubTabs();
   const html = [];
   for (const hub of HUBS) {
+    if (hub.hidden) continue;
     const active = hub.views.includes(state.view);
     const number = hub.count ? counted[hub.count] : "";
     const count = number === "" ? "" : `<span class="count">${number}</span>`;
@@ -171,6 +171,7 @@ export function renderSidebarFoot() {
     <div class="foot-row">
       <button class="btn sm ghost" data-action="theme" aria-label="Toggle theme">${icon(theme === "dark" ? "sun" : "moon", "sm")} ${theme === "dark" ? "Light" : "Dark"}</button>
       <button class="btn sm ghost icon-only" data-action="tour" aria-label="Take the tour" title="Take the tour">${icon("help", "sm")}</button>
+      <button class="btn sm ghost icon-only" data-go="obsidian" aria-label="Tools: Obsidian sync, context pack, plugins" title="Tools: Obsidian sync, context pack, plugins">${icon("puzzle", "sm")}</button>
       ${state.info?.desktop
         ? `<button class="btn sm ghost" data-action="settings">${icon("gear", "sm")} Settings</button>`
         : `<a class="btn sm ghost" href="${REPO_URL}" target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>`}
@@ -193,7 +194,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, chat: chatView, glow: glowView, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, founder: founderView, projects: projectsView };
+  const renderers = { home, chat: chatView, glow: glowView, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, projects: projectsView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -240,8 +241,6 @@ function afterRender() {
   if (state.view === "autopilot") wireAutopilot();
   if (state.view === "chat") wireChat();
   if (state.view === "glow") wireGlow();
-  if (state.view === "founder") wireFounder();
-  else syncFounderStage();
 }
 
 // ============================================================ global events
@@ -367,6 +366,9 @@ function wireGlobal() {
       "vibe-newchat": () => startChatAbout(actionEl.dataset.path, "new") && setView("chat"),
       "vibe-share": shareStats,
       "vibe-to-list": jumpToList,
+      "vibe-panel-fold": () => togglePanel(actionEl.dataset.panel),
+      "vibe-panel-move": () => movePanel(actionEl.dataset.panel, actionEl.dataset.step),
+      "vibe-layout-reset": resetLayout,
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
       "ap-toggle": toggleEnabled,
       "ap-job": () => jobAction(actionEl.dataset.op, actionEl.dataset.id),
