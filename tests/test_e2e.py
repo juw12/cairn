@@ -438,7 +438,12 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_function("() => document.querySelector('.vibe-panel').dataset.panel === 'feedback'")
 
         # The layout lands in the brain, and a reload (or another device reading the file) shows it.
-        page.wait_for_function("() => /vibe-order: .*feedback, overview,/.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        page.wait_for_function("""() => {
+            const text = window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '';
+            const saved = (text.match(/^vibe-order: (.*)$/m)?.[1] || '').split(', ');
+            const shown = [...document.querySelectorAll('.vibe-panel')].map((el) => el.dataset.panel);
+            return saved.filter((id) => shown.includes(id)).join() === shown.join();
+        }""")
         text = self.note_text(page, "CAIRN-LAYOUT.md")
         self.assertRegex(text, r"vibe-folded: .*overview")
         self.assertFalse(page.evaluate("() => window.cairn.state.notes.some((n) => n.path === 'CAIRN-LAYOUT.md')"), "the layout is not a note")
