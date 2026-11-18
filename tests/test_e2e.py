@@ -20,15 +20,16 @@ VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canv
 
 # The sidebar has one entry per hub; a hub with several pages shows them as tabs (docs/state.js HUBS).
 HUBS = {
-    "today": ["home"],
+    "today": ["home", "board", "ideas", "decisions"],
     "chat": ["chat", "glow"],
-    "plan": ["board", "ideas", "decisions"],
     "notes": ["notes", "journal"],
     "map": ["map", "canvas"],
     "build": ["vibe", "projects", "autopilot", "code"],
-    "founder": ["founder"],
-    "integrations": ["context", "obsidian", "plugins"],
     "people": ["people", "proof"],
+}
+# Pages with no sidebar entry: Ctrl+K (and the puzzle button in the sidebar foot) open them, as tabs of one strip.
+HIDDEN_HUBS = {
+    "tools": ["context", "obsidian", "plugins"],
 }
 
 
@@ -234,41 +235,41 @@ class EndToEndTests(unittest.TestCase):
             tab: document.querySelector('.hub-tabs [aria-current="page"]')?.dataset.go ?? null,
         })""")
 
-    def test_sidebar_has_nine_entries_and_no_group_labels(self):
+    def test_sidebar_has_six_entries_and_no_group_labels(self):
         page = self.open()
         entries = page.eval_on_selector_all("#nav button", "els => els.map((e) => e.querySelector('span').textContent)")
-        self.assertEqual(entries, ["Today", "Chat", "Plan", "Notes", "Map", "Build", "Founder Studio", "Integrations", "People"])
+        self.assertEqual(entries, ["Today", "Chat", "Notes", "Map", "Build", "People"])
         self.assertEqual(page.locator("#nav .nav-label").count(), 0)
         self.assertEqual(page.eval_on_selector_all("#nav button", "els => els.map((e) => e.dataset.hub)"), list(HUBS))
         self.assertEqual(self.errors, [])
 
     def test_every_old_address_opens_its_page_inside_a_hub(self):
         page = self.open()
-        for hub, views in HUBS.items():
+        for hub, views in {**HUBS, **HIDDEN_HUBS}.items():
             tabs = views if len(views) > 1 else []
             for view in views:
                 page.goto(f"{self.url}?demo=1#/{view}")
                 page.wait_for_function("(v) => window.cairn.state.view === v", arg=view)
-                expected = {"view": view, "hubs": [hub], "tabs": tabs, "tab": view if tabs else None}
+                expected = {"view": view, "hubs": [] if hub in HIDDEN_HUBS else [hub], "tabs": tabs, "tab": view if tabs else None}
                 self.assertEqual(self.nav_state(page), expected)
                 self.assertTrue(page.inner_text("#view").strip(), view)
-        self.assertEqual(sum(len(views) for views in HUBS.values()), 20)
+        self.assertEqual(sum(len(views) for views in {**HUBS, **HIDDEN_HUBS}.values()), 19)
         self.assertEqual(self.errors, [])
 
     def test_a_sidebar_entry_reopens_the_tab_used_last(self):
         page = self.open()
-        self.assertEqual(page.get_attribute('#nav [data-hub="plan"]', "data-go"), "board")
-        self.go(page, "ideas")
+        self.assertEqual(page.get_attribute('#nav [data-hub="notes"]', "data-go"), "notes")
+        self.go(page, "journal")
         self.go(page, "home")
-        page.click('#nav [data-hub="plan"]')
-        page.wait_for_function("() => window.cairn.state.view === 'ideas'")
-        self.assertEqual(self.nav_state(page)["tab"], "ideas")
+        page.click('#nav [data-hub="notes"]')
+        page.wait_for_function("() => window.cairn.state.view === 'journal'")
+        self.assertEqual(self.nav_state(page)["tab"], "journal")
         # It is remembered in this browser, so it is still the choice after a reload.
         self.go(page, "home")
         page.reload()
         page.wait_for_selector("#nav button")
         self.assertEqual(page.evaluate("() => window.cairn.state.view"), "home")
-        self.assertEqual(page.get_attribute('#nav [data-hub="plan"]', "data-go"), "ideas")
+        self.assertEqual(page.get_attribute('#nav [data-hub="notes"]', "data-go"), "journal")
         self.assertEqual(self.errors, [])
 
     def test_sidebar_entries_and_tabs_are_buttons_that_keep_the_keyboard_focus(self):
@@ -284,7 +285,7 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_function("() => window.cairn.state.view === 'notes'")
         self.assertEqual(page.evaluate("() => document.activeElement.dataset.hub"), "notes")
         reachable = page.eval_on_selector_all("#nav button, .hub-tabs .hub-tab", "els => els.map((e) => e.tagName === 'BUTTON' && e.tabIndex === 0)")
-        self.assertEqual(reachable, [True] * 11)
+        self.assertEqual(reachable, [True] * 8)
         self.assertEqual(self.errors, [])
 
     def test_tabs_fit_a_phone_and_the_drawer_closes_after_a_choice(self):
@@ -306,7 +307,7 @@ class EndToEndTests(unittest.TestCase):
     def test_palette_reaches_every_page_and_lands_inside_its_hub(self):
         page = self.open()
         labels = page.evaluate("() => import('./state.js').then((m) => m.VIEWS.map((v) => [v.id, v.label]))")
-        self.assertEqual(sorted(view for view, _ in labels), sorted(view for views in HUBS.values() for view in views))
+        self.assertEqual(sorted(view for view, _ in labels), sorted(view for views in {**HUBS, **HIDDEN_HUBS}.values() for view in views))
         page.keyboard.press("Control+k")
         page.wait_for_selector(".palette input")
         for view, label in labels:
@@ -402,6 +403,61 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("4", page.inner_text(".vibe-figures"))
         self.assertEqual(page.locator(".skill-chip").count(), 4)
         self.assertEqual(page.locator('[data-action="vibe-sample"]').count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_blocks_fold_move_and_follow_the_brain_file(self):
+        page = self.open()
+        self.go(page, "vibe")
+        self.sample_week(page)
+        order = lambda: page.eval_on_selector_all(".vibe-panel", "els => els.map((e) => e.dataset.panel)")
+        folded = lambda: page.eval_on_selector_all(".vibe-panel.folded", "els => els.map((e) => e.dataset.panel)")
+        self.assertEqual(order()[-1], "hook")
+        self.assertEqual(folded(), ["hook"], "with a few sessions live only the agent hook starts folded")
+
+        # Fold: the block keeps one line with a summary and no body.
+        page.click('.vp-toggle[data-panel="overview"]')
+        page.wait_for_selector('.vibe-panel.folded[data-panel="overview"]')
+        self.assertEqual(page.locator('[data-panel="overview"] .vp-body').count(), 0)
+        self.assertIn("4 sessions", page.inner_text('[data-panel="overview"] .vp-sum'))
+        self.assertEqual(page.evaluate("() => document.activeElement.dataset.panel"), "overview")
+
+        # Move with the arrows, then drag a block onto another.
+        page.click('.vp-move[data-panel="sessions"][data-step="-1"]')
+        page.wait_for_function("() => document.querySelector('.vibe-panel[data-panel=sessions]').previousElementSibling.dataset.panel === 'figures'")
+        grip = page.locator('.vp-grip[data-panel="feedback"]')
+        grip.scroll_into_view_if_needed()
+        box = grip.bounding_box()
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.down()
+        page.mouse.move(box["x"], box["y"] - 20, steps=5)
+        head = page.locator(".vibe-panel:first-child .vp-head")
+        head.scroll_into_view_if_needed()
+        box = head.bounding_box()
+        page.mouse.move(box["x"] + 40, box["y"] + 3, steps=10)
+        page.mouse.up()
+        page.wait_for_function("() => document.querySelector('.vibe-panel').dataset.panel === 'feedback'")
+
+        # The layout lands in the brain, and a reload (or another device reading the file) shows it.
+        page.wait_for_function("() => /vibe-order: .*feedback, overview,/.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        text = self.note_text(page, "CAIRN-LAYOUT.md")
+        self.assertRegex(text, r"vibe-folded: .*overview")
+        self.assertFalse(page.evaluate("() => window.cairn.state.notes.some((n) => n.path === 'CAIRN-LAYOUT.md')"), "the layout is not a note")
+        page.evaluate("() => localStorage.removeItem('cairn.vibeLayout')")
+        page.reload()
+        page.wait_for_selector("#nav button")
+        page.wait_for_selector(".vibe-panel")
+        self.assertEqual(order()[0], "feedback")
+        self.assertIn("overview", folded())
+
+        # A lane jump opens folded live cards for this visit only; the saved layout keeps them folded.
+        page.click('[data-action="vibe-layout-reset"]')
+        page.wait_for_function("() => document.querySelector('.vibe-panel:last-child').dataset.panel === 'hook'")
+        self.start_session(page, "Layout check")
+        page.click('.vp-toggle[data-panel="live"]')
+        page.wait_for_selector('.vibe-panel.folded[data-panel="live"]')
+        page.click(".ov-lane [data-action=vibe-lane]")
+        page.wait_for_selector('.vibe-panel[data-panel="live"]:not(.folded) .vibe-live')
+        page.wait_for_function("() => /vibe-folded: .*live/.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
         self.assertEqual(self.errors, [])
 
     def test_vibe_outcome_chips_and_folding_days(self):
@@ -972,110 +1028,6 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector(".ap-q.needs-me")
         page.click('.ap-q [data-action="ap-q-done"]')
         page.wait_for_selector(".ap-queue .empty")
-        self.assertEqual(self.errors, [])
-
-    def test_founder_studio_wears_cairns_controls_and_follows_its_theme(self):
-        """The studio inside Cairn uses Cairn's control shapes and colours, in light and in dark.
-
-        The studio's Python engine (a large download from another site) is replaced by one that never
-        starts: this test is about the page's chrome, so it stays offline.
-        """
-
-        engine_requests = []
-
-        def idle_engine(route):
-            engine_requests.append(route.request.url)
-            route.fulfill(
-                content_type="text/javascript",
-                headers={"access-control-allow-origin": "*"},
-                body="export const loadPyodide = () => new Promise(() => {});",
-            )
-
-        def open_studio(viewport, theme):
-            page = self.open(viewport=viewport, theme=theme)
-            page.route("**/pyodide.mjs", idle_engine)
-            engine_requests.clear()
-            # By address, not by the sidebar: on a phone the sidebar sits in a closed drawer.
-            with page.expect_request("**/pyodide.mjs"):
-                page.evaluate("location.hash = '#/founder'")
-            page.wait_for_function("window.cairn.state.view === 'founder'")
-            frame = page.wait_for_selector("#founder-stage iframe").content_frame()
-            frame.wait_for_selector("#runBtn")
-            frame.wait_for_function("document.readyState !== 'loading'")
-            self.assertTrue(engine_requests, "the studio's engine did not come from this test's stand-in")
-            return page, frame
-
-        cairn_colours = """() => {
-            const colour = (token) => {
-                const probe = document.body.appendChild(document.createElement("i"));
-                probe.style.color = `var(${token})`;
-                const value = getComputedStyle(probe).color;
-                probe.remove();
-                return value;
-            };
-            return {
-                theme: document.documentElement.dataset.theme,
-                paper: colour("--bg"),
-                ink: colour("--ink"),
-                accent: colour("--accent"),
-                overflow: document.documentElement.scrollWidth - window.innerWidth,
-            };
-        }"""
-        studio_look = """() => {
-            const style = (selector) => getComputedStyle(document.querySelector(selector));
-            const height = (selector) => document.querySelector(selector).getBoundingClientRect().height;
-            const run = style("#runBtn");
-            const mode = style(".mode .seg.active");
-            const tab = style(".tabs .tab.active");
-            return {
-                embedded: document.documentElement.classList.contains("embedded"),
-                theme: document.documentElement.dataset.theme,
-                paper: getComputedStyle(document.body).backgroundColor,
-                text: getComputedStyle(document.body).color,
-                run: { fill: run.backgroundColor, text: run.color, radius: run.borderTopLeftRadius, height: height("#runBtn") },
-                project: { radius: style("#projectSelect").borderTopLeftRadius, height: height("#projectSelect") },
-                mode: { fill: mode.backgroundColor, shadow: mode.boxShadow, underline: mode.borderBottomColor, height: height(".mode .seg.active") },
-                tab: { weight: tab.fontWeight, underline: tab.borderBottomColor },
-                overflow: document.documentElement.scrollWidth - window.innerWidth,
-            };
-        }"""
-
-        def check(page, frame, theme, control_height):
-            cairn = page.evaluate(cairn_colours)
-            look = frame.evaluate(studio_look)
-            where = f"{theme}, {page.viewport_size['width']}px wide"
-            self.assertEqual(cairn["theme"], theme, where)
-            self.assertTrue(look["embedded"], where)
-            self.assertEqual(look["theme"], theme, f"the studio is not in Cairn's theme ({where})")
-            self.assertEqual(look["paper"], cairn["paper"], f"the studio's paper is not Cairn's ({where})")
-            self.assertEqual(look["text"], cairn["ink"], f"the studio's text is not Cairn's ink ({where})")
-            self.assertEqual(look["run"]["fill"], cairn["ink"], f"Run panel is not an ink button ({where})")
-            self.assertEqual(look["run"]["text"], cairn["paper"], where)
-            self.assertEqual(look["run"]["radius"], "6px", where)
-            self.assertEqual(look["project"]["radius"], "6px", where)
-            self.assertAlmostEqual(look["run"]["height"], control_height, delta=0.5, msg=where)
-            self.assertAlmostEqual(look["project"]["height"], control_height, delta=0.5, msg=where)
-            self.assertEqual(look["mode"]["fill"], "rgba(0, 0, 0, 0)", f"the mode switch still has a filled chip ({where})")
-            self.assertEqual(look["mode"]["shadow"], "none", where)
-            self.assertEqual(look["mode"]["underline"], cairn["accent"], f"the mode switch is not underlined in the accent ({where})")
-            self.assertEqual(look["tab"]["weight"], "600", where)
-            self.assertEqual(look["tab"]["underline"], cairn["accent"], f"the open result tab is not underlined in the accent ({where})")
-            self.assertLessEqual(cairn["overflow"], 0, f"Cairn scrolls sideways ({where})")
-            self.assertLessEqual(look["overflow"], 0, f"the studio scrolls sideways ({where})")
-            return look
-
-        page, frame = open_studio((1280, 900), "light")
-        check(page, frame, "light", 34)
-        frame.evaluate("window.sameStudio = true")
-        page.click('[data-action="theme"]')
-        frame.wait_for_function("document.documentElement.dataset.theme === 'dark'")
-        check(page, frame, "dark", 34)
-        self.assertTrue(frame.evaluate("window.sameStudio === true"), "changing the theme reloaded the studio")
-        self.assertEqual(self.errors, [])
-
-        page, frame = open_studio((390, 844), "dark")
-        look = check(page, frame, "dark", 44)
-        self.assertGreaterEqual(look["mode"]["height"], 44, "the mode switch is a comfortable tap target on a phone")
         self.assertEqual(self.errors, [])
 
     def test_mobile_and_dark_have_no_horizontal_scroll(self):

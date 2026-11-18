@@ -12,6 +12,7 @@ import { agentGroup, estimateEffort, estimateProgress, formatMinutes, githubBudg
 import { compact, minutesText, recap, sessionState } from "./recap.js";
 import { chatReady } from "./chat.js";
 import { openShare } from "./share.js";
+import { LAYOUT_FILE, openPanel, panelsHtml, setLiveCount, wirePanels } from "./vibelayout.js";
 
 const POLL_MS = 3000;
 const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped", done: "Done" };
@@ -179,6 +180,7 @@ function flash(el) {
 
 // From a lane in the overview to that session's full card further down.
 export function jumpToLive(path) {
+  openPanel("live");
   const card = $(`.vibe-elapsed[data-path="${CSS.escape(path)}"]`)?.closest(".vibe-live");
   if (!card) return;
   card.scrollIntoView({ block: "start" });
@@ -188,6 +190,7 @@ export function jumpToLive(path) {
 
 // From the overview's short list to the full one, with focus on the chip that is filtering it.
 export function jumpToList() {
+  openPanel("sessions");
   const list = $(".vibe-sessions");
   if (!list) return;
   list.scrollIntoView({ block: "start" });
@@ -223,7 +226,7 @@ export function jumpToDay(day) {
     state.vibeOutcome = "all";
   }
   state.vibeJumped = day;
-  renderView();
+  if (!openPanel("sessions")) renderView();
   const headFor = () => $(`.day-head[data-day="${CSS.escape(day)}"]`);
   if (!headFor()) {
     state.vibeLimit = Infinity;
@@ -243,7 +246,7 @@ export function jumpToDay(day) {
 // The way back from a deep jump: scroll up to the chart and put focus on the bar you came from.
 export function backToChart(day) {
   state.vibeJumped = null;
-  renderView();
+  if (!openPanel("activity")) renderView();
   const chart = $(".vibe-activity");
   if (!chart) return;
   chart.scrollIntoView({ block: "start" });
@@ -775,6 +778,7 @@ async function poll() {
 
 export function wireVibe() {
   wireEffortBlocks();
+  wirePanels();
   if (canPoll() && !pollTimer) {
     pollTimer = setInterval(poll, pollMs());
     poll();
@@ -1248,6 +1252,10 @@ function recapRow(entry) {
     </li>`;
 }
 
+// Rows shown before "N more": waiting and stopped sessions sort first, so the ones that need you stay in view.
+const LIVE_SHOWN = 6;
+const FINISHED_SHOWN = 4;
+
 function recapBand() {
   const data = recap(state.notes, stamp());
   const running = data.live.length + data.stale.length;
@@ -1265,7 +1273,13 @@ function recapBand() {
     : "";
   const finished = data.finished.length
     ? `<h3 class="rc-sub">Just finished <span class="muted small">last 24 hours${data.finishedTotal > data.finished.length ? ` · newest ${data.finished.length} of ${data.finishedTotal}` : ""}</span></h3>
-      <ol class="rc-rows rc-finished">${data.finished.map(recapRow).join("")}</ol>`
+      <ol class="rc-rows rc-finished">${data.finished.slice(0, FINISHED_SHOWN).map(recapRow).join("")}</ol>
+      ${data.finished.length > FINISHED_SHOWN
+        ? `<details class="rc-fold" data-block="rc-finished"${(state.vibeOpenBlocks || {})["rc-finished"] ? " open" : ""}>
+            <summary>${data.finished.length - FINISHED_SHOWN} more finished</summary>
+            <ol class="rc-rows rc-finished">${data.finished.slice(FINISHED_SHOWN).map(recapRow).join("")}</ol>
+          </details>`
+        : ""}`
     : "";
   return `<section class="vibe-recap" aria-label="Live recap">
     <header>
@@ -1273,7 +1287,13 @@ function recapBand() {
       <span class="rc-chips">${chips || `<span class="muted small">Nothing running right now</span>`}</span>
       ${data.tokens ? `<span class="rc-total muted small" title="${data.tokens.toLocaleString()} tokens in and out across the sessions still live">${compact(data.tokens)} tokens in live sessions</span>` : ""}
     </header>
-    ${data.live.length ? `<ol class="rc-rows rc-live" aria-label="In progress">${data.live.map(recapRow).join("")}</ol>` : ""}
+    ${data.live.length ? `<ol class="rc-rows rc-live" aria-label="In progress">${data.live.slice(0, LIVE_SHOWN).map(recapRow).join("")}</ol>` : ""}
+    ${data.live.length > LIVE_SHOWN
+      ? `<details class="rc-fold" data-block="rc-live-more"${(state.vibeOpenBlocks || {})["rc-live-more"] ? " open" : ""}>
+          <summary>${data.live.length - LIVE_SHOWN} more running</summary>
+          <ol class="rc-rows rc-live">${data.live.slice(LIVE_SHOWN).map(recapRow).join("")}</ol>
+        </details>`
+      : ""}
     ${stale}
     ${finished}
   </section>`;
@@ -1611,20 +1631,26 @@ export function vibeView() {
     `${stats.sessions ? `<button class="btn" data-action="vibe-share" title="Your last 14 days as a picture to post">${icon("external")} Share stats</button>` : ""}
     <button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("play")} ${liveSession() ? "Start another" : "Start session"}</button>`,
   );
-  return `${head}
-    ${recapBand()}
-    ${machineStrip()}
-    ${githubStrip()}
-    ${overview(sessions)}
-    ${liveCards()}
-    ${figures(stats)}
-    <div class="vibe-cols">
-      <div>
-        ${activity(stats, sessions)}
-        ${sessionsBlock(sessions, stats)}
-      </div>
-      <div>
-      ${sideBlock(
+  const live = liveSessions();
+  setLiveCount(live.length);
+  const running = recap(state.notes, stamp());
+  const reading = machine();
+  const [minutes] = githubUsage(state.notes);
+  const agents = liveGroups(live).map((group) => `${group.label} ${group.notes.length}`).join(" · ");
+  const blocks = {
+    recap: {
+      html: recapBand(),
+      summary: Object.keys(RECAP_CHIPS).filter((key) => running.counts[key]).map((key) => `${running.counts[key]} ${RECAP_CHIPS[key]}`).join(" · ") || "nothing running",
+    },
+    machine: { html: machineStrip(), summary: reading ? `${EFFORT_LABEL[reading.level]} load · CPU ${reading.cpu_pct ?? "?"}% · memory ${reading.ram_pct ?? "?"}%` : "" },
+    github: { html: githubStrip(), summary: minutes ? `${thousands(minutes.used)} of ${thousands(minutes.limit)} free minutes · ${minutes.pct}%` : "" },
+    overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
+    live: { html: liveCards(), summary: live.length ? `${live.length} live${agents && liveGroups(live).length > 1 ? ` · ${agents}` : ""}` : "nothing live" },
+    figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },
+    activity: { html: activity(stats, sessions), summary: "sessions per day" },
+    sessions: { html: sessionsBlock(sessions, stats), summary: plural(sessions.length, "session") },
+    feedback: {
+      html: sideBlock(
         "vibe-feedback",
         "Feedback",
         feedback.length ? `${stats.feedback_open} open · ${stats.feedback_addressed} addressed` : "none yet",
@@ -1632,14 +1658,23 @@ export function vibeView() {
         ${feedbackForm(sessions)}
         ${feedback.length ? `<div class="fb-list">${feedback.slice(0, 40).map(feedbackRow).join("")}</div>` : `<p class="empty">No feedback yet. Capture it here, with <code>feedback:</code> in the bar above, or <code>cairn feedback "…" --rating 4</code>.</p>`}`,
         !feedback.length,
-      )}
-      ${skillsBlock(stats)}
-      ${modelsBlock(stats)}
-      </div>
-    </div>
-    ${readOnly() ? "" : `<section class="callout vibe-hook">${icon("terminal")}<div>
+      ),
+      summary: feedback.length ? `${stats.feedback_open} open · ${stats.feedback_addressed} addressed` : "none yet",
+    },
+    skills: { html: skillsBlock(stats), summary: plural(Object.values(stats.skills).reduce((total, count) => total + count, 0), "run") },
+    models: { html: modelsBlock(stats), summary: plural(stats.models.length, "model") },
+    hook: {
+      html: readOnly() ? "" : `<section class="callout vibe-hook">${icon("terminal")}<div>
       <p><strong>Let your assistant report its own progress.</strong> Paste this into <code>AGENTS.md</code>, <code>CLAUDE.md</code> or <code>.github/copilot-instructions.md</code>; every step lands in the live session above.</p>
       <pre class="pre-box">${esc(AGENT_HOOK)}</pre>
       <button class="btn sm" data-action="vibe-copy-hook">${icon("copy", "sm")} Copy instructions</button>
-    </div></section>`}`;
+    </div></section>`,
+      summary: "paste into AGENTS.md so your assistant reports its own steps",
+    },
+  };
+  return `${head}
+    <div class="vibe-board">${panelsHtml(blocks)}</div>
+    ${readOnly() ? "" : `<p class="vibe-layout-note muted small">Fold a block with its arrow, move it with ↑ ↓ or drag ⋮⋮. ${
+      fileByPath(LAYOUT_FILE) ? `The layout is kept in <code>${LAYOUT_FILE}</code>, so every device shows the same.` : "Your layout is saved to the brain, so every device shows the same."
+    } <button type="button" class="btn sm ghost" data-action="vibe-layout-reset">Reset layout</button></p>`}`;
 }

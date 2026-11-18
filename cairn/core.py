@@ -57,7 +57,7 @@ CAPTURE_PREFIXES = {
     "fb": "feedback",
 }
 
-SPECIAL_FILES = ("CONTEXT.md", "README.md")
+SPECIAL_FILES = ("CONTEXT.md", "README.md", "CAIRN-LAYOUT.md")
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9_-]+):(.*)$")
 _TAG_RE = re.compile(r"(^|\s)#([A-Za-z0-9][A-Za-z0-9_/-]*)")
