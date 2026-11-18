@@ -14,7 +14,7 @@ import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync,
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { addFriend, loadLeaderboard, publishStats, removeFriend, setLeaderboardStat, unpublishStats } from "./leaderboard.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
-import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
+import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, toggleRow, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -29,7 +29,7 @@ import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
-import { movePanel, resetLayout, togglePanel } from "./vibelayout.js";
+import { movePanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
 import { initDatabases } from "./database.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
@@ -171,7 +171,7 @@ export function renderSidebarFoot() {
     <div class="foot-row">
       <button class="btn sm ghost" data-action="theme" aria-label="Toggle theme">${icon(theme === "dark" ? "sun" : "moon", "sm")} ${theme === "dark" ? "Light" : "Dark"}</button>
       <button class="btn sm ghost icon-only" data-action="tour" aria-label="Take the tour" title="Take the tour">${icon("help", "sm")}</button>
-      <button class="btn sm ghost icon-only" data-go="obsidian" aria-label="Tools: Obsidian sync, context pack, plugins" title="Tools: Obsidian sync, context pack, plugins">${icon("puzzle", "sm")}</button>
+      <button class="btn sm ghost icon-only" data-go="obsidian" aria-label="Tools: all notes, code inbox, Obsidian sync, context pack, plugins" title="Tools: all notes, code inbox, Obsidian sync, context pack, plugins">${icon("puzzle", "sm")}</button>
       ${state.info?.desktop
         ? `<button class="btn sm ghost" data-action="settings">${icon("gear", "sm")} Settings</button>`
         : `<a class="btn sm ghost" href="${REPO_URL}" target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>`}
@@ -234,6 +234,7 @@ function afterRender() {
   if (state.view === "plugins") wirePlugins();
   if (state.view === "journal") wireJournal();
   syncLogFab();
+  wirePanels();
   const pluginView = $("[data-plugin-view]");
   if (pluginView) renderPluginView(state.view, pluginView);
   if (state.view === "vibe") wireVibe();
@@ -252,6 +253,13 @@ function isTyping(target) {
 function wireGlobal() {
   document.addEventListener("click", async (event) => {
     const target = event.target;
+    // The narrow-window menu is a drawer over the page: a click anywhere outside it closes it. Its backdrop
+    // covers the page, so that click only closes; a click on something above the backdrop still does its job.
+    const shell = $("#app");
+    if (shell.classList.contains("nav-open") && !target.closest("#sidebar, [data-action=toggle-nav], .tour")) {
+      shell.classList.remove("nav-open");
+      if (target === shell) return;
+    }
     if (target.closest("select")) return;
     const go = target.closest("[data-go]");
     if (go) return setView(go.dataset.go);
@@ -366,9 +374,10 @@ function wireGlobal() {
       "vibe-newchat": () => startChatAbout(actionEl.dataset.path, "new") && setView("chat"),
       "vibe-share": shareStats,
       "vibe-to-list": jumpToList,
-      "vibe-panel-fold": () => togglePanel(actionEl.dataset.panel),
-      "vibe-panel-move": () => movePanel(actionEl.dataset.panel, actionEl.dataset.step),
-      "vibe-layout-reset": resetLayout,
+      "vibe-panel-fold": () => togglePanel(actionEl.dataset.panel, actionEl.dataset.page || "vibe"),
+      "vibe-panel-move": () => movePanel(actionEl.dataset.panel, actionEl.dataset.step, actionEl.dataset.page || "vibe"),
+      "vibe-layout-reset": () => resetLayout(actionEl.dataset.page || "vibe"),
+      "vibe-row": () => toggleRow(actionEl.dataset.path),
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
       "ap-toggle": toggleEnabled,
       "ap-job": () => jobAction(actionEl.dataset.op, actionEl.dataset.id),

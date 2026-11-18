@@ -28,9 +28,9 @@ const STEPS = [
     text: "The Board tab under Today: your tasks. Drag cards between To do, Doing and Done; each move is a one-line change in the note's file.",
   },
   {
-    target: '#nav [data-views~="notes"]',
-    title: "Notes that link",
-    text: "Every note, as a list or a folder tree, with bookmarks and search operators like tag:release or path:ideas/. In a note, type [[ to link another one; backlinks and unlinked mentions appear underneath. The Journal is the tab next to it.",
+    target: '#nav [data-views~="vibe"]',
+    title: "Build, and notes that link",
+    text: "Build holds Vibe (your AI coding sessions, live), Projects and the Journal. In any note, type [[ to link another one; backlinks and unlinked mentions appear underneath. The list of every note opens from Tools or Ctrl+K.",
   },
   {
     target: '#nav [data-views~="map"]',
@@ -45,7 +45,7 @@ const STEPS = [
   {
     target: '#sidebar-foot [data-go="obsidian"]',
     title: "Works with Obsidian",
-    text: "Tools (here, or Ctrl+K) holds Obsidian sync, the context pack and plugins. Obsidian sync points Cairn at an Obsidian vault and keeps both in sync. Callouts, embeds, ==highlights==, footnotes and properties look the same here.",
+    text: "Tools (here, or Ctrl+K) holds all notes, the code inbox, Obsidian sync, the context pack and plugins. Obsidian sync points Cairn at an Obsidian vault and keeps both in sync. Callouts, embeds, ==highlights==, footnotes and properties look the same here.",
   },
   {
     target: '#nav [data-views~="proof"]',

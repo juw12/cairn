@@ -9,6 +9,7 @@ import { createNote, readOnly, state } from "./state.js";
 import { openNote } from "./drawer.js";
 import { copyText } from "./actions.js";
 import { renderView } from "./app.js";
+import { boardHtml, dashboardHtml, recapHtml } from "./vibelayout.js";
 
 const LOGIN_KEY = "cairn.proofLogin";
 const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -168,6 +169,35 @@ publish: true
 ---
 What you did, what changed because of it.`;
 
+function proofDashboard(claims, check) {
+  const checked = check?.checked && !check.running ? check.checked : null;
+  const links = claims.reduce((sum, claim) => sum + claim.evidence.length + claim.attestations.length, 0);
+  const confirmed = checked ? checked.filter((item) => item.level >= 2).length : "–";
+  const best = checked ? Math.max(0, ...checked.map((item) => item.level || 0)) : 0;
+  return `${dashboardHtml([
+    { value: claims.length, label: claims.length === 1 ? "claim" : "claims" },
+    { value: claims.filter((claim) => claim.isPublic).length, label: "public" },
+    { value: links, label: "evidence links" },
+    { value: confirmed, label: "confirmed on GitHub", sub: checked ? "level 2 or higher" : check?.running ? "checking…" : "not checked yet" },
+    { value: best ? `L${best}` : "–", label: "highest level", sub: best ? proof.levelInfo(best).label : "" },
+  ])}${checked ? levelSummary(checked) : ""}`;
+}
+
+// What needs you first: claims with no evidence, then links GitHub refused, then what each claim reached.
+function proofRecap(claims, check, byPath) {
+  if (check?.running && !check.checked) return recapHtml([{ when: "now", html: `Checking ${plural(claims.length, "claim")} on GitHub…` }], "");
+  const rows = claims.map((claim) => {
+    const checked = byPath.get(claim.path);
+    const failed = (checked?.results || []).filter((result) => result && !result.ok).length;
+    const title = `<button class="link-button" data-open="${esc(claim.path)}">${esc(claim.title)}</button>`;
+    if (!claim.evidence.length && !claim.attestations.length) return { order: 0, when: "to do", html: `${title} has no evidence links yet` };
+    if (failed) return { order: 1, when: "failed", html: `${title}: GitHub did not confirm ${plural(failed, "link")}` };
+    if (checked?.level) return { order: 3, when: `L${checked.level}`, html: `${title} is ${esc(proof.levelInfo(checked.level).label.toLowerCase())}` };
+    return { order: 2, when: "open", html: `${title} is not checked yet` };
+  });
+  return recapHtml(rows.sort((a, b) => a.order - b.order).slice(0, 8), "No claims yet. Write the first one with New claim.");
+}
+
 export function proofView() {
   const claims = proof.claimsFromNotes(state.notes);
   const subject = proofSubject();
@@ -194,6 +224,20 @@ export function proofView() {
         <p>A claim is any note with a <code>claim:</code> line. Point <code>evidence:</code> at your repos, merged pull requests, commits or releases and Cairn checks each one on GitHub.</p>
         <pre class="claim-example">${esc(CLAIM_EXAMPLE)}</pre>
       </div>`;
+  const blocks = {
+    dashboard: { html: proofDashboard(claims, check), summary: `${plural(claims.length, "claim")} · ${publicCount} public` },
+    recap: { html: proofRecap(claims, check, byPath), summary: check?.running ? "checking…" : "" },
+    claims: { html: `${who}${list}`, summary: subject ? `checked as @${subject}` : "enter your GitHub username" },
+    publish: local
+      ? {
+          html: `<section class="publish">
+            <p>${plural(publicCount, "claim")} of ${claims.length} marked <code>publish: true</code>. Only notes marked that way ever leave this brain; everything else stays private.</p>
+            <code>python -m cairn publish --to ${esc(subject || "OWNER")}/brain</code>
+          </section>`,
+          summary: `${publicCount} of ${claims.length} marked publish: true`,
+        }
+      : null,
+  };
   return `
     ${pageHead(
       "Proof",
@@ -202,18 +246,7 @@ export function proofView() {
         : "What you claim, and what GitHub confirms. Levels are earned from evidence, never typed in.",
       local ? actions : "",
     )}
-    ${who}
-    ${check?.checked && !check.running ? levelSummary(check.checked) : ""}
-    ${list}
-    ${
-      local
-        ? `<section class="publish">
-            <h3>Publish</h3>
-            <p>${plural(publicCount, "claim")} of ${claims.length} marked <code>publish: true</code>. Only notes marked that way ever leave this brain; everything else stays private.</p>
-            <code>python -m cairn publish --to ${esc(subject || "OWNER")}/brain</code>
-          </section>`
-        : ""
-    }`;
+    ${boardHtml("proof", blocks)}`;
 }
 
 export async function newClaim() {

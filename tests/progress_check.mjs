@@ -154,6 +154,12 @@ assert.deepEqual(agentGroup({ source: "opencode" }), { key: "opencode", label: "
 assert.deepEqual(agentGroup({ agent: "claude-code" }), agentGroup({ agent: "Claude" }));
 assert.deepEqual(agentGroup({ agent: "claude code" }), { key: "claude", label: "Claude Code" });
 assert.deepEqual(agentGroup({ agent: "aider" }), { key: "aider", label: "Aider" });
+// A bot that drives OpenCode from its own workspace is its own group; a session that names its agent keeps that name.
+assert.deepEqual(agentGroup({ source: "opencode", agent: "opencode", folder: "C:/Users/me/.vector/scratch/s1/openbot-bridge-test" }), { key: "openbot", label: "OpenBot" });
+assert.deepEqual(agentGroup({ source: "opencode", agent: "", folder: "C:\\Users\\me\\openbot-pegaai-bridge\\workspace" }), { key: "openbot", label: "OpenBot" });
+assert.deepEqual(agentGroup({ source: "opencode", folder: "E:/Projects/OpenBot/workspace/" }), { key: "openbot", label: "OpenBot" });
+assert.deepEqual(agentGroup({ source: "opencode", folder: "E:/Projects/cairn" }), { key: "opencode", label: "OpenCode" });
+assert.deepEqual(agentGroup({ agent: "vector", folder: "E:/Projects/openbot" }), { key: "vector", label: "Vector" });
 assert.deepEqual(agentGroup({ source: "logged" }), { key: "other", label: "Other" });
 assert.deepEqual(agentGroup({}), { key: "other", label: "Other" });
 assert.deepEqual(agentGroup(undefined), { key: "other", label: "Other" });

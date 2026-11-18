@@ -14,10 +14,13 @@ Two sources, both read-only and both optional:
   they land, and the session ends when the app closes or the repo goes quiet.
 
 Sessions are ordinary `brain/sessions/*.md` notes (`source: opencode` / `source: vector`), so stats,
-feedback and the web app treat them like hand-made ones. A session counts as live while it has activity
-in the last `idle` minutes; after that it is `shipped` if it changed code and `done` if it did not
-(a research or Q&A chat: it counts toward time, not toward the ship rate). Time is active time from
-message timestamps, so long pauses do not count.
+feedback and the web app treat them like hand-made ones. A session is live only while it is working:
+an OpenCode session ends the moment its turn finishes (a new prompt opens it again), one whose turn never
+finished ends after `idle` minutes without a message, and so does one that was deleted from the database.
+A session an assistant reports itself (`cairn vibe start`) ends after REPORTED_IDLE_MINUTES without a
+step, and opens again when the assistant logs to it. Ended sessions are `shipped` if they changed code
+and `done` if they did not (a research or Q&A chat: it counts toward time, not toward the ship rate).
+Time is active time from message timestamps, so long pauses do not count.
 A status you change by hand is kept.
 """
 
@@ -38,6 +41,8 @@ from . import core, github_usage, machine, vibe
 from .brain import Brain, ConflictError
 
 IDLE_MINUTES = 30
+REPORTED_IDLE_MINUTES = 240  # an assistant reporting its own session can think for hours between steps
+CLOSED_BY = "watcher"  # marks a session the watcher ended for silence, so its next step can open it again
 ACTIVE_GAP_MINUTES = 10  # a pause longer than this between messages is not counted as working time
 DAYS = 14
 EVERY_SECONDS = 60
@@ -555,10 +560,6 @@ def _opencode_note(session: dict, status: str) -> tuple[dict, str]:
     if session.get("runs"):
         failed = session.get("failed_runs", 0)
         lines.append(f"- {_clock(session['updated'])} note: {session['runs']} automated runs{f' ({failed} stopped with an error)' if failed else ''}")
-    elif status == "live" and turn == "done":
-        lines.append(f"- {_clock(session['updated'])} note: turn finished, waiting for you")
-    elif status == "live" and turn == "failed":
-        lines.append(f"- {_clock(session['updated'])} note: turn stopped with an error")
     if status != "live":
         if status in ("shipped", "partial"):
             outcome = "code changed"
@@ -595,7 +596,11 @@ def sync_opencode(brain: Brain, sessions: list[dict], now_ms: int, idle_minutes:
     for session in sessions:
         active = now_ms - session["updated"] < idle_minutes * 60_000
         changed_code = session["added"] + session["removed"] + session["files"] + session.get("commits", 0) > 0
-        computed = "live" if active else ("shipped" if changed_code else "done")
+        # Nobody is at the keyboard of a finished turn: the session is over until a new prompt arrives.
+        # A script's daily batch stays open between its runs, and so does a database without message types.
+        turn = session.get("turn", "")
+        finished = turn in ("done", "failed") and not session.get("runs")
+        computed = "live" if active and not finished else ("shipped" if changed_code else "done")
         note = existing.get(session["id"])
         if note is None:
             meta, body = _opencode_note(session, computed)
@@ -608,7 +613,11 @@ def sync_opencode(brain: Brain, sessions: list[dict], now_ms: int, idle_minutes:
         # Keep a status set by hand; only sessions still marked live (or picking up new work) follow the source.
         recorded_end = core.stamp_minutes(str(note["meta"].get("ended", "")))
         new_activity = recorded_end is not None and core.stamp_minutes(_stamp(session["updated"])) > recorded_end
-        status = computed if (current_status == "live" or new_activity or current_status not in core.STATUSES["session"]) else current_status
+        # A prompt sent in the same minute the last turn ended, or a commit landing just after it.
+        resumed = computed == "live" and turn == "working" and str(note["meta"].get("turn", "")) in ("done", "failed")
+        late_change = current_status == "done" and computed == "shipped" and active
+        follow = current_status == "live" or new_activity or resumed or late_change
+        status = computed if (follow or current_status not in core.STATUSES["session"]) else current_status
         meta, body = _opencode_note(session, status)
         current = brain.read(note["path"])
         changes = {key: value for key, value in meta.items() if key not in ("tags", "created")}
@@ -621,6 +630,59 @@ def sync_opencode(brain: Brain, sessions: list[dict], now_ms: int, idle_minutes:
         brain.write(note["path"], text, current["mtime"])
         counts["updated"] += 1
     return counts
+
+
+def _close(brain: Brain, note: dict, status: str, last: int, reason: str, extra: dict | None = None) -> bool:
+    """End a live session note at `last` (stamp_minutes units), the moment it last did anything."""
+    ended = core.minutes_stamp(last)
+    try:
+        current = brain.read(note["path"])
+        body = core.parse_note(current["text"])["body"].rstrip() + f"\n- {ended[11:]} end: {status}: {reason}\n"
+        text = core.update_note_text(current["text"], {"status": status, "ended": ended, **(extra or {})}, body)
+        brain.write(note["path"], text, current["mtime"])
+    except (ConflictError, OSError):  # edited or synced under us: the next pass closes it
+        return False
+    return True
+
+
+def close_missing_opencode(brain: Brain, seen_ids, now_ms: int, idle_minutes: int = IDLE_MINUTES) -> int:
+    """End live OpenCode notes whose session is no longer in the database. Returns how many.
+
+    A script that deletes its sessions when it is done (or an archived or very old session) never shows
+    up again, so nothing would ever close its note. It waits `idle_minutes` from the note's own last
+    activity first, so a session that is merely slow to appear is left alone."""
+    seen = set(seen_ids)
+    now = core.stamp_minutes(_stamp(now_ms))
+    closed = 0
+    for external, note in _external_index(brain, "opencode").items():
+        if note["status"] != "live" or external in seen:
+            continue
+        last = core.session_last_activity(note)
+        if last is None or now - last < idle_minutes:
+            continue
+        figures = (str(note["meta"].get(key, "")).strip() for key in ("added", "removed", "files", "commits"))
+        status = "shipped" if any(figure.isdigit() and int(figure) for figure in figures) else "done"
+        closed += _close(brain, note, status, last, "auto-detected, the session is no longer in OpenCode")
+    return closed
+
+
+def close_silent_reported(brain: Brain, now_ms: int, idle_minutes: int = REPORTED_IDLE_MINUTES) -> int:
+    """End live sessions an assistant (or you) started by hand and then left: no step for `idle_minutes`.
+
+    Nobody said how it went, so it ends as `done`, which counts toward time and not toward the ship
+    rate. It is marked `closed_by: watcher`; the next `cairn vibe log --session <slug>` opens it again."""
+    now = core.stamp_minutes(_stamp(now_ms))
+    closed = 0
+    for note in vibe.live_sessions(brain):
+        if note["meta"].get("source") == "opencode":
+            continue  # the OpenCode database decides when these end
+        last = core.session_last_activity(note)
+        if last is None or now - last < idle_minutes:
+            continue
+        hours = idle_minutes / 60
+        waited = f"{hours:g} h" if idle_minutes >= 60 else f"{idle_minutes} min"
+        closed += _close(brain, note, "done", last, f"auto-ended, no step for {waited} (outcome not reported)", {"closed_by": CLOSED_BY})
+    return closed
 
 
 def _drop_property(text: str, key: str) -> str:
@@ -907,6 +969,10 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
         counts = sync_opencode(brain, pending, now_ms, idle_minutes)
         if counts["created"] or counts["updated"]:
             messages.append(f"OpenCode: {counts['created']} new, {counts['updated']} updated session(s)")
+        # Only where OpenCode lives: on another device the database is simply not there.
+        gone = close_missing_opencode(brain, [s["id"] for s in sessions], now_ms, idle_minutes) if path.is_file() else 0
+        if gone:
+            messages.append(f"OpenCode: {gone} session(s) ended, no longer in OpenCode")
     if vector:
         is_running = process_running(vector_names) if running is None else running
         action = sync_vector(brain, is_running, now_ms, idle_minutes)
@@ -914,6 +980,9 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
             messages.append("Vector: session started (app open and the repo changed)")
         elif action == "ended":
             messages.append("Vector: session ended")
+    silent = close_silent_reported(brain, now_ms)
+    if silent:
+        messages.append(f"Sessions: {silent} ended after {REPORTED_IDLE_MINUTES // 60} h without a step")
     if laptop and sync_machine(brain):
         messages.append("Laptop: load noted in machines/")
     if github and github_usage.sync(brain):

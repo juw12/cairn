@@ -3,13 +3,14 @@
 
 import * as core from "./core.js";
 
-// A live session with no step for this long has probably stopped without saying so.
+// A live session is running: the watcher ends one the moment its turn finishes, and one that stops logging
+// after a few hours. Past this many minutes without a step the row says when the last step was.
 export const QUIET_MIN = 20;
-// Quiet for a day: still marked live, but nobody is there. The recap folds these away.
+// No step for a day and still marked live: only a brain no watcher looks after gets here. Folded away.
 export const STALE_MIN = 1440;
 const FINISHED_WINDOW_MIN = 1440;
 const FINISHED_ROWS = 10;
-const ORDER = { error: 0, waiting: 1, working: 2, quiet: 3 };
+const ORDER = { error: 0, working: 1, finished: 2, left: 3 };
 const RESULT = { shipped: "Shipped", partial: "Partial", dropped: "Dropped", done: "Done" };
 
 const number = (value) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Math.floor(Number(value)) : 0);
@@ -83,16 +84,17 @@ export function finalMessage(note) {
   return last ? { kind: last.kind, time: last.time, text: last.text } : null;
 }
 
-// One of: working, waiting (turn finished), error (turn failed), quiet (no step for a while) for a live
-// session; done, cut (stopped mid-turn) or error for one that ended.
+// For a live session one of: working, finished (its turn is over: a batch between two runs, or a session the
+// watcher is about to end), error (turn failed), left (no step for a day). For one that ended: done, cut
+// (stopped mid-turn) or error. Nothing here waits for a person: sessions run on their own.
 export function sessionState(note, now) {
   const turn = word(note.meta.turn);
   const active = lastActivity(note);
   const idle = active === null || now === null ? 0 : Math.max(0, now - active);
   if (note.status === "live") {
     if (turn === "failed") return { key: "error", label: "Stopped on an error", idle };
-    if (turn === "done") return { key: "waiting", label: "Waiting for you", idle };
-    if (idle >= QUIET_MIN) return { key: "quiet", label: `Quiet ${minutesText(idle)}`, idle };
+    if (idle >= STALE_MIN) return { key: "left", label: `No step for ${minutesText(idle)}`, idle };
+    if (turn === "done") return { key: "finished", label: number(note.meta.runs) ? "Between runs" : "Turn finished", idle };
     return { key: "working", label: "Working", idle };
   }
   if (turn === "working") return { key: "cut", label: "Stopped mid-turn", idle };
@@ -124,14 +126,14 @@ export function recap(notes, nowStamp) {
     .filter((note) => note.status === "live")
     .map((note) => ({ ...row(note, now), at: lastActivity(note) }))
     .sort((a, b) => ORDER[a.key] - ORDER[b.key] || newestFirst(a, b));
-  const stale = running.filter((entry) => entry.key === "quiet" && entry.idle >= STALE_MIN);
-  const live = running.filter((entry) => !stale.includes(entry));
+  const stale = running.filter((entry) => entry.key === "left");
+  const live = running.filter((entry) => entry.key !== "left");
   const finished = sessions
     .filter((note) => note.status !== "live")
     .map((note) => ({ ...row(note, now), at: core.stampMinutes(note.meta.ended) ?? lastActivity(note) }))
     .filter((entry) => entry.at !== null && now !== null && now - entry.at >= 0 && now - entry.at <= FINISHED_WINDOW_MIN)
     .sort(newestFirst);
-  const counts = { working: 0, waiting: 0, error: 0, quiet: 0 };
+  const counts = { working: 0, finished: 0, error: 0, left: 0 };
   for (const entry of running) counts[entry.key] += 1;
   return {
     live,

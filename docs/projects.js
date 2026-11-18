@@ -13,6 +13,7 @@ import { escapeHtml as esc } from "./md.js";
 import { $, icon, pageHead, plural, relativeTime, toast } from "./ui.js";
 import { REPO_URL, createNote, readOnly, saveNote, state } from "./state.js";
 import { renderView } from "./app.js";
+import { boardHtml, dashboardHtml, recapHtml } from "./vibelayout.js";
 
 const DAY = 86400000;
 const STALE_MS = 15 * 60 * 1000;
@@ -508,6 +509,44 @@ function coverage(list) {
   return ` · tests & CI checked for ${checked} of ${list.length} (more each refresh${auth.session() ? "" : "; sign in to check all"})`;
 }
 
+const WEEK = 7 * DAY;
+
+// What changed in the ranking: the pick, what most repos share, who moved since yesterday and what was pushed lately.
+function projectsRecap(list) {
+  const top = list[0];
+  const shared = sharedSteps(list).slice(0, 2);
+  const lead = top
+    ? `<p class="proj-lead">${icon("target", "sm")} Focus pick: <strong>${esc(top.repo.name)}</strong>${top.score.nextSteps[0] ? ` · next: ${esc(top.score.nextSteps[0])}` : ""}</p>
+       ${shared.length ? `<p class="proj-lead proj-shared">${icon("sparkle", "sm")} Across most of your repos: ${shared.map(esc).join(" · ")}</p>` : ""}`
+    : "";
+  const moved = list
+    .filter((p) => view.moves[p.repo.full_name] || view.moves[p.repo.full_name] === null)
+    .sort((a, b) => Math.abs(view.moves[b.repo.full_name] || 0) - Math.abs(view.moves[a.repo.full_name] || 0))
+    .slice(0, 4)
+    .map((p) => ({ when: "rank", html: `${move(view.moves[p.repo.full_name])} <strong>${esc(p.repo.name)}</strong> is now #${p.rank}` }));
+  const pushed = [...list]
+    .filter((p) => Date.now() - Date.parse(p.repo.pushed_at || "") < WEEK)
+    .sort((a, b) => Date.parse(b.repo.pushed_at) - Date.parse(a.repo.pushed_at))
+    .slice(0, 4)
+    .map((p) => ({ when: relativeTime(Date.parse(p.repo.pushed_at)), html: `pushed to <strong>${esc(p.repo.name)}</strong> (#${p.rank}, ${p.score.tier})` }));
+  return `${lead}${recapHtml([...moved, ...pushed], list.length ? "No rank moves since yesterday and nothing pushed this week." : "Nothing ranked yet.")}`;
+}
+
+function projectsDashboard(list) {
+  const tier = (name) => list.filter((p) => p.score.tier === name).length;
+  const top = list[0];
+  const average = list.length ? Math.round(list.reduce((sum, p) => sum + p.score.overall, 0) / list.length) : 0;
+  const pushed = list.filter((p) => Date.now() - Date.parse(p.repo.pushed_at || "") < WEEK).length;
+  return dashboardHtml([
+    { value: list.length, label: "repos ranked" },
+    { value: tier("Flagship"), label: "flagship", title: TIER_HINT.Flagship },
+    { value: tier("Rising"), label: "rising", title: TIER_HINT.Rising },
+    { value: top ? top.score.overall : "–", label: "top score", sub: top ? top.repo.name : "" },
+    { value: list.length ? average : "–", label: "average score" },
+    { value: pushed, label: "pushed this week" },
+  ]);
+}
+
 export function projectsView() {
   if (!view.owner) view.owner = defaultOwner();
   ensureFresh();
@@ -522,16 +561,29 @@ export function projectsView() {
       ? `Re-ranked ${relativeTime(view.loadedAt)} · refreshes every 15 min${coverage(list)}`
       : "";
   const top = list[0];
-  const shared = sharedSteps(list).slice(0, 2);
-  const lead = top
-    ? `<p class="proj-lead">${icon("target", "sm")} Focus pick: <strong>${esc(top.repo.name)}</strong>${top.score.nextSteps[0] ? ` · next: ${esc(top.score.nextSteps[0])}` : ""}</p>
-       ${shared.length ? `<p class="proj-lead proj-shared">${icon("sparkle", "sm")} Across most of your repos: ${shared.map(esc).join(" · ")}</p>` : ""}`
-    : "";
   const body = view.error && !list.length
     ? `<div class="card"><div class="empty-state">${icon("github")}<h3>Couldn't load the repos</h3><p>${esc(view.error)}</p></div></div>`
     : !list.length
       ? `<div class="card"><div class="empty-state">${icon("github")}<h3>${view.loading ? "Fetching repos from GitHub…" : "No repos yet"}</h3><p>Every public repo of @${esc(view.owner)} shows up here, ranked.</p></div></div>`
       : `<ol class="proj-list">${list.map(card).join("")}</ol>`;
+  const toolbar = `
+    <form class="proj-toolbar" id="projects-form" autocomplete="off">
+      <label class="sr-only" for="projects-owner">GitHub user or organisation</label>
+      <input class="input" id="projects-owner" name="owner" value="${esc(view.owner)}" placeholder="GitHub user, e.g. juw12">
+      <button class="btn sm" type="submit">Rank</button>
+      <div class="segmented" role="group" aria-label="Order by">${sortButton("overall", "Overall")}${sortButton("solid", "Most solid")}${sortButton("potential", "Most potential")}</div>
+      <label class="proj-auto"><input type="checkbox" data-projects-auto ${autoNote ? "checked" : ""} ${readOnly() ? "disabled" : ""}> Keep a ranking note in the brain</label>
+      <span class="muted proj-status">${status}</span>
+    </form>`;
+  const blocks = {
+    dashboard: list.length ? { html: projectsDashboard(list), summary: `${plural(list.length, "repo")} · top ${top.repo.name} ${top.score.overall}` } : null,
+    recap: list.length ? { html: projectsRecap(list), summary: `focus: ${top.repo.name}` } : null,
+    ranking: { html: `${toolbar}${body}`, summary: list.length ? `${plural(list.length, "repo")} by ${sort}` : view.loading ? "ranking…" : "" },
+    scoring: {
+      html: `<p class="muted proj-foot">Solid: live demo, tests, CI, codebase size, months of upkeep, README, license, packaging. Potential: stars, recent pushes, how often your notes mention it, whether people can try it, forks. Overall weighs the stronger side more, so a project can top the list by being either very solid or very promising. Forks, archived repos and profile/settings repos are left out.</p>`,
+      summary: "what Solid, Potential and Overall count",
+    },
+  };
   return `
     ${pageHead(
       "Projects",
@@ -540,17 +592,7 @@ export function projectsView() {
        <button class="btn" data-action="projects-note" ${list.length ? "" : "disabled"}>${icon("note", "sm")} Save as note</button>`,
       "Project",
     )}
-    <form class="proj-toolbar" id="projects-form" autocomplete="off">
-      <label class="sr-only" for="projects-owner">GitHub user or organisation</label>
-      <input class="input" id="projects-owner" name="owner" value="${esc(view.owner)}" placeholder="GitHub user, e.g. juw12">
-      <button class="btn sm" type="submit">Rank</button>
-      <div class="segmented" role="group" aria-label="Order by">${sortButton("overall", "Overall")}${sortButton("solid", "Most solid")}${sortButton("potential", "Most potential")}</div>
-      <label class="proj-auto"><input type="checkbox" data-projects-auto ${autoNote ? "checked" : ""} ${readOnly() ? "disabled" : ""}> Keep a ranking note in the brain</label>
-      <span class="muted proj-status">${status}</span>
-    </form>
-    ${lead}
-    ${body}
-    <p class="muted proj-foot">Solid: live demo, tests, CI, codebase size, months of upkeep, README, license, packaging. Potential: stars, recent pushes, how often your notes mention it, whether people can try it, forks. Overall weighs the stronger side more, so a project can top the list by being either very solid or very promising. Forks, archived repos and profile/settings repos are left out.</p>`;
+    ${boardHtml("projects", blocks)}`;
 }
 
 // Clicks and the owner form (called from the app's global handlers).

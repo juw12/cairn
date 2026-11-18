@@ -106,12 +106,42 @@ def live_session(brain: Brain, slug: str = "") -> dict | None:
     return live[-1] if live else None
 
 
+def _reopen(brain: Brain, slug: str) -> dict | None:
+    """A session the watcher ended for silence (`closed_by: watcher`) is live again when its assistant
+    reports another step by name. One ended on purpose stays ended."""
+    wanted = slug.strip().removesuffix(".md").rsplit("/", 1)[-1]
+    note = next((n for n in _notes(brain) if n["type"] == "session" and n["slug"] == wanted), None)
+    if note is None or note["status"] == "live" or note["meta"].get("closed_by") != "watcher":
+        return None
+    current = brain.read(note["path"])
+    text = _drop_properties(core.update_note_text(current["text"], {"status": "live"}), ("ended", "closed_by"))
+    brain.write(note["path"], text, current["mtime"])
+    return live_session(brain, wanted)
+
+
+def _drop_properties(text: str, keys: tuple[str, ...]) -> str:
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return text
+    kept, in_header = [lines[0]], True
+    for line in lines[1:]:
+        if in_header and line.strip() == "---":
+            in_header = False
+        elif in_header and line.split(":", 1)[0].strip() in keys:
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def _require_live(brain: Brain, slug: str = "") -> dict:
     session = live_session(brain, slug)
     if session:
         return session
     wanted = slug or os.environ.get("CAIRN_SESSION", "")
     if wanted:
+        session = _reopen(brain, wanted)
+        if session:
+            return session
         raise VibeError(f"No live session called {wanted!r}. Live now: {', '.join(n['slug'] for n in live_sessions(brain)) or 'none'}")
     raise VibeError('No live session. Start one with: cairn vibe start "what you are building"')
 

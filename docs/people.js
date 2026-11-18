@@ -8,12 +8,13 @@ import * as auth from "./auth.js";
 import { forgetBrains } from "./brain-cache.js";
 import { forgetPlaces } from "./map.js";
 import { openSignIn as showSignInDialog } from "./signin.js";
-import { $, icon, pageHead, relativeTime, toast, today } from "./ui.js";
+import { $, icon, pageHead, plural, relativeTime, toast, today } from "./ui.js";
 import { LAST_BRAIN_KEY, readOnly, state } from "./state.js";
 import { flushPending, renderDrawer } from "./drawer.js";
 import { claimsFromNotes } from "./proof.js";
 import { profileClaims, runCheck } from "./proofview.js";
-import { friends, leaderboardView } from "./leaderboard.js";
+import { STATS, friends, leaderboardView, rank } from "./leaderboard.js";
+import { boardHtml, dashboardHtml, recapHtml } from "./vibelayout.js";
 import { applyInfo, render, renderSidebarFoot, renderView, setView } from "./app.js";
 
 // ============================================================ network: profiles, discover, read-only brains
@@ -297,6 +298,48 @@ export async function createMyBrain() {
   }
 }
 
+// Friends who published totals, best first on the stat the leaderboard is showing.
+function rankedFriends() {
+  const board = state.leaderboard;
+  if (!board?.totals) return [];
+  const rows = friends()
+    .filter((friend) => board.totals[friend.fullName])
+    .map((friend) => ({ login: friend.owner, fullName: friend.fullName, totals: board.totals[friend.fullName] }));
+  return rank(rows, board.stat);
+}
+
+function peopleDashboard(others) {
+  const mine = state.mine?.items;
+  const published = rankedFriends().length;
+  return dashboardHtml([
+    { value: auth.signedIn() ? (mine ? mine.length : "–") : "–", label: "your brains", sub: auth.signedIn() ? "" : "sign in to see them" },
+    { value: friends().length, label: "friends", sub: friends().length ? `${published} published totals` : "" },
+    { value: state.discover?.loading ? "–" : others.length, label: "brains published by others" },
+    { value: state.profile?.claims?.items?.length ?? "–", label: "claims looked up", sub: state.profile?.user ? `@${state.profile.user.login}` : "" },
+  ]);
+}
+
+// What is new around you: who you looked up, who leads among friends, and the brains pushed most recently.
+function peopleRecap(others) {
+  const rows = [];
+  const profile = state.profile;
+  if (profile?.user && profile.proof) {
+    const { now, shipped, decisions } = profile.proof;
+    rows.push({ when: "looked up", html: `<strong>@${esc(profile.user.login)}</strong>: ${now.length} in progress, ${shipped.length} shipped, ${plural(decisions.length, "decision")}` });
+  }
+  const leader = rankedFriends()[0];
+  if (leader) {
+    const stat = STATS[state.leaderboard.stat];
+    rows.push({ when: "leading", html: `<strong>@${esc(leader.login)}</strong> leads your friends on ${esc(stat.label.toLowerCase())} with ${esc(stat.text(leader.totals[state.leaderboard.stat]))}` });
+  }
+  [...others]
+    .filter((repo) => repo.pushedAt)
+    .sort((a, b) => Date.parse(b.pushedAt) - Date.parse(a.pushedAt))
+    .slice(0, 4)
+    .forEach((repo) => rows.push({ when: relativeTime(Date.parse(repo.pushedAt)), html: `<button class="link-button" data-action="open-brain" data-repo="${esc(repo.fullName)}">${esc(repo.fullName)}</button> was updated` }));
+  return recapHtml(rows, "Nothing new yet. Look someone up or add a friend.");
+}
+
 export function peopleView() {
   loadDiscover();
   const d = state.discover;
@@ -311,8 +354,21 @@ export function peopleView() {
         ? `<div class="repo-list">${others.map(repoRow).join("")}</div>`
         : `<p class="muted">${profileLogin ? "No one else has published a brain yet." : "No published brains yet. Be the first."}</p>`;
   const publishHint = state.info.mode === "server" || state.info.mode === "folder"
-    ? `<section class="publish"><h3>Publish your brain</h3><p>Push your repo to GitHub as public and add one topic. Only repos you mark this way ever appear here.</p><code>gh repo edit OWNER/${esc(state.info.project)} --add-topic ${gh.BRAIN_TOPIC}</code></section>`
-    : `<section class="publish"><h3>Publish your brain</h3><p>Keep your <code>brain/</code> folder in a public GitHub repo and add the <code>${gh.BRAIN_TOPIC}</code> topic. Only repos you mark this way ever appear here.</p></section>`;
+    ? `<section class="publish"><p>Push your repo to GitHub as public and add one topic. Only repos you mark this way ever appear here.</p><code>gh repo edit OWNER/${esc(state.info.project)} --add-topic ${gh.BRAIN_TOPIC}</code></section>`
+    : `<section class="publish"><p>Keep your <code>brain/</code> folder in a public GitHub repo and add the <code>${gh.BRAIN_TOPIC}</code> topic. Only repos you mark this way ever appear here.</p></section>`;
+  const mineHtml = myBrainsBlock();
+  const profileHtml = profileBlock();
+  const leaderboardHtml = leaderboardView();
+  const lookedUp = state.profile?.user?.login || state.profile?.login || "";
+  const blocks = {
+    dashboard: { html: peopleDashboard(others), summary: `${plural(friends().length, "friend")} · ${plural(others.length, "published brain")}` },
+    recap: { html: peopleRecap(others), summary: rankedFriends()[0] ? `@${rankedFriends()[0].login} leads` : "" },
+    profile: profileHtml ? { html: profileHtml, summary: lookedUp ? `@${lookedUp}` : "" } : null,
+    mine: { html: mineHtml, summary: auth.signedIn() ? plural(state.mine?.items?.length || 0, "brain") : "sign in to edit from any device" },
+    leaderboard: { html: leaderboardHtml, summary: plural(friends().length, "friend") },
+    discover: { html: discoverHtml, summary: d?.loading ? "loading…" : plural(others.length, "brain") },
+    publish: { html: publishHint, summary: `add the ${gh.BRAIN_TOPIC} topic to a public repo` },
+  };
   return `
     ${pageHead("People", "Look up anyone on GitHub and see what they're thinking about, building and deciding. Their brain is plain files in their repo, shown read-only.")}
     <form class="people-search" id="people-form" autocomplete="off">
@@ -321,10 +377,5 @@ export function peopleView() {
       <input id="people-query" name="query" placeholder="Paste a GitHub profile or repo link, or type a username" value="${esc(state.peopleQuery)}">
       <button class="btn primary" type="submit">Look up</button>
     </form>
-    ${myBrainsBlock()}
-    ${profileBlock()}
-    ${leaderboardView()}
-    <h3 class="section-title">Recently published by others</h3>
-    ${discoverHtml}
-    ${publishHint}`;
+    ${boardHtml("people", blocks)}`;
 }

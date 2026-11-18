@@ -88,7 +88,7 @@ capture  →  brainstorm  →  decide  →  do  →  remember
 | **/ menu** | Type `/` in the editor for a Notion-style block menu: headings, to-dos, toggles (foldable Obsidian callouts), callouts, tables, code, maths, Mermaid diagrams, links, embeds, dates and databases. Everything it inserts is plain Markdown. |
 | **Projects** | Every GitHub repo of a person (yours by default, **Cairn itself always included**; forks, archived and profile/settings repos left out) ranked by how **solid** it is (live demo, tests, CI, codebase size, months of upkeep, README, license) and how much **potential** it has (stars, recent pushes, how often your own notes mention it, whether people can try it). Scores are partly relative to your other repos, so similar projects still spread out. Each card says what sets that repo apart (*Why*) and the concrete step that would lift it (*Next*); advice that applies to most of your repos is shown once above the list. It re-ranks itself every 15 minutes, shows who moved since yesterday, remembers test/CI checks until a repo is pushed again (so it stays inside GitHub's anonymous rate limit) and can keep a *Project ranking* note in the brain up to date. |
 | **Plugins** | Community plugins: install from the list, a GitHub repo or a link. Each plugin gets a **settings page** drawn from its own options, a plugin that breaks is flagged on its row with a **Restart** button, and the list of plugins you use can be **saved into the brain** so your other devices offer to install the same ones (sources only, never code). Write your own in one file ([PLUGINS.md](PLUGINS.md)). |
-| **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. |
+| **Code inbox** | Every `TODO`, `FIXME` and `HACK` comment in the repo. One click makes a task that remembers `file:line`. Under **Tools** (<kbd>Ctrl</kbd>+<kbd>K</kbd>), with Notes, Context pack, Obsidian sync and Plugins. |
 | **Context pack** | A one-page brief (doing now, up next, decisions in force, open questions) saved as `brain/CONTEXT.md` for teammates and AI assistants. |
 | **Search** | <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> across every note and command. <kbd>C</kbd> jumps to capture, <kbd>?</kbd> shows [every shortcut](#keyboard-shortcuts). |
 | **People** | Look up anyone on GitHub and see their proof of work, read from their brain's files: working on, shipped, decisions, open to collaborate. Open their brain read-only and **Ask to join** (opens a prefilled GitHub issue). |
@@ -163,10 +163,17 @@ It opens `http://127.0.0.1:4777` with code scanning and one-click **Commit brain
 thought. A session is a plain file in `brain/sessions/` with `status: live` while you work and a log of timestamped
 steps; feedback lives in `brain/feedback/` with an optional 1-5 rating.
 
-Every block on the Vibe page (live recap, overview, live cards, numbers, activity, sessions, feedback...) folds to one
-line with a summary, and moves up or down with its arrows or by dragging its handle. The layout is saved in
-`brain/CAIRN-LAYOUT.md`, so the desktop app, the web app and your phone show the same page; with more than three
-sessions live the full live cards start folded, since the recap and the overview already list them.
+Every block on the Vibe page (live recap, overview, numbers, activity, sessions, skills, models...) folds to one
+line with a summary, and moves up or down with its arrows or by dragging its handle. **Projects**, **People** and
+**Proof** are built the same way, each starting with a **Dashboard** (the numbers) and a **Recap** (what changed and
+what needs you). The layout is saved in `brain/CAIRN-LAYOUT.md` (one `page-order:` and `page-folded:` line per page),
+so the desktop app, the web app and your phone show the same pages.
+
+The **Live recap** is the one list of sessions that are open: each row says *working*, *turn finished*, *stopped on
+an error* or *left open*, and opens to the full session (progress, steps, add a step, end it). Its sections
+(running, left open, just finished) and each assistant in the overview (OpenCode, OpenBot, Vector...) fold too.
+A session counts as running only while it is doing something: nothing ever waits for you to press a button.
+Blocks with nothing in them stay away (feedback before the first `fb:` note, models that used no tokens).
 
 ```sh
 cairn vibe start "add dark mode" --agent claude   # opens a live session
@@ -214,14 +221,17 @@ stand by and take over within five minutes of it stopping.
 - **OpenCode:** each session in OpenCode's local database becomes a session note (`source: opencode`) with active
   minutes (gaps between messages, capped at 10 minutes) and when they happened (`spans`), model and cost. OpenCode
   does not record line changes, so the watcher also counts the commits made in the session's folder while it ran
-  (local branches, no merges, no `[bot]` authors). It is `live` while messages keep arriving, `shipped` if it changed
-  or committed code, otherwise `done`; the log says whether the folder had no commits or is not a git repo at all.
+  (local branches, no merges, no `[bot]` authors). It is `live` only while a turn is running: the moment the
+  assistant finishes its turn the session ends (`shipped` if it changed or committed code, otherwise `done`), and a
+  new message opens it again. A session deleted from OpenCode's database (bots that clean up after themselves) is
+  closed too. The log says whether the folder had no commits or is not a git repo at all.
   Re-running is idempotent and finished sessions are not re-read, and a status you set by hand is kept until the
   session moves again. Subagent and archived sessions are skipped.
 - **Vector:** when the Vector app is running and this repo changes, a session opens; new commits are logged, and it
   ends when Vector closes or the repo has been quiet for 30 minutes (`shipped` with commits, else `partial`).
   Detection is from the outside only (process list and git), so it can't see what was asked. For prompts and steps,
-  let the assistant report itself with `cairn vibe start/log/check/end`.
+  let the assistant report itself with `cairn vibe start/log/check/end`. A self-reported session that never says
+  `vibe end` is closed after four hours without a step, and its next `vibe log --session <slug>` opens it again.
 - **Privacy:** the OpenCode database is opened read-only and only session metadata and message timestamps are read,
   never message text. Nothing leaves your machine. `--no-opencode` and `--no-vector` turn either source off.
 - **GitHub Actions minutes:** with a GitHub token (the one `cairn publish` uses) the watcher reads your Actions

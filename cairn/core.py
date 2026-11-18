@@ -822,6 +822,34 @@ def stamp_minutes(stamp) -> int | None:
     return days * 1440 + hour * 60 + minute
 
 
+def session_last_activity(note: dict) -> int | None:
+    """When a session last did anything, in stamp_minutes units (see recap.js lastActivity).
+
+    A watcher stamps `turn_at`; otherwise walk the log from the start: its lines only carry HH:MM, so a
+    time that goes backwards is the next day."""
+    stamped = stamp_minutes(note["meta"].get("turn_at"))
+    if stamped is not None:
+        return stamped
+    start = stamp_minutes(note["meta"].get("started"))
+    if start is None:
+        return None
+    day, previous, last = start - start % 1440, start % 1440, start
+    for entry in session_log(note.get("body", "")):
+        hour, _, minute = entry["time"].partition(":")
+        clock = int(hour) * 60 + int(minute)
+        if clock < previous:
+            day += 1440
+        previous = clock
+        last = day + clock
+    return last
+
+
+def minutes_stamp(minutes: int) -> str:
+    """The reverse of stamp_minutes: minutes on the common clock -> `2026-11-07T14:02`."""
+    day = dt.date.fromordinal(dt.date(1970, 1, 1).toordinal() + minutes // 1440)
+    return f"{day.isoformat()}T{minutes % 1440 // 60:02d}:{minutes % 60:02d}"
+
+
 def session_minutes(note: dict) -> int:
     """Active minutes: `minutes` when a watcher measured it, else ended minus started."""
     measured = note["meta"].get("minutes")

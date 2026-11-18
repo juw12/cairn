@@ -9,10 +9,10 @@ import { $, $$, ask, icon, pageHead, plural, statusPill, toast, today } from "./
 import { createNote, fileByPath, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { renderNav, renderView } from "./app.js";
 import { agentGroup, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubUsage, machineReading } from "./progress.js";
-import { compact, minutesText, recap, sessionState } from "./recap.js";
+import { QUIET_MIN, compact, minutesText, recap, sessionState } from "./recap.js";
 import { chatReady } from "./chat.js";
 import { openShare } from "./share.js";
-import { LAYOUT_FILE, openPanel, panelsHtml, setLiveCount, wirePanels } from "./vibelayout.js";
+import { boardHtml, openPanel } from "./vibelayout.js";
 
 const POLL_MS = 3000;
 const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped", done: "Done" };
@@ -54,6 +54,42 @@ const oneLine = (text) => String(text).replace(/\s+/g, " ").trim();
 const canPoll = () => typeof state.store?.vibe === "function";
 // The computer the sessions run on: measured now by the local app, else the newest machines/ note a watcher left.
 const machine = () => machineReading(state.vibeMachine, state.notes);
+
+// Folds inside a block (a recap section, one AI in the overview, a session row) stay as you left them through
+// live updates. The section folds are also kept on this device, so the page opens the way you arranged it.
+const FOLD_KEY = "cairn.vibeFolds";
+const KEPT_FOLD = /^(rc-running$|rc-stale$|rc-finished-all$|ov-agent:)/;
+let foldsLoaded = false;
+
+function folds() {
+  if (!foldsLoaded) {
+    foldsLoaded = true;
+    let kept = {};
+    try {
+      kept = JSON.parse(localStorage.getItem(FOLD_KEY)) || {};
+    } catch {
+      /* storage is off: folds last until the page closes */
+    }
+    state.vibeOpenBlocks = { ...kept, ...(state.vibeOpenBlocks || {}) };
+  }
+  return state.vibeOpenBlocks || (state.vibeOpenBlocks = {});
+}
+
+function foldOpen(key, fallback = false) {
+  const saved = folds()[key];
+  return typeof saved === "boolean" ? saved : fallback;
+}
+
+function setFold(key, open) {
+  state.vibeOpenBlocks = { ...folds(), [key]: open };
+  if (!KEPT_FOLD.test(key)) return;
+  try {
+    const kept = Object.entries(state.vibeOpenBlocks).filter(([name]) => KEPT_FOLD.test(name));
+    localStorage.setItem(FOLD_KEY, JSON.stringify(Object.fromEntries(kept)));
+  } catch {
+    /* storage is off */
+  }
+}
 
 function startedKey(note) {
   return `${note.meta.started || note.meta.created || ""} ${note.path}`;
@@ -178,14 +214,28 @@ function flash(el) {
   setTimeout(() => el.classList.remove("flash"), 1600);
 }
 
-// From a lane in the overview to that session's full card further down.
+// From a lane in the overview to that session's row in the live recap, opened to its steps.
 export function jumpToLive(path) {
-  openPanel("live");
-  const card = $(`.vibe-elapsed[data-path="${CSS.escape(path)}"]`)?.closest(".vibe-live");
-  if (!card) return;
-  card.scrollIntoView({ block: "start" });
-  $("h2 a", card)?.focus({ preventScroll: true });
-  flash(card);
+  const data = recap(state.notes, stamp());
+  setFold(`rc-row:${path}`, true);
+  setFold("rc-running", true);
+  if (data.stale.some((entry) => entry.note.path === path)) setFold("rc-stale", true);
+  if (data.live.findIndex((entry) => entry.note.path === path) >= LIVE_SHOWN) setFold("rc-live-more", true);
+  if (!openPanel("recap")) renderView();
+  const row = $(`.rc-row[data-path="${CSS.escape(path)}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: "start" });
+  $(".rc-toggle", row)?.focus({ preventScroll: true });
+  const card = $(".vibe-live", row);
+  if (card) flash(card);
+}
+
+// A row in the live recap, opened to its steps or closed again.
+export function toggleRow(path) {
+  const row = $(`.rc-row[data-path="${CSS.escape(path)}"]`);
+  setFold(`rc-row:${path}`, !row?.classList.contains("open"));
+  renderView();
+  $(`.rc-row[data-path="${CSS.escape(path)}"] .rc-toggle`)?.focus({ preventScroll: true });
 }
 
 // From the overview's short list to the full one, with focus on the chip that is filtering it.
@@ -308,13 +358,15 @@ export async function startSession() {
   // The commit the session starts from, so only commits made during it are counted.
   const extraMeta = { started: stamp() };
   if (state.vibeGit?.head) extraMeta.base = state.vibeGit.head;
-  await createNote({
+  const note = await createNote({
     type: "session",
     title,
     status: "live",
     extraMeta,
     body: `## Goal\n\n${title}\n\n## Log\n\n- ${clock()} start: ${title}\n`,
   });
+  // A session you start by hand opens to its log form: you are the one who writes its steps.
+  if (note) setFold(`rc-row:${note.path}`, true);
   state.vibeGit = null;
   renderNav();
   renderView();
@@ -454,7 +506,8 @@ function liveEstimate(live, newest) {
   const git = newest && state.vibeGit?.available ? state.vibeGit : null;
   // The load is the whole computer's, so it only speaks for a session that is working right now, and only while the reading is recent.
   const reading = machine();
-  const load = reading?.fresh && sessionState(live, core.stampMinutes(stamp())).key === "working" ? reading : null;
+  const now = sessionState(live, core.stampMinutes(stamp()));
+  const load = reading?.fresh && now.key === "working" && now.idle < QUIET_MIN ? reading : null;
   const effort = estimateEffort({ elapsed, log, git, durations, machine: load });
   return { progress, effort, agent, elapsed, git, load };
 }
@@ -778,7 +831,6 @@ async function poll() {
 
 export function wireVibe() {
   wireEffortBlocks();
-  wirePanels();
   if (canPoll() && !pollTimer) {
     pollTimer = setInterval(poll, pollMs());
     poll();
@@ -807,17 +859,14 @@ export function wireVibe() {
   // Empty side blocks fold on phones; remember when someone opens one so live updates keep it open.
   // Recorded on click (which also fires for Enter/Space on the summary), not on "toggle": toggle fires a task
   // later, and a live re-render in between would close the block again.
-  for (const fold of $$("details.vibe-fold, details.rc-fold")) {
-    fold.querySelector("summary")?.addEventListener("click", () => {
-      state.vibeOpenBlocks = { ...(state.vibeOpenBlocks || {}), [fold.dataset.block]: !fold.open };
-    });
+  for (const fold of $$("details.vibe-fold, details.rc-fold, details.ov-fold")) {
+    fold.querySelector("summary")?.addEventListener("click", () => setFold(fold.dataset.block, !fold.open));
   }
   // The last message is clamped to three lines; a tap opens it in full and live updates keep it open.
   for (const last of $$(".rc-last[data-more]")) {
     last.addEventListener("click", () => {
       if (String(getSelection?.() || "")) return;
-      const open = last.classList.toggle("open");
-      state.vibeOpenBlocks = { ...(state.vibeOpenBlocks || {}), [`rc-last:${last.dataset.more}`]: open };
+      setFold(`rc-last:${last.dataset.more}`, last.classList.toggle("open"));
     });
   }
   const feedbackForm = $("#fb-form");
@@ -882,32 +931,26 @@ function lastSession() {
     .sort((a, b) => (key(a) < key(b) ? 1 : -1))[0] || null;
 }
 
-function liveCards() {
-  const live = liveSessions();
-  if (!live.length) {
-    const sample = !readOnly() && state.info?.canLoadSample && !state.notes.some((n) => n.type === "session")
-      ? ` <button class="btn sm" data-action="vibe-sample">${icon("play", "sm")} Load a sample week</button>`
-      : "";
-    const last = lastSession();
-    if (last) {
-      const ended = String(last.meta.ended || last.meta.started || "");
-      const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ended) ? `${dayLabel(ended.slice(0, 10))} ${ended.slice(11, 16)}` : "";
-      return `<section class="vibe-live idle compact">
-        <p>${icon("activity")} <strong>Nothing live.</strong> Last session: <a href="#" data-open="${esc(last.path)}">${esc(last.title)}</a><span class="idle-meta muted">${[when ? `ended ${esc(when)}` : "", readOnly() ? "" : `next: Start session above, or <code>cairn vibe start</code>`].filter(Boolean).join(" · ")}</span></p>
-      </section>`;
-    }
-    return `<section class="vibe-live idle">
-      <p>${icon("activity")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here or from your terminal with <code>cairn vibe start "add dark mode"</code>. <code>cairn vibe watch</code> picks up OpenCode and Vector sessions on its own.`}${sample}</p>
+// Nothing running: one line saying so, with the last session to pick up from.
+function idleNote() {
+  const sample = !readOnly() && state.info?.canLoadSample && !state.notes.some((n) => n.type === "session")
+    ? ` <button class="btn sm" data-action="vibe-sample">${icon("play", "sm")} Load a sample week</button>`
+    : "";
+  const last = lastSession();
+  if (last) {
+    const ended = String(last.meta.ended || last.meta.started || "");
+    const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ended) ? `${dayLabel(ended.slice(0, 10))} ${ended.slice(11, 16)}` : "";
+    return `<section class="vibe-live idle compact">
+      <p>${icon("activity")} <strong>Nothing live.</strong> Last session: <a href="#" data-open="${esc(last.path)}">${esc(last.title)}</a><span class="idle-meta muted">${[when ? `ended ${esc(when)}` : "", readOnly() ? "" : `next: Start session above, or <code>cairn vibe start</code>`].filter(Boolean).join(" · ")}</span></p>
     </section>`;
   }
-  const groups = liveGroups(live);
-  if (groups.length < 2) return live.map((session, index) => liveCard(session, index === 0, live.length)).join("");
-  return groups
-    .map((group) => `<h3 class="live-agent">${esc(group.label)} <span class="muted">${group.notes.length} live</span></h3>${group.notes.map((session) => liveCard(session, session.path === live[0].path, live.length)).join("")}`)
-    .join("");
+  return `<section class="vibe-live idle">
+    <p>${icon("activity")} <strong>Nothing live.</strong> ${readOnly() ? "" : `Start a session here or from your terminal with <code>cairn vibe start "add dark mode"</code>. <code>cairn vibe watch</code> picks up OpenCode and Vector sessions on its own.`}${sample}</p>
+  </section>`;
 }
 
-function liveCard(live, newest = true, total = 1) {
+// A live session opened inside its recap row: progress, its steps, the form to log one, and the buttons that end it.
+function liveDetail(live, newest = true, total = 1) {
   const log = core.sessionLog(live.body);
   const checks = log.filter((e) => e.kind === "pass" || e.kind === "fail");
   const lastCheck = checks.at(-1);
@@ -932,12 +975,12 @@ function liveCard(live, newest = true, total = 1) {
   const code = newest
     ? `<div><h3>Code${total > 1 ? " <span class=\"muted small\">(whole repo, since this session started)</span>" : ""}</h3>${gitPanel(state.vibeGit)}</div>`
     : "";
+  const facts = [agent, task ? `for ${task}` : "", skills.length ? `skills ${skills.map((s) => `<code>${esc(s)}</code>`).join(" ")}` : "", total > 1 ? `<code>CAIRN_SESSION=${esc(live.slug)}</code>` : ""].filter(Boolean);
   return `<section class="vibe-live${newest ? "" : " also"}" aria-label="Live session: ${esc(live.title)}">
     <header>
       <div>
         <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>Live · <span class="vibe-elapsed" data-path="${esc(live.path)}">${duration(elapsedMinutes(live))}</span>${lastCheck ? ` · last check <span class="check-${lastCheck.kind}">${lastCheck.kind === "pass" ? "passed" : "failed"}</span>` : ""}</p>
-        <h2><a href="#" data-open="${esc(live.path)}">${esc(live.title)}</a></h2>
-        <p class="muted small">${[agent, task ? `for ${task}` : "", skills.length ? `skills ${skills.map((s) => `<code>${esc(s)}</code>`).join(" ")}` : "", total > 1 ? `<code>CAIRN_SESSION=${esc(live.slug)}</code>` : ""].filter(Boolean).join(" · ")}</p>
+        ${facts.length ? `<p class="muted small">${facts.join(" · ")}</p>` : ""}
       </div>
       ${controls}
     </header>
@@ -951,6 +994,16 @@ function liveCard(live, newest = true, total = 1) {
       ${code}
     </div>
   </section>`;
+}
+
+// A session that ended, opened inside its recap row: its last steps.
+const ENDED_STEPS = 8;
+function endedDetail(note) {
+  const log = core.sessionLog(note.body);
+  return `<div class="rc-detail">
+    <ol class="vibe-log" reversed>${log.slice(-ENDED_STEPS).reverse().map(logRow).join("") || `<li class="muted small">No steps were logged.</li>`}</ol>
+    ${log.length > ENDED_STEPS ? `<p class="muted small">Newest ${ENDED_STEPS} of ${log.length} steps. <a href="#" data-open="${esc(note.path)}">Open the session</a> for all of them.</p>` : ""}
+  </div>`;
 }
 
 // ============================================================ overview band
@@ -1032,7 +1085,7 @@ function lane(note) {
     </li>`;
 }
 
-// What is running, one block per AI: a few lanes each so one busy AI cannot push the others off the screen.
+// What is running, one fold per AI: a few lanes each so one busy AI cannot push the others off the screen.
 function liveLanes(live) {
   if (!live.length) return "";
   const groups = liveGroups(live);
@@ -1040,11 +1093,11 @@ function liveLanes(live) {
   const blocks = groups.map((group) => {
     const old = group.notes.filter(staleDays).length;
     const more = group.notes.length - cap;
-    return `<section class="ov-agent" data-agent="${esc(group.key)}">
-        <h3><span class="ov-agent-name">${esc(group.label)}</span><span class="ov-agent-count">${group.notes.length} live</span>${old ? `<span class="ov-agent-old" title="Still marked live. Open one and end it if the work is over.">${old} started over a day ago</span>` : ""}</h3>
+    return `<details class="ov-agent ov-fold" data-agent="${esc(group.key)}" data-block="ov-agent:${esc(group.key)}"${foldOpen(`ov-agent:${group.key}`, true) ? " open" : ""}>
+        <summary><h3><span class="ov-agent-name">${esc(group.label)}</span><span class="ov-agent-count">${group.notes.length} live</span>${old ? `<span class="ov-agent-old" title="Still marked live. Open one and end it if the work is over.">${old} started over a day ago</span>` : ""}</h3></summary>
         <ol class="ov-lanes" aria-label="${esc(group.label)}, running now">${group.notes.slice(0, cap).map(lane).join("")}</ol>
-        ${more > 0 ? `<p class="ov-more muted small">+${more} more${groups.length > 1 ? ` in ${esc(group.label)}` : " live"}, listed below</p>` : ""}
-      </section>`;
+        ${more > 0 ? `<p class="ov-more muted small">+${more} more${groups.length > 1 ? ` in ${esc(group.label)}` : " live"}, all in Live recap</p>` : ""}
+      </details>`;
   });
   return `<div class="ov-agents">${blocks.join("")}</div>`;
 }
@@ -1184,10 +1237,11 @@ function wireOverview() {
 }
 
 // ============================================================ live recap
-// Above everything else: every session running now with its state (working, waiting for you, stopped on an
-// error, gone quiet), the model and tokens behind it, and how the sessions of the last day ended.
+// Above everything else: every session running now with its state (working, between runs, stopped on an
+// error), the model and tokens behind it, and how the sessions of the last day ended. Each section folds, and
+// each row opens to that session's steps, so the recap is also where you log a step or end a session.
 
-const RECAP_CHIPS = { error: "stopped on an error", waiting: "waiting for you", working: "working", quiet: "quiet" };
+const RECAP_CHIPS = { error: "stopped on an error", working: "working", finished: "turn finished", left: "left open" };
 
 // `at` is on the stampMinutes clock: "14:02" today, "Yesterday 14:02" or "12 Nov 14:02" before that.
 function recapWhen(at) {
@@ -1206,7 +1260,7 @@ function recapActions(entry) {
   const canContinue = sessionSource(note) === "opencode" && external && !external.startsWith("batch-") && entry.key !== "working";
   const buttons = [
     canContinue
-      ? `<button type="button" class="btn sm${entry.key === "waiting" || entry.key === "error" ? " primary" : ""}" data-action="vibe-continue" data-path="${esc(note.path)}" title="Send the next prompt to this OpenCode session">${icon("chat", "sm")} Continue</button>`
+      ? `<button type="button" class="btn sm${entry.key === "finished" || entry.key === "error" ? " primary" : ""}" data-action="vibe-continue" data-path="${esc(note.path)}" title="Send the next prompt to this OpenCode session">${icon("chat", "sm")} Continue</button>`
       : "",
     folder
       ? `<button type="button" class="btn sm ghost" data-action="vibe-newchat" data-path="${esc(note.path)}" title="Start a fresh chat in ${esc(folder)}">${icon("plus", "sm")} New chat</button>`
@@ -1215,7 +1269,8 @@ function recapActions(entry) {
   return buttons.length ? `<div class="rc-actions">${buttons.join("")}</div>` : "";
 }
 
-function recapRow(entry) {
+// `alone`: the only live session opens by itself, so its log form is one click away as it always was.
+function recapRow(entry, alone = false) {
   const note = entry.note;
   const live = note.status === "live";
   const group = groupOf(note);
@@ -1228,20 +1283,25 @@ function recapRow(entry) {
     entry.prompts ? plural(entry.prompts, "prompt") : "",
     entry.runs ? `${entry.runs} runs` : "",
   ].filter(Boolean);
+  const slow = live && entry.key === "working" && entry.idle >= QUIET_MIN;
   let when;
-  if (live && entry.key === "working") {
+  if (live && entry.key === "working" && !slow) {
     when = `<span class="sr-only">running for </span><span class="rc-clock" data-started="${esc(String(note.meta.started || ""))}" title="Time since it started">${clockText(liveSeconds(note.meta.started))}</span>`;
   } else if (live) {
-    when = `<span class="rc-when" title="Last activity ${esc(recapWhen(entry.at))}">${entry.key === "quiet" ? "" : `for ${minutesText(entry.idle)} · `}${duration(elapsedMinutes(note))} in</span>`;
+    const since = slow ? `last step ${minutesText(entry.idle)} ago · ` : entry.key === "left" ? "" : `for ${minutesText(entry.idle)} · `;
+    when = `<span class="rc-when" title="Last activity ${esc(recapWhen(entry.at))}">${since}${duration(elapsedMinutes(note))} in</span>`;
   } else {
     when = `<span class="rc-when">ended ${esc(recapWhen(entry.at))} · ${duration(core.sessionMinutes(note))}</span>`;
   }
   const message = entry.message;
   const last = message
-    ? `<p class="rc-last k-${message.kind}${(state.vibeOpenBlocks || {})[`rc-last:${note.path}`] ? " open" : ""}" data-more="${esc(note.path)}" title="Tap to read it all">${message.time ? `<span class="t">${esc(message.time)}</span>` : ""}<span class="kind">${message.kind === "reply" ? "last reply" : message.kind}</span><span class="txt">${esc(message.text)}</span></p>`
+    ? `<p class="rc-last k-${message.kind}${foldOpen(`rc-last:${note.path}`) ? " open" : ""}" data-more="${esc(note.path)}" title="Tap to read it all">${message.time ? `<span class="t">${esc(message.time)}</span>` : ""}<span class="kind">${message.kind === "reply" ? "last reply" : message.kind}</span><span class="txt">${esc(message.text)}</span></p>`
     : "";
-  return `<li class="rc-row s-${entry.key}" data-path="${esc(note.path)}" data-state="${entry.key}">
+  const open = foldOpen(`rc-row:${note.path}`, live && alone);
+  const detail = open ? (live ? liveDetail(note, note.path === liveSession()?.path, liveSessions().length) : endedDetail(note)) : "";
+  return `<li class="rc-row s-${entry.key}${slow ? " slow" : ""}${open ? " open" : ""}" data-path="${esc(note.path)}" data-state="${entry.key}">
       <div class="rc-head">
+        <button type="button" class="rc-toggle" data-action="vibe-row" data-path="${esc(note.path)}" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} the steps of ${esc(note.title)}" title="${open ? "Hide" : "Show"} its steps">${icon("chevron", "sm")}</button>
         <span class="rc-state s-${entry.key}">${esc(entry.label)}</span>
         <a class="rc-title" href="#" data-open="${esc(note.path)}">${esc(note.title)}</a>
         ${when}
@@ -1249,37 +1309,61 @@ function recapRow(entry) {
       ${facts.length ? `<p class="rc-facts">${facts.join(`<span aria-hidden="true"> · </span>`)}</p>` : ""}
       ${last}
       ${recapActions(entry)}
+      ${detail}
     </li>`;
 }
 
-// Rows shown before "N more": waiting and stopped sessions sort first, so the ones that need you stay in view.
+// Rows shown before "N more": stopped sessions sort first, so the ones worth a look stay in view.
 const LIVE_SHOWN = 6;
 const FINISHED_SHOWN = 4;
 
+function recapFold(key, summary, body, fallback = false, section = false) {
+  return `<details class="rc-fold${section ? " rc-section" : ""}" data-block="${key}"${foldOpen(key, fallback) ? " open" : ""}>
+      <summary>${summary}</summary>
+      ${body}
+    </details>`;
+}
+
 function recapBand() {
   const data = recap(state.notes, stamp());
-  const running = data.live.length + data.stale.length;
-  if (!running && !data.finished.length) return "";
   const chips = Object.keys(RECAP_CHIPS)
     .filter((key) => data.counts[key])
     .map((key) => `<span class="rc-chip s-${key}"><b>${data.counts[key]}</b> ${RECAP_CHIPS[key]}</span>`)
     .join("");
-  const staleOpen = Boolean((state.vibeOpenBlocks || {})["rc-stale"]);
+  const alone = data.live.length + data.stale.length === 1;
+  const rows = (entries) => entries.map((entry) => recapRow(entry, alone)).join("");
+  const running = data.live.length
+    ? recapFold(
+        "rc-running",
+        `<span class="rc-sub">Running now</span> <span class="muted small">${plural(data.live.length, "session")}</span>`,
+        `<ol class="rc-rows rc-live" aria-label="In progress">${rows(data.live.slice(0, LIVE_SHOWN))}</ol>
+        ${data.live.length > LIVE_SHOWN
+          ? recapFold("rc-live-more", `${data.live.length - LIVE_SHOWN} more running`, `<ol class="rc-rows rc-live">${rows(data.live.slice(LIVE_SHOWN))}</ol>`)
+          : ""}`,
+        true,
+        true,
+      )
+    : "";
   const stale = data.stale.length
-    ? `<details class="rc-fold" data-block="rc-stale"${staleOpen ? " open" : ""}>
-        <summary>${data.stale.length} quiet for over a day, still marked live</summary>
-        <ol class="rc-rows">${data.stale.map(recapRow).join("")}</ol>
-      </details>`
+    ? recapFold(
+        "rc-stale",
+        `<span class="rc-sub">Left open</span> <span class="muted small">${data.stale.length} with no step for over a day, still marked live</span>`,
+        `<ol class="rc-rows">${rows(data.stale)}</ol>`,
+        false,
+        true,
+      )
     : "";
   const finished = data.finished.length
-    ? `<h3 class="rc-sub">Just finished <span class="muted small">last 24 hours${data.finishedTotal > data.finished.length ? ` · newest ${data.finished.length} of ${data.finishedTotal}` : ""}</span></h3>
-      <ol class="rc-rows rc-finished">${data.finished.slice(0, FINISHED_SHOWN).map(recapRow).join("")}</ol>
-      ${data.finished.length > FINISHED_SHOWN
-        ? `<details class="rc-fold" data-block="rc-finished"${(state.vibeOpenBlocks || {})["rc-finished"] ? " open" : ""}>
-            <summary>${data.finished.length - FINISHED_SHOWN} more finished</summary>
-            <ol class="rc-rows rc-finished">${data.finished.slice(FINISHED_SHOWN).map(recapRow).join("")}</ol>
-          </details>`
-        : ""}`
+    ? recapFold(
+        "rc-finished-all",
+        `<span class="rc-sub">Just finished</span> <span class="muted small">last 24 hours${data.finishedTotal > data.finished.length ? ` · newest ${data.finished.length} of ${data.finishedTotal}` : ` · ${data.finished.length}`}</span>`,
+        `<ol class="rc-rows rc-finished">${rows(data.finished.slice(0, FINISHED_SHOWN))}</ol>
+        ${data.finished.length > FINISHED_SHOWN
+          ? recapFold("rc-finished", `${data.finished.length - FINISHED_SHOWN} more finished`, `<ol class="rc-rows rc-finished">${rows(data.finished.slice(FINISHED_SHOWN))}</ol>`)
+          : ""}`,
+        true,
+        true,
+      )
     : "";
   return `<section class="vibe-recap" aria-label="Live recap">
     <header>
@@ -1287,23 +1371,25 @@ function recapBand() {
       <span class="rc-chips">${chips || `<span class="muted small">Nothing running right now</span>`}</span>
       ${data.tokens ? `<span class="rc-total muted small" title="${data.tokens.toLocaleString()} tokens in and out across the sessions still live">${compact(data.tokens)} tokens in live sessions</span>` : ""}
     </header>
-    ${data.live.length ? `<ol class="rc-rows rc-live" aria-label="In progress">${data.live.slice(0, LIVE_SHOWN).map(recapRow).join("")}</ol>` : ""}
-    ${data.live.length > LIVE_SHOWN
-      ? `<details class="rc-fold" data-block="rc-live-more"${(state.vibeOpenBlocks || {})["rc-live-more"] ? " open" : ""}>
-          <summary>${data.live.length - LIVE_SHOWN} more running</summary>
-          <ol class="rc-rows rc-live">${data.live.slice(LIVE_SHOWN).map(recapRow).join("")}</ol>
-        </details>`
-      : ""}
+    ${data.live.length + data.stale.length ? "" : idleNote()}
+    ${running}
     ${stale}
     ${finished}
   </section>`;
 }
 
+// Models with a token count; one that never returned a token (a failed probe, a mistyped name) is left out
+// as soon as any other model has numbers.
+function shownModels(stats) {
+  return stats.models.some((m) => m.tokens) ? stats.models.filter((m) => m.tokens) : stats.models;
+}
+
 // Tokens and time per model, the heaviest first.
 function modelsBlock(stats) {
-  if (!stats.models.length) return "";
-  const top = Math.max(1, ...stats.models.map((m) => m.tokens));
-  const rows = stats.models
+  const models = shownModels(stats);
+  if (!models.length) return "";
+  const top = Math.max(1, ...models.map((m) => m.tokens));
+  const rows = models
     .map(
       (m) => `<li>
         <span class="mu-name">${esc(m.model)}</span>
@@ -1331,7 +1417,7 @@ function figures(stats) {
   };
   const dash = "–";
   const parallel = stats.parallel && stats.parallel >= 1.1;
-  return `<div class="figures vibe-figures">
+  return `<div class="figures vibe-figures${stats.feedback ? "" : " few"}">
     ${figure(stats.sessions, stats.sessions === 1 ? "session" : "sessions", `${stats.shipped} ${OUTCOMES.shipped} · ${stats.partial} partial · ${stats.dropped} dropped${stats.done ? ` · ${stats.done} with no code change` : ""}`)}
     ${figure(
       duration(stats.minutes),
@@ -1343,12 +1429,8 @@ function figures(stats) {
     ${stats.pass_rate === null
       ? figure(dash, "checks green", "No test runs logged yet. Log one with: cairn vibe check -- <test command>", "no checks logged yet")
       : figure(`${stats.pass_rate}%`, "checks green", `${stats.passed} passed · ${stats.failed} failed`)}
-    ${stats.feedback
-      ? figure(stats.feedback_open, "feedback open", `${stats.feedback} total · ${stats.feedback_addressed} addressed`)
-      : figure(dash, "feedback open", "No feedback yet. Add some with the form below, or feedback: in the capture bar.", "no feedback yet")}
-    ${stats.rating === null
-      ? figure(dash, "avg rating", "No rated feedback yet. Add feedback with a 1-5 rating below.", "no ratings yet")
-      : figure(stats.rating.toFixed(1), "avg rating", "Out of 5")}
+    ${stats.feedback ? figure(stats.feedback_open, "feedback open", `${stats.feedback} total · ${stats.feedback_addressed} addressed`) : ""}
+    ${stats.feedback && stats.rating !== null ? figure(stats.rating.toFixed(1), "avg rating", "Out of 5") : ""}
     ${tokensFigure(stats, figure, dash)}
   </div>`;
 }
@@ -1440,7 +1522,7 @@ function sideBlock(cls, title, meta, body, empty) {
   if (!(empty && narrow)) {
     return `<section class="column-block ${cls}"><header><h2>${title}</h2><span class="muted small">${meta}</span></header>${body}</section>`;
   }
-  const open = Boolean((state.vibeOpenBlocks || {})[cls]);
+  const open = foldOpen(cls);
   return `<details class="column-block ${cls} vibe-fold" data-block="${cls}"${open ? " open" : ""}>
     <summary><h2>${title}</h2><span class="muted small">${meta}</span></summary>
     ${body}
@@ -1627,44 +1709,45 @@ export function vibeView() {
     .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || String(b.meta.created || "").localeCompare(String(a.meta.created || "")) || b.mtime - a.mtime);
   const head = pageHead(
     "Vibe",
-    "Live progress of your AI coding sessions, what came out of them, and what people said about it. Every session and every piece of feedback is a Markdown file in <code>brain/</code>.",
+    "Live progress of your AI coding sessions and what came out of them. Every session is a Markdown file in <code>brain/</code>.",
     `${stats.sessions ? `<button class="btn" data-action="vibe-share" title="Your last 14 days as a picture to post">${icon("external")} Share stats</button>` : ""}
     <button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("play")} ${liveSession() ? "Start another" : "Start session"}</button>`,
   );
   const live = liveSessions();
-  setLiveCount(live.length);
   const running = recap(state.notes, stamp());
   const reading = machine();
   const [minutes] = githubUsage(state.notes);
-  const agents = liveGroups(live).map((group) => `${group.label} ${group.notes.length}`).join(" · ");
   const blocks = {
     recap: {
       html: recapBand(),
-      summary: Object.keys(RECAP_CHIPS).filter((key) => running.counts[key]).map((key) => `${running.counts[key]} ${RECAP_CHIPS[key]}`).join(" · ") || "nothing running",
+      summary: Object.keys(RECAP_CHIPS).filter((key) => running.counts[key]).map((key) => `${running.counts[key]} ${RECAP_CHIPS[key]}`).join(" · ") || `nothing running${running.finishedTotal ? ` · ${running.finishedTotal} finished in the last day` : ""}`,
     },
     machine: { html: machineStrip(), summary: reading ? `${EFFORT_LABEL[reading.level]} load · CPU ${reading.cpu_pct ?? "?"}% · memory ${reading.ram_pct ?? "?"}%` : "" },
     github: { html: githubStrip(), summary: minutes ? `${thousands(minutes.used)} of ${thousands(minutes.limit)} free minutes · ${minutes.pct}%` : "" },
     overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
-    live: { html: liveCards(), summary: live.length ? `${live.length} live${agents && liveGroups(live).length > 1 ? ` · ${agents}` : ""}` : "nothing live" },
     figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },
     activity: { html: activity(stats, sessions), summary: "sessions per day" },
     sessions: { html: sessionsBlock(sessions, stats), summary: plural(sessions.length, "session") },
+    // Feedback is a block only once the brain holds some (`fb: …` in the capture bar or `cairn feedback` adds the first).
     feedback: {
-      html: sideBlock(
-        "vibe-feedback",
-        "Feedback",
-        feedback.length ? `${stats.feedback_open} open · ${stats.feedback_addressed} addressed` : "none yet",
-        `${ratingSummary(stats)}
+      html: feedback.length
+        ? sideBlock(
+            "vibe-feedback",
+            "Feedback",
+            `${stats.feedback_open} open · ${stats.feedback_addressed} addressed`,
+            `${ratingSummary(stats)}
         ${feedbackForm(sessions)}
-        ${feedback.length ? `<div class="fb-list">${feedback.slice(0, 40).map(feedbackRow).join("")}</div>` : `<p class="empty">No feedback yet. Capture it here, with <code>feedback:</code> in the bar above, or <code>cairn feedback "…" --rating 4</code>.</p>`}`,
-        !feedback.length,
-      ),
-      summary: feedback.length ? `${stats.feedback_open} open · ${stats.feedback_addressed} addressed` : "none yet",
+        <div class="fb-list">${feedback.slice(0, 40).map(feedbackRow).join("")}</div>`,
+            false,
+          )
+        : "",
+      summary: `${stats.feedback_open} open · ${stats.feedback_addressed} addressed`,
     },
     skills: { html: skillsBlock(stats), summary: plural(Object.values(stats.skills).reduce((total, count) => total + count, 0), "run") },
-    models: { html: modelsBlock(stats), summary: plural(stats.models.length, "model") },
+    models: { html: modelsBlock(stats), summary: plural(shownModels(stats).length, "model") },
+    // The setup hint for a brain with no session yet; once sessions arrive on their own it has done its job.
     hook: {
-      html: readOnly() ? "" : `<section class="callout vibe-hook">${icon("terminal")}<div>
+      html: readOnly() || sessions.length ? "" : `<section class="callout vibe-hook">${icon("terminal")}<div>
       <p><strong>Let your assistant report its own progress.</strong> Paste this into <code>AGENTS.md</code>, <code>CLAUDE.md</code> or <code>.github/copilot-instructions.md</code>; every step lands in the live session above.</p>
       <pre class="pre-box">${esc(AGENT_HOOK)}</pre>
       <button class="btn sm" data-action="vibe-copy-hook">${icon("copy", "sm")} Copy instructions</button>
@@ -1673,8 +1756,5 @@ export function vibeView() {
     },
   };
   return `${head}
-    <div class="vibe-board">${panelsHtml(blocks)}</div>
-    ${readOnly() ? "" : `<p class="vibe-layout-note muted small">Fold a block with its arrow, move it with ↑ ↓ or drag ⋮⋮. ${
-      fileByPath(LAYOUT_FILE) ? `The layout is kept in <code>${LAYOUT_FILE}</code>, so every device shows the same.` : "Your layout is saved to the brain, so every device shows the same."
-    } <button type="button" class="btn sm ghost" data-action="vibe-layout-reset">Reset layout</button></p>`}`;
+    ${boardHtml("vibe", blocks)}`;
 }
