@@ -1,4 +1,5 @@
 // The main views (Today, Ideas, Board, Decisions, Notes, Journal, Code inbox, Context pack) and board drag and drop.
+// The sidebar holds five hubs (Today, Chat, Map, Build, People); Notes, Code inbox and Context pack sit under Tools.
 
 import * as core from "./core.js";
 import { renderMarkdown, escapeHtml as esc } from "./md.js";

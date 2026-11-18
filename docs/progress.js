@@ -267,6 +267,7 @@ export function githubBudget(reading, nowMs = Date.now()) {
 // ------------------------------------------------------------ which AI ran a session
 
 const AGENT_LABELS = {
+  openbot: "OpenBot",
   opencode: "OpenCode",
   vector: "Vector",
   codex: "Codex",
@@ -278,12 +279,23 @@ const AGENT_LABELS = {
   gemini: "Gemini",
 };
 
+// A bot that drives OpenCode from its own workspace (…/openbot-pegaai-bridge/workspace) is its own group,
+// so its runs do not hide among the sessions you opened in OpenCode yourself. The watcher files those under
+// "opencode", which is the engine; any other agent name is what the session called itself and stays.
+function botOf(meta, agent) {
+  if (agent && agent !== "opencode") return "";
+  const folder = typeof meta?.folder === "string" ? meta.folder.toLowerCase() : "";
+  return folder.split(/[\\/]+/).some((part) => part.startsWith("openbot")) ? "openbot" : "";
+}
+
 /**
- * The AI a session belongs to, for grouping: the agent it names, else the source that wrote the note.
- * Spelling and case do not split a group ("Vector" and "vector" are one); no name at all is "Other".
+ * The AI a session belongs to, for grouping: the agent it names, else the bot whose workspace it ran in,
+ * else the source that wrote the note. Spelling and case do not split a group ("Vector" and "vector" are
+ * one); no name at all is "Other".
  */
 export function agentGroup(meta) {
-  const name = String(meta?.agent || meta?.source || "").trim().toLowerCase();
+  const agent = String(meta?.agent || "").trim().toLowerCase();
+  const name = botOf(meta, agent) || agent || String(meta?.source || "").trim().toLowerCase();
   if (!name || name === "logged") return { key: "other", label: "Other" };
   const label = AGENT_LABELS[name] || name.replace(/^./, (letter) => letter.toUpperCase());
   const key = label === "Claude Code" ? "claude" : name;

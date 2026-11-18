@@ -21,15 +21,15 @@ VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canv
 # The sidebar has one entry per hub; a hub with several pages shows them as tabs (docs/state.js HUBS).
 HUBS = {
     "today": ["home", "board", "ideas", "decisions"],
-    "chat": ["chat", "glow"],
-    "notes": ["notes", "journal"],
+    "chat": ["chat", "glow", "autopilot"],
     "map": ["map", "canvas"],
-    "build": ["vibe", "projects", "autopilot", "code"],
+    "build": ["vibe", "projects", "journal"],
     "people": ["people", "proof"],
 }
 # Pages with no sidebar entry: Ctrl+K (and the puzzle button in the sidebar foot) open them, as tabs of one strip.
+# All notes and the Code inbox are there too: the assistants use them more than you do.
 HIDDEN_HUBS = {
-    "tools": ["context", "obsidian", "plugins"],
+    "tools": ["notes", "code", "context", "obsidian", "plugins"],
 }
 
 
@@ -37,8 +37,8 @@ HIDDEN_HUBS = {
 # whatever today's date is (a dated page never overwrites the fixed sample journal page).
 DEMO_NOTES = 27
 
-# Sessions in every state the Vibe recap tells apart: working, waiting, stopped on an error, quiet,
-# quiet for days, and two that ended (one shipped, one cut off mid-turn).
+# Sessions in every state the Vibe recap tells apart: working, turn finished, stopped on an error, working but
+# slow to log, left open for days, and two that ended (one shipped, one cut off mid-turn).
 RECAP_SEED = """() => {
   const s = window.cairn.state;
   const core = window.cairn.core;
@@ -61,7 +61,7 @@ RECAP_SEED = """() => {
   note("c-error", { title: "Import the Obsidian vault", type: "session", status: "live", started: at(130), source: "opencode", external: "ses_error1", folder: "E:/Projects/trailmix", model: "Pega-Chat", tokens: 220100, prompts: 2, turn: "failed", turn_at: at(31) },
     [`- ${hm(130)} start: Import the Obsidian vault`, `- ${hm(31)} fail: provider error · context length exceeded`]);
   note("d-quiet", { title: "Tolerance stack for the O-ring", type: "session", status: "live", started: at(200), agent: "Vector" },
-    [`- ${hm(200)} start: Tolerance stack for the O-ring`, `- ${hm(75)} step: wrote the loop items from the 2D FAI`]);
+    [`- ${hm(200)} start: Tolerance stack for the O-ring`, `- ${hm(75)} note: wrote the loop items from the 2D FAI`]);
   note("e-stale", { title: "Old experiment nobody closed", type: "session", status: "live", started: at(4000) },
     [`- ${hm(4000)} start: Old experiment nobody closed`]);
   note("f-shipped", { title: "Share card for weekly stats", type: "session", status: "shipped", started: at(400), ended: at(310), source: "opencode", external: "ses_done1", folder: "E:/Projects/cairn", model: "Pega-Coding", tokens: 5300000, prompts: 11, turn: "done", turn_at: at(310), commits: 3 },
@@ -69,6 +69,21 @@ RECAP_SEED = """() => {
   note("g-cut", { title: "Leaderboard query", type: "session", status: "done", started: at(600), ended: at(560), source: "opencode", external: "ses_cut1", folder: "E:/Projects/cairn", model: "Pega-Thinking", tokens: 480000, prompts: 3, turn: "working", turn_at: at(560) },
     [`- ${hm(600)} start: Leaderboard query`, `- ${hm(565)} prompt: rank by tokens, hours and streak`]);
   s.notes = s.files.map((f) => core.noteFromFile(f.path, f.text, f.mtime));
+  window.cairn.rerender();
+}"""
+
+# One running session of the OpenBot bridge: OpenCode is the engine, the bot's workspace is the folder.
+OPENBOT_SEED = """() => {
+  const s = window.cairn.state;
+  const pad = (n) => String(n).padStart(2, "0");
+  const d = new Date(Date.now() - 120000);
+  const at = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const meta = { title: "team-eval-7", type: "session", status: "live", started: at, source: "opencode", agent: "opencode", external: "ses_bot1",
+    folder: "C:/Users/me/openbot-pegaai-bridge/workspace", turn: "working", turn_at: at };
+  const head = Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join("\\n");
+  const text = `---\\n${head}\\n---\\n\\n## Log\\n\\n- ${at.slice(11)} start: team-eval-7\\n`;
+  s.files.push({ path: "sessions/h-openbot.md", text, mtime: Date.now() });
+  s.notes = s.files.map((f) => window.cairn.core.noteFromFile(f.path, f.text, f.mtime));
   window.cairn.rerender();
 }"""
 
@@ -235,10 +250,10 @@ class EndToEndTests(unittest.TestCase):
             tab: document.querySelector('.hub-tabs [aria-current="page"]')?.dataset.go ?? null,
         })""")
 
-    def test_sidebar_has_six_entries_and_no_group_labels(self):
+    def test_sidebar_has_five_entries_and_no_group_labels(self):
         page = self.open()
         entries = page.eval_on_selector_all("#nav button", "els => els.map((e) => e.querySelector('span').textContent)")
-        self.assertEqual(entries, ["Today", "Chat", "Notes", "Map", "Build", "People"])
+        self.assertEqual(entries, ["Today", "Chat", "Map", "Build", "People"])
         self.assertEqual(page.locator("#nav .nav-label").count(), 0)
         self.assertEqual(page.eval_on_selector_all("#nav button", "els => els.map((e) => e.dataset.hub)"), list(HUBS))
         self.assertEqual(self.errors, [])
@@ -258,10 +273,10 @@ class EndToEndTests(unittest.TestCase):
 
     def test_a_sidebar_entry_reopens_the_tab_used_last(self):
         page = self.open()
-        self.assertEqual(page.get_attribute('#nav [data-hub="notes"]', "data-go"), "notes")
+        self.assertEqual(page.get_attribute('#nav [data-hub="build"]', "data-go"), "vibe")
         self.go(page, "journal")
         self.go(page, "home")
-        page.click('#nav [data-hub="notes"]')
+        page.click('#nav [data-hub="build"]')
         page.wait_for_function("() => window.cairn.state.view === 'journal'")
         self.assertEqual(self.nav_state(page)["tab"], "journal")
         # It is remembered in this browser, so it is still the choice after a reload.
@@ -269,7 +284,7 @@ class EndToEndTests(unittest.TestCase):
         page.reload()
         page.wait_for_selector("#nav button")
         self.assertEqual(page.evaluate("() => window.cairn.state.view"), "home")
-        self.assertEqual(page.get_attribute('#nav [data-hub="notes"]', "data-go"), "journal")
+        self.assertEqual(page.get_attribute('#nav [data-hub="build"]', "data-go"), "journal")
         self.assertEqual(self.errors, [])
 
     def test_sidebar_entries_and_tabs_are_buttons_that_keep_the_keyboard_focus(self):
@@ -280,12 +295,12 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_function("() => window.cairn.state.view === 'ideas'")
         focused = page.evaluate("() => [document.activeElement.className, document.activeElement.dataset.go]")
         self.assertEqual(focused, ["hub-tab active", "ideas"])
-        page.focus('#nav [data-hub="notes"]')
+        page.focus('#nav [data-hub="map"]')
         page.keyboard.press("Enter")
-        page.wait_for_function("() => window.cairn.state.view === 'notes'")
-        self.assertEqual(page.evaluate("() => document.activeElement.dataset.hub"), "notes")
+        page.wait_for_function("() => window.cairn.state.view === 'map'")
+        self.assertEqual(page.evaluate("() => document.activeElement.dataset.hub"), "map")
         reachable = page.eval_on_selector_all("#nav button, .hub-tabs .hub-tab", "els => els.map((e) => e.tagName === 'BUTTON' && e.tabIndex === 0)")
-        self.assertEqual(reachable, [True] * 8)
+        self.assertEqual(reachable, [True] * 7)
         self.assertEqual(self.errors, [])
 
     def test_tabs_fit_a_phone_and_the_drawer_closes_after_a_choice(self):
@@ -299,9 +314,15 @@ class EndToEndTests(unittest.TestCase):
             self.assertLessEqual(strip["x"] + strip["width"], 390, view)
             self.assertTrue(page.is_visible(f'.hub-tabs [data-go="{view}"]'), view)
         page.click("#menu-btn")
-        page.click('#nav [data-hub="notes"]')
-        page.wait_for_function("() => window.cairn.state.view === 'notes'")
+        page.click('#nav [data-hub="map"]')
+        page.wait_for_function("() => window.cairn.state.view === 'map'")
         self.assertFalse(page.evaluate("() => document.querySelector('#app').classList.contains('nav-open')"))
+        # Opened and not used: a tap anywhere on the page closes it again, and the page under it stays put.
+        page.click("#menu-btn")
+        page.wait_for_function("() => document.querySelector('#app').classList.contains('nav-open')")
+        page.mouse.click(370, 600)
+        page.wait_for_function("() => !document.querySelector('#app').classList.contains('nav-open')")
+        self.assertEqual(page.evaluate("() => window.cairn.state.view"), "map")
         self.assertEqual(self.errors, [])
 
     def test_palette_reaches_every_page_and_lands_inside_its_hub(self):
@@ -324,11 +345,18 @@ class EndToEndTests(unittest.TestCase):
     def test_vibe_session_feedback_and_stats(self):
         page = self.open()
         self.go(page, "vibe")
-        self.assertIn("Nothing live", page.inner_text(".vibe-live"))
+        self.assertIn("Nothing live", page.inner_text(".vibe-live.idle"))
+        # Blocks with nothing in them stay off the page: no feedback yet, so no Feedback block and no rating figures.
+        self.assertEqual(page.locator('.vibe-panel[data-panel="feedback"]').count(), 0)
+        self.assertNotIn("feedback", page.inner_text(".vibe-figures"))
         page.click('[data-action="vibe-start"]')
         page.fill(".modal input", "Add dark mode")
         page.click('.modal button[type="submit"]')
-        page.wait_for_selector(".vibe-live h2")
+        # The session you start is a row of the live recap, opened to its log form. There is no second card.
+        page.wait_for_selector(".rc-row.open .vibe-log-form")
+        self.assertEqual(page.locator(".vibe-live").count(), 1)
+        self.assertEqual(page.locator('.vibe-panel[data-panel="live"]').count(), 0)
+        self.assertEqual(page.locator('.vibe-panel[data-panel="hook"]').count(), 0, "the setup hint goes once a session exists")
         self.assertEqual(page.inner_text('#nav [data-views~="vibe"] .count'), "live")
         path = page.evaluate("window.cairn.state.notes.find((n) => n.type === 'session').path")
         self.assertRegex(path, r"^sessions/\d{4}-\d{2}-\d{2}-add-dark-mode\.md$")
@@ -339,6 +367,10 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_function("(p) => window.cairn.state.files.find((f) => f.path === p).text.includes('pass: pytest: 12 passed')", arg=path)
         self.assertIn("pytest: 12 passed", page.inner_text(".vibe-log"))
 
+        # The first piece of feedback comes from the capture bar; from then on the Feedback block is there.
+        page.fill("#capture-input", "fb: first impression is good")
+        page.press("#capture-input", "Enter")
+        page.wait_for_selector("#fb-form")
         page.fill("#fb-text", "The toggle is hard to find")
         page.select_option("#fb-form select[name=rating]", "3")
         page.fill("#fb-form input[name=from]", "@alice")
@@ -371,9 +403,19 @@ class EndToEndTests(unittest.TestCase):
             page.fill(".modal input", title)
             page.click('.modal button[type="submit"]')
             page.wait_for_function("(t) => window.cairn.state.notes.some((n) => n.type === 'session' && n.title === t)", arg=title)
-        page.wait_for_function("() => document.querySelectorAll('.vibe-live').length === 2")
+        page.wait_for_function("() => document.querySelectorAll('.rc-row.open > .vibe-live').length === 2")
         self.assertEqual(page.inner_text('#nav [data-views~="vibe"] .count'), "2 live")
-        self.assertIn("Share link", page.inner_text(".vibe-live >> nth=0"))  # newest first
+        titles = page.eval_on_selector_all(".rc-live > .rc-row .rc-title", "els => els.map((e) => e.innerText.trim())")
+        self.assertEqual(sorted(titles), ["Map tiles", "Share link"])
+        # A row folds to its one-line summary and opens again from the same button.
+        newest = page.evaluate("window.cairn.state.notes.find((n) => n.title === 'Share link').path")
+        toggle = f'.rc-toggle[data-path="{newest}"]'
+        page.click(toggle)
+        page.wait_for_function("() => document.querySelectorAll('.rc-row.open').length === 1")
+        self.assertEqual(page.get_attribute(toggle, "aria-expanded"), "false")
+        self.assertEqual(page.evaluate("() => document.activeElement.className"), "rc-toggle")
+        page.click(toggle)
+        page.wait_for_function("() => document.querySelectorAll('.rc-row.open').length === 2")
 
         # A note that starts with a slash command is logged as a skill run, on the session whose form was used.
         older = page.evaluate("window.cairn.state.notes.find((n) => n.title === 'Map tiles').path")
@@ -411,8 +453,10 @@ class EndToEndTests(unittest.TestCase):
         self.sample_week(page)
         order = lambda: page.eval_on_selector_all(".vibe-panel", "els => els.map((e) => e.dataset.panel)")
         folded = lambda: page.eval_on_selector_all(".vibe-panel.folded", "els => els.map((e) => e.dataset.panel)")
-        self.assertEqual(order()[-1], "hook")
-        self.assertEqual(folded(), ["hook"], "with a few sessions live only the agent hook starts folded")
+        self.assertEqual(order()[0], "recap")
+        self.assertNotIn("hook", order())
+        self.assertNotIn("live", order())
+        self.assertEqual(folded(), [], "every block that has something to show starts open")
 
         # Fold: the block keeps one line with a summary and no body.
         page.click('.vp-toggle[data-panel="overview"]')
@@ -454,15 +498,15 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(order()[0], "feedback")
         self.assertIn("overview", folded())
 
-        # A lane jump opens folded live cards for this visit only; the saved layout keeps them folded.
+        # A lane jump opens a folded live recap for this visit only; the saved layout keeps it folded.
         page.click('[data-action="vibe-layout-reset"]')
-        page.wait_for_function("() => document.querySelector('.vibe-panel:last-child').dataset.panel === 'hook'")
-        self.start_session(page, "Layout check")
-        page.click('.vp-toggle[data-panel="live"]')
-        page.wait_for_selector('.vibe-panel.folded[data-panel="live"]')
+        page.wait_for_function("() => document.querySelector('.vibe-panel').dataset.panel === 'recap'")
+        path = self.start_session(page, "Layout check")
+        page.click('.vp-toggle[data-panel="recap"]')
+        page.wait_for_selector('.vibe-panel.folded[data-panel="recap"]')
         page.click(".ov-lane [data-action=vibe-lane]")
-        page.wait_for_selector('.vibe-panel[data-panel="live"]:not(.folded) .vibe-live')
-        page.wait_for_function("() => /vibe-folded: .*live/.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        page.wait_for_selector(f'.vibe-panel[data-panel="recap"]:not(.folded) .rc-row.open[data-path="{path}"] .vibe-live')
+        page.wait_for_function("() => /vibe-folded: .*recap/.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
         self.assertEqual(self.errors, [])
 
     def test_vibe_outcome_chips_and_folding_days(self):
@@ -470,8 +514,8 @@ class EndToEndTests(unittest.TestCase):
         self.go(page, "vibe")
         figures = page.inner_text(".vibe-figures")
         self.assertIn("no checks logged yet", figures)  # a dash always says why
-        self.assertIn("no ratings yet", figures)
-        self.assertIn("no feedback yet", figures)
+        self.assertNotIn("rating", figures)  # figures with nothing behind them are left out
+        self.assertNotIn("feedback", figures)
         tile = page.locator('.vibe-figures [data-action="vibe-why"]').first
         tile.click()  # a tap shows the same explanation the hover tooltip gives
         page.wait_for_selector(".vibe-figures .figure.open .why")
@@ -644,9 +688,9 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(page.locator(f"{lane}.ov-stepped").count(), 1)
         self.assertTrue(page.evaluate("window.__sameLoad"))
 
-        # The step line jumps down to that session's own card.
+        # The step line jumps to that session's own row in the live recap, opened to its steps.
         page.click(f"{lane} .ov-lane-log")
-        page.wait_for_function("() => Boolean(document.activeElement.closest('.vibe-live'))")
+        page.wait_for_function("(p) => document.activeElement.closest('.rc-row.open')?.dataset.path === p", arg=path)
 
         # Ending it moves it from live to shipped.
         page.click(f'[data-action="vibe-end"][data-result="shipped"][data-path="{path}"]')
@@ -761,26 +805,59 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector(".vibe-recap .rc-row")
 
         states = page.eval_on_selector_all(".rc-live > .rc-row", "nodes => nodes.map((n) => n.dataset.state)")
-        self.assertEqual(states, ["error", "waiting", "working", "quiet"])  # what needs you comes first
+        self.assertEqual(states, ["error", "working", "working", "finished"])  # what stopped comes first
         chips = page.eval_on_selector_all(".rc-chip", "nodes => nodes.map((n) => n.textContent.replace(/\\s+/g, ' ').trim())")
-        self.assertEqual(chips, ["1 stopped on an error", "1 waiting for you", "1 working", "2 quiet"])
+        self.assertEqual(chips, ["1 stopped on an error", "2 working", "1 turn finished", "1 left open"])
+        # Sessions run on their own: nothing on the page says one is waiting for you, or calls a running one quiet.
+        band = page.inner_text(".vibe-recap").lower()
+        self.assertNotIn("waiting", band)
+        self.assertNotIn("quiet", band)
         working = '.rc-row[data-path="sessions/a-working.md"]'
         waiting = '.rc-row[data-path="sessions/b-waiting.md"]'
+        slow = '.rc-row[data-path="sessions/d-quiet.md"]'
+        self.assertEqual(page.inner_text(f"{slow} .rc-state"), "Working")
+        self.assertIn("last step 1h 15m ago", page.inner_text(f"{slow} .rc-when"))
         self.assertEqual(page.inner_text(f"{working} .rc-state"), "Working")
         self.assertEqual(page.inner_text(f"{working} .rc-model"), "Pega-Coding")
         self.assertEqual(page.inner_text(f"{working} .rc-effort"), "high effort")
         self.assertEqual(page.inner_text(f"{working} .rc-tokens"), "1.8M tokens")
-        self.assertEqual(page.inner_text(f"{waiting} .rc-state"), "Waiting for you")
+        self.assertEqual(page.inner_text(f"{waiting} .rc-state"), "Turn finished")
         self.assertIn("backs off 2, 4, 8 seconds", page.inner_text(f"{waiting} .rc-last.k-reply"))
         self.assertIn("context length exceeded", page.inner_text('.rc-row[data-state="error"] .rc-last'))
         self.assertIn("tokens in live sessions", page.inner_text(".vibe-recap > header"))
 
         # A session nobody closed is folded away, not mixed in with the ones that are running.
-        self.assertEqual(page.locator("details.rc-fold .rc-row").count(), 1)
+        self.assertEqual(page.locator('details[data-block="rc-stale"] .rc-row').count(), 1)
         self.assertFalse(page.is_visible('.rc-row[data-path="sessions/e-stale.md"]'))
         finished = page.eval_on_selector_all(".rc-finished .rc-state", "nodes => nodes.map((n) => n.innerText.trim())")
         self.assertEqual(finished, ["Shipped", "Stopped mid-turn"])
         self.assertIn("share sheet opens on the phone", page.inner_text('.rc-row[data-path="sessions/f-shipped.md"] .rc-last'))
+
+        # Every part of the recap folds, and a fold is still how you left it after a reload.
+        sections = page.eval_on_selector_all(".vibe-recap > details.rc-section", "nodes => nodes.map((n) => [n.dataset.block, n.open])")
+        self.assertEqual(sections, [["rc-running", True], ["rc-stale", False], ["rc-finished-all", True]])
+        page.click('details[data-block="rc-finished-all"] > summary')
+        page.wait_for_function("() => !document.querySelector('details[data-block=\"rc-finished-all\"]').open")
+        self.assertFalse(page.is_visible('.rc-row[data-path="sessions/f-shipped.md"]'))
+        self.assertEqual(page.evaluate("() => JSON.parse(localStorage.getItem('cairn.vibeFolds'))['rc-finished-all']"), False)
+        page.evaluate("window.cairn.rerender()")
+        self.assertFalse(page.evaluate("() => document.querySelector('details[data-block=\"rc-finished-all\"]').open"))
+        page.click('details[data-block="rc-finished-all"] > summary')
+        page.wait_for_function("() => document.querySelector('details[data-block=\"rc-finished-all\"]').open")
+        # A finished session opens to its last steps too.
+        page.click('.rc-toggle[data-path="sessions/f-shipped.md"]')
+        page.wait_for_selector('.rc-row.open[data-path="sessions/f-shipped.md"] .rc-detail')
+        page.click('.rc-toggle[data-path="sessions/f-shipped.md"]')
+        page.wait_for_selector('.rc-row[data-path="sessions/f-shipped.md"] .rc-detail', state="detached")
+
+        # The overview folds per assistant, and the bridge's own OpenCode sessions get their own name.
+        agents = page.eval_on_selector_all("details.ov-agent", "nodes => nodes.map((n) => [n.dataset.block, n.open])")
+        self.assertIn(["ov-agent:opencode", True], agents)
+        self.assertIn(["ov-agent:vector", True], agents)
+        page.click('details[data-block="ov-agent:opencode"] > summary')
+        page.wait_for_function("() => !document.querySelector('details[data-block=\"ov-agent:opencode\"]').open")
+        page.click('details[data-block="ov-agent:opencode"] > summary')
+        page.wait_for_function("() => document.querySelector('details[data-block=\"ov-agent:opencode\"]').open")
 
         # No PC to talk to: nothing to press. With one: continue what stopped, never what is still working.
         self.assertEqual(page.locator(".rc-actions").count(), 0)
@@ -812,6 +889,13 @@ class EndToEndTests(unittest.TestCase):
         page.press("#chat-input", "Enter")
         page.wait_for_function("() => window.__sent.length === 2")
         self.assertNotIn("about", page.evaluate("window.__sent[1]"))
+
+        # What a bot runs through OpenCode from its own workspace is listed under the bot, not under OpenCode.
+        self.go(page, "vibe")
+        page.evaluate(OPENBOT_SEED)
+        page.wait_for_selector('details[data-block="ov-agent:openbot"]')
+        self.assertEqual(page.inner_text('details[data-block="ov-agent:openbot"] .ov-agent-name'), "OpenBot")
+        self.assertIn("OpenBot", page.inner_text('.rc-row[data-path="sessions/h-openbot.md"] .rc-facts'))
         self.assertEqual(self.errors, [])
 
     def test_vibe_share_card_is_drawn_from_totals_and_names_the_model_only_when_asked(self):
@@ -924,13 +1008,14 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector(".vibe-figures")
         overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
         self.assertLessEqual(overflow, 0)
-        fold = page.locator("details.vibe-feedback")
-        self.assertEqual(fold.count(), 1, "empty feedback folds to one line on a phone")
-        self.assertFalse(page.is_visible("#fb-text"))
-        page.click("details.vibe-feedback > summary")
-        page.wait_for_selector("#fb-text", state="visible")
+        self.assertEqual(page.locator(".vibe-feedback").count(), 0, "no feedback yet, so no Feedback block")
+        fold = page.locator("details.vibe-skills")
+        self.assertEqual(fold.count(), 1, "an empty block folds to one line on a phone")
+        self.assertFalse(page.evaluate("() => document.querySelector('details.vibe-skills').open"))
+        page.click("details.vibe-skills > summary")
+        page.wait_for_function("() => document.querySelector('details.vibe-skills').open")
         page.evaluate("window.cairn.rerender()")
-        self.assertTrue(page.is_visible("#fb-text"), "an opened block stays open when the view re-renders")
+        self.assertTrue(page.evaluate("() => document.querySelector('details.vibe-skills').open"), "an opened block stays open when the view re-renders")
         self.assertEqual(self.errors, [])
 
     def test_capture_routes_to_task_with_tags(self):
@@ -1669,6 +1754,59 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("Shipped offline maps", card)
         self.assertIn("Private", card)
         self.assertIn("Not checked", card)
+        self.assertEqual(self.errors, [])
+
+    def test_people_and_proof_are_blocks_with_a_dashboard_and_a_recap(self):
+        page = self.open()
+        panels = lambda name: page.eval_on_selector_all(f'.vibe-board[data-page="{name}"] .vibe-panel', "els => els.map((e) => e.dataset.panel)")
+        folded = lambda name: page.eval_on_selector_all(f'.vibe-board[data-page="{name}"] .vibe-panel.folded', "els => els.map((e) => e.dataset.panel)")
+        layout = lambda: self.note_text(page, "CAIRN-LAYOUT.md") or ""
+
+        # Arrange Vibe first, so the file already holds another page's lines.
+        self.go(page, "vibe")
+        self.sample_week(page)
+        page.click('.vp-toggle[data-panel="overview"]')
+        page.wait_for_function("() => /^vibe-folded: .*overview/m.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+
+        # People: dashboard and recap lead, the rest keeps its order, publishing help starts folded.
+        self.go(page, "people")
+        page.wait_for_selector('.vibe-board[data-page="people"] .vibe-panel')
+        self.assertEqual(panels("people"), ["dashboard", "recap", "mine", "leaderboard", "discover", "publish"])
+        self.assertEqual(folded("people"), ["publish"])
+        self.assertGreaterEqual(page.locator('[data-page="people"][data-panel="dashboard"] .figure').count(), 4)
+        self.assertEqual(page.locator('[data-page="people"][data-panel="recap"] .vp-body').count(), 1)
+        self.assertEqual(page.locator("#people-form").count(), 1, "the look-up box stays above the blocks")
+        page.click('.vp-move[data-page="people"][data-panel="leaderboard"][data-step="-1"]')
+        page.wait_for_function("() => /^people-order: dashboard, recap, (profile, )?leaderboard, (profile, )?mine/m.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        self.assertRegex(layout(), r"(?m)^vibe-folded: .*overview", "arranging one page keeps the others")
+        self.assertEqual(panels("people")[:4], ["dashboard", "recap", "leaderboard", "mine"])
+
+        # Proof: the dashboard and the recap are there before the first claim.
+        self.go(page, "proof")
+        self.assertEqual(panels("proof"), ["dashboard", "recap", "claims", "publish"])
+        self.assertEqual(folded("proof"), [])
+        self.assertIn("No claims yet", page.inner_text('[data-page="proof"][data-panel="recap"]'))
+        self.assertTrue(page.inner_text('[data-page="proof"][data-panel="dashboard"] .figure').startswith("0"))
+        page.click('[data-action="new-claim"]')
+        page.fill(".modal input", "Shipped offline maps")
+        page.click(".modal button[type=submit]")
+        page.wait_for_selector(".drawer")
+        page.keyboard.press("Escape")
+        self.go(page, "proof")
+        self.assertIn("Shipped offline maps has no evidence links yet", page.inner_text('[data-page="proof"][data-panel="recap"]'))
+        self.assertTrue(page.inner_text('[data-page="proof"][data-panel="dashboard"] .figure').startswith("1"))
+        page.click('.vp-toggle[data-page="proof"][data-panel="claims"]')
+        page.wait_for_selector('.vibe-panel.folded[data-page="proof"][data-panel="claims"]')
+        self.assertEqual(page.locator(".claim").count(), 0)
+        page.wait_for_function("() => /^proof-folded: claims$/m.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        self.assertRegex(layout(), r"(?m)^people-order: ")
+        self.assertRegex(layout(), r"(?m)^vibe-folded: .*overview")
+
+        # Reset is per page: Proof goes back, People keeps what was arranged.
+        page.click('[data-action="vibe-layout-reset"][data-page="proof"]')
+        page.wait_for_selector('.vibe-panel[data-page="proof"][data-panel="claims"]:not(.folded)')
+        self.go(page, "people")
+        self.assertEqual(panels("people")[:4], ["dashboard", "recap", "leaderboard", "mine"])
         self.assertEqual(self.errors, [])
 
     def test_proof_view_of_someone_elses_brain_checks_itself(self):

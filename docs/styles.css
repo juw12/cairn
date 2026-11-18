@@ -1524,6 +1524,7 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .commit-list .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .commit-list .churn { font-family: var(--mono); font-size: 12px; }
 .vibe-figures { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+@media (min-width: 1101px) { .vibe-figures.few { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 .vibe-figures .figure .value { font-size: 34px; }
 .column-block > header .small { font-weight: 400; }
 .vibe-activity svg { display: block; width: 100%; height: 90px; }
@@ -1946,14 +1947,13 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .ov-more { margin: 6px 0 0; }
 /* what is running, one block per AI */
 .ov-agent { margin-top: 16px; }
-.ov-agent > h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; font-size: 13px; font-weight: 600; }
+.ov-agent > summary { cursor: pointer; }
+.ov-agent > summary > h3 { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; font-size: 13px; font-weight: 600; }
 .ov-agent-count, .ov-agent-old { font-size: 12.5px; font-weight: 400; color: var(--muted); }
 .ov-agent .ov-lanes { margin-top: 6px; }
 .ov-stale { flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .ov-lane.stale .ov-pulse { animation: none; background: var(--line-strong); }
 .ov-lane.stale .ov-clock { color: var(--muted); font-weight: 400; }
-.live-agent { margin: 22px 0 0; font-size: 13px; font-weight: 600; }
-.live-agent .muted { font-weight: 400; }
 /* the band draws itself in when the page opens; after that only what changed moves */
 .vibe-overview.ov-enter .ov-bar { animation: ov-reveal .7s cubic-bezier(.2, .7, .2, 1) var(--ov-into, 0s) both; }
 @keyframes ov-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
@@ -2161,9 +2161,9 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .rc-chip b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .rc-total { margin-left: auto; font-family: var(--mono); }
 :is(.rc-chip, .rc-row).s-working { --rc: var(--accent); }
-:is(.rc-chip, .rc-row).s-waiting { --rc: var(--decision); }
+:is(.rc-chip, .rc-row).s-finished { --rc: var(--decision); }
 :is(.rc-chip, .rc-row):is(.s-error, .s-cut) { --rc: var(--danger); }
-:is(.rc-chip, .rc-row).s-quiet { --rc: var(--muted); }
+:is(.rc-chip, .rc-row).s-left { --rc: var(--muted); }
 :is(.rc-chip, .rc-row).s-done { --rc: var(--session); }
 .rc-rows { list-style: none; margin: 0; padding: 0; }
 .rc-row { padding: 8px 0 8px 12px; border-left: 3px solid var(--rc, var(--line-strong)); }
@@ -2171,6 +2171,17 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .rc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
 .rc-state { flex: none; font-size: 12px; font-weight: 600; color: color-mix(in srgb, var(--rc, var(--muted)) 62%, var(--ink)); }
 .rc-row.s-working .rc-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--accent); animation: live-pulse 2s ease-out infinite; }
+.rc-row.s-working.slow .rc-state::before { animation: none; background: var(--line-strong); }
+/* a row opens to that session's steps: the chevron in front of its state */
+.rc-toggle { flex: none; align-self: center; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: -4px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.rc-toggle:hover { background: var(--hover, rgba(0, 0, 0, .06)); color: var(--ink); }
+.rc-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rc-toggle .icon { transition: transform .15s; }
+.rc-row:not(.open) .rc-toggle .icon { transform: rotate(-90deg); }
+.rc-row > .vibe-live { margin: 10px 0 0; padding: 12px 0 4px; border-top: 1px solid var(--line); border-bottom: 0; }
+.rc-row > .vibe-live h3 { margin-top: 14px; }
+.rc-detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.rc-detail p { margin: 6px 0 0; }
 .rc-title { flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font-size: 14px; font-weight: 600; text-decoration: none; }
 .rc-title:hover { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
 .rc-clock, .rc-when { margin-left: auto; flex: none; font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--muted); }
@@ -2186,11 +2197,13 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .rc-last.k-fail .kind { color: var(--danger); font-weight: 600; }
 .rc-last.k-prompt .kind { color: var(--decision); }
 .rc-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.rc-sub { margin: 16px 0 6px; font-size: 12.5px; font-weight: 600; }
-.rc-sub .muted { margin-left: 6px; font-weight: 400; }
+.rc-sub { font-size: 12.5px; font-weight: 600; color: var(--ink); }
 details.rc-fold { margin-top: 8px; }
 details.rc-fold > summary { padding: 4px 0; font-size: 12.5px; color: var(--muted); cursor: pointer; }
 details.rc-fold[open] > summary { margin-bottom: 6px; }
+details.rc-section { margin-top: 12px; }
+details.rc-section > summary .muted { margin-left: 4px; }
+.vibe-recap > .vibe-live.idle { padding: 4px 0 8px; margin: 0; border-bottom: 0; }
 .mu-list { list-style: none; margin: 0; padding: 0; }
 .mu-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .mu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
@@ -2313,8 +2326,26 @@ details.rc-fold[open] > summary { margin-bottom: 6px; }
 .vp-body > :is(.vibe-recap, .vibe-overview, .vibe-machine, .vibe-github, .figures, .vibe-hook) { margin: 0; border-bottom: 0; }
 .vp-body > .column-block { padding-top: 0; }
 .vp-body > .vibe-hook { margin-top: 0; }
-.vp-body > .vibe-live:last-child { border-bottom: 0; }
 .vibe-layout-note { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+/* Dashboard and Recap blocks shared by the pages built from blocks (Projects, People, Proof). */
+.figures.page-figures { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 4px 20px; }
+.figures.page-figures .figure, .figures.page-figures .figure + .figure { padding: 6px 0 10px; border: 0; }
+.figures.page-figures .figure .value { font-size: 32px; }
+.figures.page-figures .figure .sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-recap { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.page-recap li { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 5px 0; font-size: 13.5px; line-height: 1.45; }
+.page-recap .t { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.page-recap .txt { min-width: 0; overflow-wrap: anywhere; color: var(--ink-2); }
+.page-recap .txt strong, .page-recap .txt .link-button { color: var(--ink); }
+.page-recap-empty { margin: 0; }
+.vp-body > .proj-lead:last-of-type { margin-bottom: 8px; }
+.vp-body > .proj-foot { margin-top: 0; }
+.vp-body > .lvl-summary { margin-top: 10px; }
+.vp-body > .my-brains > .section-title, .vp-body > .lb .lb-head > .section-title { display: none; }
+.vp-body > .lb .lb-head { justify-content: flex-end; }
+.vp-body > :is(.publish, .signin-cta, .my-brains, .proof-who) { margin-top: 0; }
+.vp-body > :is(.signin-cta, .my-brains):last-child { margin-bottom: 0; }
+.vp-body > .profile-card:first-child { margin-top: 0; }
 @media (max-width: 1000px) {
   .vibe-board { grid-template-columns: minmax(0, 1fr); }
   .vibe-panel.half { grid-column: 1 / -1; }

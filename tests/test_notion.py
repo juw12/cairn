@@ -297,6 +297,43 @@ class NotionAndProjectsTests(unittest.TestCase):
         self.assertIn("[cairn](https://github.com/juw12/cairn)", body)
         self.assertEqual(self.errors, [])
 
+    def test_projects_page_is_blocks_with_a_dashboard_and_a_recap(self):
+        page = self.open()
+        page.click('#nav [data-hub="build"]')
+        page.click('.hub-tabs [data-go="projects"]')
+        page.wait_for_selector(".proj-card")
+        board = '.vibe-board[data-page="projects"]'
+        order = lambda: page.eval_on_selector_all(f"{board} .vibe-panel", "els => els.map((e) => e.dataset.panel)")
+        folded = lambda: page.eval_on_selector_all(f"{board} .vibe-panel.folded", "els => els.map((e) => e.dataset.panel)")
+        self.assertEqual(order(), ["dashboard", "recap", "ranking", "scoring"])
+        self.assertEqual(folded(), ["scoring"], "the explanation of the score starts folded")
+        # Dashboard: the numbers of the ranking. Recap: the focus pick first.
+        tiles = page.eval_on_selector_all(f'{board} [data-panel="dashboard"] .figure', "els => els.map((e) => e.innerText.replace(/\\s+/g, ' ').trim())")
+        self.assertTrue(tiles[0].startswith("3 "), tiles)
+        self.assertIn("Focus pick", page.inner_text(f'{board} [data-panel="recap"]'))
+
+        # Fold the ranking to one line, then open it again.
+        page.click(f'{board} .vp-toggle[data-panel="ranking"]')
+        page.wait_for_selector(f'{board} .vibe-panel.folded[data-panel="ranking"]')
+        self.assertEqual(page.locator(".proj-card").count(), 0)
+        self.assertIn("3", page.inner_text(f'{board} [data-panel="ranking"] .vp-sum'))
+        page.click(f'{board} .vp-toggle[data-panel="ranking"]')
+        page.wait_for_selector(".proj-card")
+
+        # Move the recap above the dashboard; the brain file keeps one pair of lines per page.
+        page.click(f'{board} .vp-move[data-panel="recap"][data-step="-1"]')
+        page.wait_for_function("() => document.querySelector('.vibe-board[data-page=projects] .vibe-panel').dataset.panel === 'recap'")
+        page.wait_for_function("() => /^projects-order: recap, dashboard/m.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        layout = page.evaluate("() => window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md').text")
+        self.assertRegex(layout, r"(?m)^projects-folded: scoring$")
+        self.assertNotRegex(layout, r"(?m)^vibe-order:", "a page nobody arranged gets no line")
+
+        # Reset puts the default order back for this page.
+        page.click(f'[data-action="vibe-layout-reset"][data-page="projects"]')
+        page.wait_for_function("() => document.querySelector('.vibe-board[data-page=projects] .vibe-panel').dataset.panel === 'dashboard'")
+        self.assertEqual(order(), ["dashboard", "recap", "ranking", "scoring"])
+        self.assertEqual(self.errors, [])
+
     def test_database_block_renders_edits_and_switches_view(self):
         page = self.open()
         page.evaluate(
