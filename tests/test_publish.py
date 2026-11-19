@@ -2,9 +2,11 @@
 
 import base64
 import json
+import ssl
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cairn import publish
 from cairn.cli import main
@@ -158,6 +160,40 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue((destination / "brain/notes/built-x.md").exists())
         self.assertEqual(main(["--root", str(self.tmp), "publish"]), 2)  # no brain/ folder and no --to
+
+
+class CertificateTests(unittest.TestCase):
+    """The Python from python.org on a Mac has no certificates until a script is run; GitHub must still be reachable."""
+
+    def paths(self, cafile=None, capath=None):
+        return ssl.DefaultVerifyPaths(cafile, capath, "SSL_CERT_FILE", "/missing/cert.pem", "SSL_CERT_DIR", "/missing/certs")
+
+    def test_a_mac_without_certificates_uses_the_systems_own(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "cert.pem"
+            bundle.write_text("", encoding="utf-8")
+            with mock.patch.object(publish.sys, "platform", "darwin"), mock.patch.object(publish, "MAC_CERTS", str(bundle)), \
+                    mock.patch.object(ssl, "get_default_verify_paths", return_value=self.paths()), \
+                    mock.patch.object(ssl, "create_default_context", return_value="system roots") as create:
+                self.assertEqual(publish.ssl_context(), "system roots")
+            create.assert_called_once_with(cafile=str(bundle))
+
+    def test_pythons_own_certificates_are_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "cert.pem"
+            bundle.write_text("", encoding="utf-8")
+            (Path(tmp) / "certs").mkdir()
+            (Path(tmp) / "certs" / "root.0").write_text("", encoding="utf-8")
+            cases = {
+                "another system": ("linux", self.paths(), str(bundle)),
+                "a certificate file": ("darwin", self.paths(cafile=str(bundle)), str(bundle)),
+                "a certificate folder": ("darwin", self.paths(capath=str(Path(tmp) / "certs")), str(bundle)),
+                "no system bundle either": ("darwin", self.paths(), str(Path(tmp) / "gone.pem")),
+            }
+            for name, (platform, paths, system_bundle) in cases.items():
+                with self.subTest(name), mock.patch.object(publish.sys, "platform", platform), mock.patch.object(publish, "MAC_CERTS", system_bundle), \
+                        mock.patch.object(ssl, "get_default_verify_paths", return_value=paths):
+                    self.assertIsNone(publish.ssl_context())
 
 
 if __name__ == "__main__":

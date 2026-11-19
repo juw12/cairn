@@ -17,7 +17,9 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -151,9 +153,29 @@ def _powershell_request(method: str, url: str, token: str, payload: bytes | None
         return int(answer["status"]), (answer.get("body") or "").encode("utf-8")
 
 
+MAC_CERTS = "/etc/ssl/cert.pem"  # the roots macOS itself trusts
+
+
+def ssl_context() -> ssl.SSLContext | None:
+    """None for Python's own certificates, which is right nearly everywhere. The Python from
+    python.org on a Mac has none until its "Install Certificates" script is run, and every call
+    then fails as if GitHub could not be reached; there, check against macOS's own bundle."""
+    if sys.platform != "darwin":
+        return None
+    paths = ssl.get_default_verify_paths()
+    try:
+        has_folder = bool(paths.capath) and bool(os.listdir(paths.capath))
+    except OSError:
+        has_folder = False
+    if paths.cafile or has_folder or not os.path.isfile(MAC_CERTS):
+        return None
+    return ssl.create_default_context(cafile=MAC_CERTS)
+
+
 def make_http(token: str, use_powershell: bool | None = None):
     """A function (method, path, body) -> (status, json) for the GitHub API."""
     state = {"powershell": bool(use_powershell)}
+    context = ssl_context()
 
     def http(method: str, path: str, body: dict | None = None):
         url = path if path.startswith("http") else API + path
@@ -166,7 +188,7 @@ def make_http(token: str, use_powershell: bool | None = None):
                 "Content-Type": "application/json",
             })
             try:
-                with urllib.request.urlopen(request, timeout=30) as response:
+                with urllib.request.urlopen(request, timeout=30, context=context) as response:
                     status, raw = response.status, response.read()
             except urllib.error.HTTPError as error:
                 status, raw = error.code, error.read()
