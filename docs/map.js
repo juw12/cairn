@@ -525,6 +525,9 @@ function setBox() {
 function slideBox(size) {
   if (!model.big) return setBox();
   dom.touched = true;
+  // Labels still waiting to be placed would redraw the map in the middle of the slide; they are
+  // placed when the finger rests or lifts instead.
+  clearTimeout(labelTimer);
   clearTimeout(dom.restTimer);
   dom.restTimer = setTimeout(() => {
     setBox();
