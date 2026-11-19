@@ -635,6 +635,27 @@ The **Context** page shows the same snippet, filled in for your machine, when yo
 Every note is also a resource (`cairn://brain/<path>`); the `project-brief` prompt starts a session from the context pack
 and the `precedent` prompt hands over a goal. Add `--read-only` to hide the write tools.
 
+### Teach your AI assistant how the brain works (skills)
+
+[`skills/`](skills) holds five [agent skills](https://agentskills.io/specification): plain `SKILL.md` files that an
+assistant loads only when the work calls for them. MCP gives the assistant the tools; the skills tell it the rules.
+
+| Skill | What the assistant learns |
+|---|---|
+| [`cairn-notes`](skills/cairn-notes/SKILL.md) | Folders, note types, statuses, front matter, file names, links, capture prefixes and the work queue |
+| [`cairn-databases`](skills/cairn-databases/SKILL.md) | ` ```database ` blocks: table, board, gallery, list and calendar views |
+| [`cairn-cli`](skills/cairn-cli/SKILL.md) | The `cairn` command line: capture, journal, list, code TODOs, context pack, publish |
+| [`cairn-mcp`](skills/cairn-mcp/SKILL.md) | The `cairn mcp` tools: search before answering, record decisions and tasks, the queue |
+| [`cairn-vibe`](skills/cairn-vibe/SKILL.md) | Live session reporting: start, log, progress, check, end |
+
+- **OpenCode:** add the folder to `opencode.json` (`"skills": ["/path/to/cairn/skills"]`), or copy the five folders
+  into `~/.config/opencode/skills/`.
+- **Claude Code, Codex and others:** copy the five folders into the tool's skills folder (`~/.claude/skills`,
+  `~/.agents/skills`).
+
+`tests/test_skills.py` checks the skills against the code (note types, statuses, capture prefixes, MCP tool names,
+database views, session log kinds), so a skill cannot quietly fall behind Cairn.
+
 ## Why
 
 | Tool | Great at | Missing for "a brain inside the project" |
