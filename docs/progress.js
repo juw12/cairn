@@ -226,9 +226,12 @@ export function githubFromNote(note) {
     .map((part) => /^(.*\S)\s+(\d+)$/.exec(part))
     .filter(Boolean)
     .map((match) => ({ name: match[1], minutes: Number(match[2]) }));
+  // github-usage/2026-11.md is the main account's month; github-usage/<name>/2026-11.md is another account's.
+  const shelf = /(?:^|\/)github-usage\/([^/]+)\/[^/]+$/.exec(String(note?.path || ""))?.[1] || "";
   return {
     month: String(meta.gh_month),
-    account: String(meta.gh_account || ""),
+    account: String(meta.gh_account || shelf),
+    extra: Boolean(shelf),
     at: String(meta.gh_at || ""),
     used,
     limit,
@@ -302,9 +305,49 @@ export function agentGroup(meta) {
   return { key, label };
 }
 
-/** Every month the watcher noted, newest first. */
+const newestFirst = (a, b) => (a.month < b.month ? 1 : -1);
+
+/** Every month the watcher noted for the main account, newest first. */
 export function githubUsage(notes) {
-  return notes.map(githubFromNote).filter(Boolean).sort((a, b) => (a.month < b.month ? 1 : -1));
+  return notes.map(githubFromNote).filter((reading) => reading && !reading.extra).sort(newestFirst);
+}
+
+/**
+ * The months of every account that has notes: [{ account, extra, months }], the main account first and
+ * the others by name. An account that is the main one somewhere and named on another computer shows once.
+ */
+export function githubAccounts(notes) {
+  const main = githubUsage(notes);
+  const mainName = (main[0]?.account || "").toLowerCase();
+  const others = new Map();
+  for (const reading of notes.map(githubFromNote)) {
+    if (!reading?.extra || !reading.account || reading.account.toLowerCase() === mainName) continue;
+    const key = reading.account.toLowerCase();
+    if (!others.has(key)) others.set(key, []);
+    others.get(key).push(reading);
+  }
+  const rest = [...others.keys()].sort().map((key) => {
+    const months = others.get(key).sort(newestFirst);
+    return { account: months[0].account, extra: true, months };
+  });
+  return [...(main.length ? [{ account: main[0].account, extra: false, months: main }] : []), ...rest];
+}
+
+const MOVE_WAIT_MS = 24 * 3600 * 1000; // GitHub keeps the link it mails to the new owner for a day
+
+/** Repo moves Cairn asked GitHub for, from the notes in github-usage/moves/: [{ repo, from, to, at }], newest first. */
+export function githubMoves(notes) {
+  return notes
+    .map((note) => note?.meta || {})
+    .filter((meta) => meta.gh_move_repo && meta.gh_move_from && meta.gh_move_to)
+    .map((meta) => ({ repo: String(meta.gh_move_repo), from: String(meta.gh_move_from), to: String(meta.gh_move_to), at: String(meta.gh_move_at || "") }))
+    .sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+/** True while a move can still be waiting for the new owner to open GitHub's mail. */
+export function movePending(move, nowMs = Date.now()) {
+  const at = Date.parse(move?.at);
+  return Number.isFinite(at) && nowMs - at < MOVE_WAIT_MS;
 }
 
 // ------------------------------------------------------------ one brain, several computers

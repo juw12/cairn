@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, machine, mcp, precedent, vibe
+from . import __version__, autopilot, chat, github_move, machine, mcp, precedent, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -79,6 +79,7 @@ class Handler(BaseHTTPRequestHandler):
     web_dir: Path
     allowed_hosts: set[str]
     desktop = None  # optional DesktopHooks: state() -> dict, act(action, payload) -> dict
+    github_moves = True  # /api/github/move acts as you on GitHub; the phone listener turns it off
     server_version = f"Cairn/{__version__}"
 
     def log_message(self, *args):  # keep the terminal quiet
@@ -182,6 +183,7 @@ class Handler(BaseHTTPRequestHandler):
                     "desktop": self.desktop is not None,
                     "path": str(brain.root) if self.desktop is not None else None,
                     "mcp": mcp.server_entry(brain),
+                    "githubMove": self.github_moves,
                 })
             elif route == "/api/files":
                 self._send_json({"files": brain.files()})
@@ -299,8 +301,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(self.desktop.act(str(body.get("action", "")), body))
             except (SyncError, ValueError, OSError) as error:
                 return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        if route == "/api/github/move" and self.github_moves:
+            return self._github_move()
         self._drain()
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+
+    def _github_move(self):
+        """POST /api/github/move {repo, from, to}: ask GitHub to hand a private repo to another of
+        your accounts (cairn.github_move). The note it leaves is sent back so the page shows it at once."""
+        try:
+            body = self._body()
+            result = github_move.move(self.brain, str(body.get("repo", "")), str(body.get("from", "")), str(body.get("to", "")))
+        except (github_move.MoveError, ValueError) as error:
+            return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        if result["note"]:
+            self.changes.record(result["note"], self._client())
+            result["file"] = self.brain.read(result["note"])
+        self._send_json(result)
 
     def _chat(self, action: str):
         """Plain chat with your OpenCode models: send, stop, delete, refresh the model list."""

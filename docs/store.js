@@ -67,6 +67,8 @@ export class ServerStore {
       canGit: Boolean(this.meta.git),
       canScan: true,
       desktop: Boolean(this.meta.desktop),
+      // Handing a repo to another GitHub account uses the GitHub CLI on this computer; a paired phone may not.
+      canMoveRepos: Boolean(this.meta.githubMove),
       path: this.meta.path || null,
     };
   }
@@ -155,6 +157,11 @@ export class ServerStore {
 
   async desktopAction(action, payload = {}) {
     return this.request("POST", "api/desktop", { ...payload, action });
+  }
+
+  // Ask GitHub to hand the private repo `from`/`repo` to `to`, another account signed in on this computer.
+  async githubMove(repo, from, to) {
+    return this.request("POST", "api/github/move", { repo, from, to });
   }
 }
 

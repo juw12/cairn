@@ -262,6 +262,7 @@ def _vibe_watch(brain: Brain, args) -> int:
         "last_reply": args.last_reply,
         "laptop": not args.no_laptop,
         "github": not args.no_github,
+        "github_accounts": tuple(args.github_account or ()),
     }
     if args.vector_process:
         options["vector_names"] = tuple(args.vector_process)
@@ -272,6 +273,7 @@ def _vibe_watch(brain: Brain, args) -> int:
         extra += ["--no-vector"] if args.no_vector else []
         extra += ["--no-laptop"] if args.no_laptop else []
         extra += ["--no-github"] if args.no_github else []
+        extra += [f"--github-account={name}" for name in args.github_account or []]
         extra += ["--last-reply"] if args.last_reply else []
         extra += [f"--vector-process={name}" for name in args.vector_process or []]
         try:
@@ -351,21 +353,74 @@ def cmd_vibe(brain: Brain, args) -> int:
     return 0
 
 
+def _vibe_github_move(brain: Brain, args, account: str) -> int:
+    """`cairn vibe github move REPO --to ACCOUNT`: hand a private repo to another of your accounts, so
+    its Actions minutes count there. Asks first unless --yes; GitHub then mails the new owner to confirm."""
+    import datetime as dt
+
+    from . import core, github_move, github_usage
+
+    if len(args.text) != 2 or not args.to:
+        print("Usage: cairn vibe github move REPO --to ACCOUNT [--account OWNER] [--yes]", file=sys.stderr)
+        return 2
+    repo, target = args.text[1], args.to.strip().lstrip("@")
+    if not account:  # the owner is the main account, as this month's note names it
+        path = github_usage.note_path(dt.datetime.now(dt.timezone.utc).strftime("%Y-%m"))
+        if brain.resolve(path).exists():
+            account = str(core.parse_note(brain.read(path)["text"])["meta"].get("gh_account", ""))
+    if not account:
+        print("Say whose repo it is: --account OWNER", file=sys.stderr)
+        return 2
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print("Not moving anything without a yes: add --yes.", file=sys.stderr)
+            return 2
+        answer = input(f"Move the private repo {account}/{repo} to {target}? GitHub mails {target} a link to confirm. [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Nothing moved.")
+            return 0
+    try:
+        result = github_move.move(brain, repo, account, target)
+    except github_move.MoveError as error:
+        print(error, file=sys.stderr)
+        return 1
+    print(result["message"])
+    return 0
+
+
 def _vibe_github(brain: Brain, args) -> int:
     """`cairn vibe github 1801 --at 2026-11-16T14:51`: count the month's Actions minutes on from the
-    figure GitHub itself shows or mails. With no number, say what the month's note holds."""
+    figure GitHub itself shows or mails. With no number, say what the month's note holds.
+    `--account NAME` is for another account you are signed in to; `move REPO --to NAME` hands a repo over."""
     import datetime as dt
 
     from . import core, github_usage, publish
 
+    account = (args.account or "").strip().lstrip("@")
+    if args.text and args.text[0] == "move":
+        return _vibe_github_move(brain, args, account)
+    try:
+        account = github_usage.account_name(account) if account else ""
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 2
     if not args.text:
         month = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m")
-        path = github_usage.note_path(month)
+        path = github_usage.note_path(month, account)
+        if not brain.resolve(path).exists() and account:
+            # Asked for by name and never read: ask GitHub now and say why when it refuses.
+            try:
+                print(github_usage.summary(github_usage.read_now(brain, account)))
+            except publish.PublishError as error:
+                print(error, file=sys.stderr)
+                return 1
+            return 0
         if not brain.resolve(path).exists():
             print(f"No reading for {month} yet. `cairn vibe watch` notes one every hour; `cairn vibe github <minutes>` sets GitHub's own figure.")
             return 0
         meta = core.parse_note(brain.read(path)["text"])["meta"]
-        line = f"GitHub Actions {month}: {meta.get('gh_used', '?')} of {meta.get('gh_limit', '?')} minutes ({meta.get('gh_pct', '?')}%), read {str(meta.get('gh_at', '')).replace('T', ' ')}."
+        who = f" ({account})" if account else ""
+        line = f"GitHub Actions {month}{who}: {meta.get('gh_used', '?')} of {meta.get('gh_limit', '?')} minutes ({meta.get('gh_pct', '?')}%), read {str(meta.get('gh_at', '')).replace('T', ' ')}."
         if meta.get("gh_anchor_used"):
             line += f" GitHub's count of {meta['gh_anchor_used']} at {str(meta.get('gh_anchor_at', '')).replace('T', ' ')}, plus {meta.get('gh_since', '0')} since."
         print(line)
@@ -373,10 +428,10 @@ def _vibe_github(brain: Brain, args) -> int:
     try:
         used = int(args.text[0].replace(",", ""))
         at = dt.datetime.fromisoformat(args.at) if args.at else None
-        reading = github_usage.set_anchor(brain, used, at=at, api=args.api)
+        reading = github_usage.set_anchor(brain, used, at=at, api=args.api, account=account)
     except ValueError as error:
         message = str(error)
-        print(message if message.startswith(("That", "Minutes")) else "Usage: cairn vibe github 1801 [--at 2026-11-16T14:51]", file=sys.stderr)
+        print(message if message.startswith(("That", "Minutes")) else "Usage: cairn vibe github 1801 [--at 2026-11-16T14:51] [--account NAME]", file=sys.stderr)
         return 2
     except publish.PublishError as error:
         print(error, file=sys.stderr)
@@ -759,6 +814,10 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--no-vector", action="store_true", help="watch: skip Vector detection")
     vibe_parser.add_argument("--no-laptop", action="store_true", help="watch: do not note this computer's load in machines/")
     vibe_parser.add_argument("--no-github", action="store_true", help="watch: do not note the month's GitHub Actions minutes in github-usage/")
+    vibe_parser.add_argument("--github-account", action="append", metavar="NAME", help="watch: also note the Actions minutes of this other account the GitHub CLI is signed in to, in github-usage/NAME/ (repeat for more)")
+    vibe_parser.add_argument("--account", metavar="NAME", help="github: the figure of another account you are signed in to; with move, the account that owns the repo")
+    vibe_parser.add_argument("--to", metavar="NAME", help="github move REPO: the account of yours that takes the private repo, so its minutes count there")
+    vibe_parser.add_argument("--yes", action="store_true", help="github move: do not ask first")
     vibe_parser.add_argument("--at", metavar="WHEN", help="github: when GitHub showed that figure, e.g. 2026-11-16T14:51 (default: now)")
     vibe_parser.add_argument("--api", type=int, metavar="MINUTES", help="github: what the billing rows summed to at that moment, for a figure that is not fresh")
     vibe_parser.add_argument("--vector-process", action="append", help="watch: process name(s) that mean Vector is open (default Vector.exe)")

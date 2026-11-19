@@ -48,6 +48,35 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_server(self.brain, port=0, host="0.0.0.0")
 
+    def test_a_repo_move_goes_to_github_and_its_note_comes_back(self):
+        from cairn import github_move
+
+        def moved(brain, repo, source, target):
+            path, text = github_move.move_note(repo, source, target, "2026-11-19T21:40")
+            brain.write(path, text)
+            return {"repo": repo, "from": source, "to": target, "at": "2026-11-19T21:40", "note": path, "message": "GitHub mailed grace a link."}
+
+        _, info = self.call("GET", "/api/info")
+        self.assertIs(info["githubMove"], True)
+        _, before = self.call("GET", "/api/changes?since=0", headers={"X-Cairn-Client": "another-page"})
+        with mock.patch.object(github_move, "move", side_effect=moved) as move:
+            status, result = self.call("POST", "/api/github/move", {"repo": "vault", "from": "ada", "to": "grace"})
+        self.assertEqual(status, 200)
+        move.assert_called_once_with(self.brain, "vault", "ada", "grace")
+        self.assertEqual((result["message"], result["file"]["path"]), ("GitHub mailed grace a link.", "github-usage/moves/ada-vault.md"))
+        self.assertIn("gh_move_to: grace", result["file"]["text"])
+        _, changes = self.call("GET", f"/api/changes?since={before['revision']}&epoch={before['epoch']}", headers={"X-Cairn-Client": "another-page"})
+        self.assertEqual(changes["paths"], ["github-usage/moves/ada-vault.md"], "other open pages hear of the note")
+
+    def test_a_refused_repo_move_says_why(self):
+        from cairn import github_move
+
+        with mock.patch.object(github_move, "move", side_effect=github_move.MoveError("vault is public.")):
+            status, result = self.call("POST", "/api/github/move", {"repo": "vault", "from": "ada", "to": "grace"})
+        self.assertEqual((status, result["error"]), (400, "vault is public."))
+        status, _ = self.call("POST", "/api/github/move", {"repo": "vault", "from": "ada", "to": "grace"}, headers={"X-Cairn": ""})
+        self.assertEqual(status, 403)
+
     def test_requires_header_and_host(self):
         status, _ = self.call("GET", "/api/files", headers={"X-Cairn": ""})
         self.assertEqual(status, 403)
