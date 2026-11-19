@@ -1089,7 +1089,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("1 session · 50 tokens", page.inner_text(".vibe-device-note"))
         self.assertEqual(page.inner_text(".vibe-machine h2"), "MacBook Pro")  # its own reading, not this computer's
         self.assertEqual(page.inner_text('[data-panel="machine"] .vp-title'), "Computer")
-        self.assertEqual(page.inner_text('#nav [data-views~="vibe"] .count'), "2 live")  # the sidebar counts every computer
+        self.assertIn("2 live", page.inner_text('.hub-tabs [data-go="vibe"]'))  # the tab's count is every computer's
         self.assertEqual(page.evaluate("() => localStorage.getItem('cairn.vibeDevice')"), '"MacBook Pro"')
 
         page.click(".vibe-devices .chip:not([data-device])")
