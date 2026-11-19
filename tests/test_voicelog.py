@@ -275,7 +275,7 @@ class VoiceLogTests(unittest.TestCase):
     def test_home_strip_opens_the_log(self):
         page = self.open()
         page.wait_for_selector(".home-log")
-        self.assertIn("Today's log", page.inner_text(".home-log"))
+        self.assertIn("Today's log", page.inner_text('.vibe-panel[data-page="home"][data-panel="log"] .vp-title'))
         page.click(".home-log [data-log-open]")
         page.wait_for_selector(".log-sheet")
         self.assertEqual(self.errors, [])

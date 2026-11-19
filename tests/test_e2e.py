@@ -101,6 +101,39 @@ CHAT_STUB = """() => {
 }"""
 
 
+# A PC with three chats (one still answering) and an autopilot with three goals, for the pages that need one.
+PC_STUB = """() => {
+  const s = window.cairn.state;
+  const now = Math.floor(Date.now() / 1000);
+  const chats = [
+    { id: "20261119-00000001", title: "Why is the relay slow?", status: "idle", updated: now - 300 },
+    { id: "20261119-00000002", title: "Draft the weekly summary", status: "running", updated: now - 20 },
+    { id: "20261118-00000003", title: "Explain tolerance stack-up", status: "idle", updated: now - 200000 },
+  ];
+  s.store.chat = async () => ({ available: true, models: ["Pega-Chat", "Pega-Coding"], chats });
+  s.store.chatAction = async (action, body) => ({ id: chats[0].id, title: body.text, status: "idle", messages: [{ role: "user", text: body.text }] });
+  s.store.chatThread = async (id) => ({ id, title: chats.find((c) => c.id === id).title, status: "idle",
+    messages: [{ role: "user", text: "Why is the relay slow?" }, { role: "assistant", text: "It polls every 20 seconds." }] });
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const autopilot = {
+    settings: { enabled: true, engine: "opencode", command: "", opencode_flags: "", workdir_root: "", round_timeout_min: 30,
+      max_rounds_per_goal: 8, improve_rounds_after_done: 1, auto_pull_queue: true },
+    worker: { worker: "here", current: "j1" },
+    engine_found: true,
+    state_dir: "~/.cairn/autopilot",
+    jobs: [
+      { id: "j1", goal: "Add dark mode to the settings page", status: "running", rounds: 2, updated: stamp, workdir: "E:/Projects/demo", next_hint: "wire the toggle" },
+      { id: "j2", goal: "Write release notes for v1", status: "blocked", rounds: 1, updated: stamp, workdir: "E:/Projects/demo", blocked_reason: "Which version number?" },
+      { id: "j3", goal: "Tidy the README", status: "done", rounds: 3, updated: stamp, workdir: "E:/Projects/demo", summary: "README rewritten, links checked" },
+    ],
+  };
+  s.store.autopilot = async () => autopilot;
+  s.store.autopilotLog = async () => ({ size: 23, text: "round 2: editing files\\n" });
+  s.store.autopilotAction = async () => autopilot.jobs[0];
+  window.cairn.rerender();
+}"""
+
+
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
 class EndToEndTests(unittest.TestCase):
     @classmethod
@@ -1807,6 +1840,140 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector('.vibe-panel[data-page="proof"][data-panel="claims"]:not(.folded)')
         self.go(page, "people")
         self.assertEqual(panels("people")[:4], ["dashboard", "recap", "leaderboard", "mine"])
+        self.assertEqual(self.errors, [])
+
+    def test_every_page_is_blocks_with_a_dashboard_and_a_recap(self):
+        page = self.open()
+        panels = lambda name: page.eval_on_selector_all(f'.vibe-board[data-page="{name}"] .vibe-panel', "els => els.map((e) => e.dataset.panel)")
+        folded = lambda name: page.eval_on_selector_all(f'.vibe-board[data-page="{name}"] .vibe-panel.folded', "els => els.map((e) => e.dataset.panel)")
+        pages = {
+            "home": ["dashboard", "recap", "log", "focus"],
+            "board": ["dashboard", "recap", "cards"],
+            "ideas": ["dashboard", "recap", "cards"],
+            "decisions": ["dashboard", "recap", "log"],
+            "journal": ["dashboard", "recap", "reviews", "calendar", "lookback", "search", "days", "pages"],
+            "map": ["graph", "dashboard", "recap"],
+            "canvas": ["dashboard", "recap", "boards"],
+            "notes": ["dashboard", "recap", "all"],
+            "code": ["dashboard", "recap", "inbox"],
+            "autopilot": ["dashboard", "recap", "queue"],
+        }
+        for name, expected in pages.items():
+            with self.subTest(page=name):
+                self.go(page, name)
+                page.wait_for_selector(f'.vibe-board[data-page="{name}"] .vibe-panel')
+                self.assertEqual(panels(name), expected)
+                self.assertEqual(folded(name), ["pages"] if name == "journal" else [])
+                dashboard = f'[data-page="{name}"][data-panel="dashboard"]'
+                recap = f'[data-page="{name}"][data-panel="recap"]'
+                self.assertGreaterEqual(page.locator(f"{dashboard} :is(.figure, .stat-card)").count(), 4)
+                self.assertGreaterEqual(page.locator(f"{recap} :is(.page-recap li, .page-recap-empty)").count(), 1)
+                # Fold the recap to its one line, then open it again.
+                page.click(f'.vp-toggle[data-page="{name}"][data-panel="recap"]')
+                page.wait_for_selector(f".vibe-panel.folded{recap}")
+                self.assertTrue(page.inner_text(f"{recap} .vp-sum").strip(), "a folded block says what is in it")
+                self.assertEqual(page.locator(f"{recap} .vp-body").count(), 0)
+                page.click(f'.vp-toggle[data-page="{name}"][data-panel="recap"]')
+                page.wait_for_selector(f".vibe-panel{recap}:not(.folded) .vp-body")
+        # The tools keep working inside their block: the map draws, and a recap row opens its note.
+        self.go(page, "map")
+        page.wait_for_selector("#map-svg text")
+        self.assertEqual(page.locator(".map-node").count(), DEMO_NOTES)
+        self.go(page, "home")
+        self.assertIn("Today's log", page.inner_text('.vibe-panel[data-page="home"][data-panel="log"] .vp-title'))
+        page.click('[data-page="home"][data-panel="recap"] .page-recap [data-open]')
+        page.wait_for_selector(".drawer")
+        self.assertEqual(self.errors, [])
+
+    def test_block_layout_is_kept_per_page_and_tools_still_work(self):
+        page = self.open()
+        panels = lambda name: page.eval_on_selector_all(f'.vibe-board[data-page="{name}"] .vibe-panel', "els => els.map((e) => e.dataset.panel)")
+        saved = "(pattern) => new RegExp(pattern, 'm').test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')"
+
+        # Board: the tasks move above the recap, and a card still drags from one column to the next.
+        self.go(page, "board")
+        page.click('.vp-move[data-page="board"][data-panel="cards"][data-step="-1"]')
+        page.wait_for_function(saved, arg="^board-order: dashboard, cards, recap$")
+        self.assertEqual(panels("board"), ["dashboard", "cards", "recap"])
+        todo = page.locator('[data-page="board"][data-panel="dashboard"] .figure .value').first.inner_text()
+        card = page.locator('.column[data-column="todo"] .item-card[data-drag]').first
+        path = card.get_attribute("data-drag")
+        card.drag_to(page.locator('.column[data-column="doing"]'))
+        page.wait_for_function("(p) => window.cairn.state.notes.find((n) => n.path === p).status === 'doing'", arg=path)
+        self.assertEqual(panels("board"), ["dashboard", "cards", "recap"], "dropping a card moves no block")
+        self.assertEqual(page.locator('[data-page="board"][data-panel="dashboard"] .figure .value').first.inner_text(), str(int(todo) - 1))
+
+        # Journal: with the search block folded, a tag in Look back unfolds it and searches.
+        self.go(page, "journal")
+        page.wait_for_selector(".memory-stats")
+        page.click('.vp-toggle[data-page="journal"][data-panel="search"]')
+        page.wait_for_selector('.vibe-panel.folded[data-page="journal"][data-panel="search"]')
+        page.wait_for_function(saved, arg="^journal-folded: (pages, search|search, pages)$")
+        self.assertEqual(page.locator("#journal-search").count(), 0)
+        tag = page.locator(".memory-card .tags .tag").first
+        label = tag.inner_text().split()[0]
+        tag.click()
+        page.wait_for_selector("#journal-search")
+        self.assertEqual(page.input_value("#journal-search"), label)
+        self.assertGreater(page.locator(".search-hits li").count(), 0)
+        # All journal pages start folded; opening the block lists them.
+        page.click('.vp-toggle[data-page="journal"][data-panel="pages"]')
+        page.wait_for_selector('[data-page="journal"][data-panel="pages"] .all-pages .row-item')
+
+        # Canvas: the recap row opens the canvas, like its card.
+        self.go(page, "canvas")
+        page.click('[data-page="canvas"][data-panel="recap"] [data-cv-open]')
+        page.wait_for_selector(".cv-page #cv-wrap")
+        self.assertEqual(page.locator(".vibe-board").count(), 0, "an open canvas is the whole page")
+
+        # One file, one pair of lines per arranged page; Reset is per page.
+        layout = self.note_text(page, "CAIRN-LAYOUT.md")
+        self.assertRegex(layout, r"(?m)^board-order: dashboard, cards, recap$")
+        self.assertNotRegex(layout, r"(?m)^(home|map|canvas)-order:", "a page nobody arranged gets no line")
+        self.go(page, "board")
+        page.click('[data-action="vibe-layout-reset"][data-page="board"]')
+        page.wait_for_function("() => document.querySelectorAll('.vibe-board[data-page=board] .vibe-panel')[1].dataset.panel === 'recap'")
+        self.assertRegex(self.note_text(page, "CAIRN-LAYOUT.md"), r"(?m)^journal-folded: ")
+        self.assertEqual(self.errors, [])
+
+    def test_chat_and_autopilot_are_blocks_when_a_pc_answers(self):
+        page = self.open()
+        page.evaluate(PC_STUB)
+        panels = lambda name: page.eval_on_selector_all(f'.vibe-board[data-page="{name}"] .vibe-panel', "els => els.map((e) => e.dataset.panel)")
+
+        # Chat: the conversation first, then the numbers and the latest chats.
+        self.go(page, "chat")
+        page.wait_for_selector("#chat-recap .page-recap li")
+        self.assertEqual(panels("chat"), ["talk", "dashboard", "recap"])
+        tiles = page.eval_on_selector_all("#chat-dash .figure", "els => els.map((e) => e.innerText.replace(/\\s+/g, ' ').trim())")
+        self.assertEqual(tiles[:3], ["3 chats", "1 answering now", "2 active in the last day"])
+        self.assertEqual(page.locator("#chat-recap .page-recap li").count(), 3)
+        self.assertIn("answering", page.inner_text("#chat-recap .page-recap li:first-child"))
+        box = page.locator("#chat-form").bounding_box()
+        self.assertLessEqual(box["y"] + box["height"], 900, "the message box stays on screen")
+        # Fold the conversation, then pick a chat in the recap: it unfolds on that chat.
+        page.click('.vp-toggle[data-page="chat"][data-panel="talk"]')
+        page.wait_for_selector('.vibe-panel.folded[data-page="chat"][data-panel="talk"]')
+        self.assertEqual(page.locator(".chat-page").count(), 0)
+        page.click('#chat-recap [data-chat-open="20261119-00000001"]')
+        page.wait_for_selector(".chat-msg.assistant")
+        self.assertEqual(page.inner_text(".chat-title"), "Why is the relay slow?")
+        page.fill("#chat-input", "and now?")
+        page.press("#chat-input", "Enter")
+        page.wait_for_function("() => document.querySelector('.chat-msg.user')?.innerText.includes('and now?')")
+
+        # Autopilot: every part is a block; settings start folded.
+        self.go(page, "autopilot")
+        page.wait_for_selector("#ap-numbers .figure")
+        self.assertEqual(panels("autopilot"), ["dashboard", "recap", "goal", "goals", "log", "queue", "settings"])
+        self.assertEqual(page.eval_on_selector_all('.vibe-board[data-page="autopilot"] .vibe-panel.folded', "els => els.map((e) => e.dataset.panel)"), ["settings"])
+        self.assertEqual(page.locator("#ap-recap .page-recap li").count(), 3)
+        self.assertIn("Which version number?", page.inner_text("#ap-recap"))
+        page.click('#ap-recap [data-action="ap-select"][data-id="j3"]')
+        page.wait_for_function("() => document.querySelector('.ap-detail h3')?.innerText === 'Tidy the README'")
+        page.wait_for_function("() => document.querySelector('#ap-log').textContent.includes('round 2')")
+        page.click('.vp-toggle[data-page="autopilot"][data-panel="settings"]')
+        page.wait_for_selector("#ap-settings-form")
         self.assertEqual(self.errors, [])
 
     def test_proof_view_of_someone_elses_brain_checks_itself(self):

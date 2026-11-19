@@ -3,11 +3,13 @@
 // waiting on you), so it lives in brain/ next to everything else and works in every mode. Running
 // goals needs the local app: the server's worker starts your agent CLI (OpenCode or any command)
 // with a brief built from your own history, reads its STATUS line and keeps going until it's done.
+// The page is blocks (vibelayout.js): Dashboard, Recap, the goal form, the goals, the log, the queue, settings.
 
 import { escapeHtml as esc } from "./md.js";
 import { $, ask, icon, pageHead, plural, toast, today } from "./ui.js";
 import { createNote, readOnly, saveNote, state } from "./state.js";
 import { renderNav, renderView } from "./app.js";
+import { boardHtml, noteRecap, recapHtml } from "./vibelayout.js";
 
 const POLL_MS = 2000;
 const QUEUE_TAG = "queue";
@@ -223,6 +225,10 @@ async function poll() {
       // Only the live parts are redrawn, so whatever is typed in the forms stays put.
       const live = $("#ap-live");
       if (live) live.innerHTML = liveParts();
+      const numbers = $("#ap-numbers");
+      if (numbers) numbers.innerHTML = figures(ap().data);
+      const recap = $("#ap-recap");
+      if (recap) recap.innerHTML = goalsRecap(ap().data);
       renderNav();
     }
     if (grew || changed) paintLog();
@@ -332,11 +338,26 @@ function figures(data) {
   </div>`;
 }
 
+// What the goals did lately: the newest change of each, newest first.
+function goalsRecap(data) {
+  const rows = [...(data?.jobs || [])]
+    .sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")))
+    .slice(0, 6)
+    .map((job) => {
+      const note = job.status === "blocked" ? job.blocked_reason : job.status === "done" ? job.summary : job.next_hint;
+      return {
+        when: when(job.updated),
+        html: `${pillFor(job.status)} <button type="button" class="link-button" data-action="ap-select" data-id="${esc(job.id)}">${esc(shortTitle(job.goal, 70))}</button>${note ? ` <span class="muted">· ${esc(shortTitle(String(note), 110))}</span>` : ""}`,
+      };
+    });
+  return recapHtml(rows, data ? "No goals yet. Hand one over below." : "Connecting…");
+}
+
 function liveParts() {
   const data = ap().data;
   if (!data) return `<p class="muted small">Connecting…</p>`;
   const job = data.jobs.find((j) => j.id === ap().selected) || null;
-  return `${figures(data)}
+  return `
     <div class="ap-cols">
       <section class="column-block">
         <header><h2>Goals</h2><span class="muted small">${plural(data.jobs.length, "goal")}</span></header>
@@ -377,8 +398,7 @@ function queueBlock() {
 function settingsBlock(s) {
   const field = (name, label, value, type = "text", hint = "") => `<label class="field"><span>${label}</span>
     <input class="input" type="${type}" name="${name}" value="${esc(String(value ?? ""))}" ${type === "number" ? 'min="0"' : ""}>${hint ? `<span class="muted small">${hint}</span>` : ""}</label>`;
-  return `<details class="ap-settings column-block">
-    <summary><h2>Settings</h2><span class="muted small">agent, work folders, limits</span></summary>
+  return `<div class="ap-settings">
     <form id="ap-settings-form">
       <label class="field"><span>Agent</span>
         <select class="select" name="engine">
@@ -397,7 +417,7 @@ function settingsBlock(s) {
       <div><button class="btn sm primary" type="submit">${icon("save", "sm")} Save settings</button></div>
     </form>
     <p class="muted small">State and logs: <code>${esc(ap().data?.state_dir || "~/.cairn/autopilot")}</code></p>
-  </details>`;
+  </div>`;
 }
 
 function offlineCard() {
@@ -407,11 +427,38 @@ function offlineCard() {
   </div></section>`;
 }
 
+// The queue as numbers and as a recap, for the page shown without the local app (and the queue block's summary).
+function queueNumbers() {
+  const all = queueItems(true);
+  const open = all.filter((i) => i.note.status !== "done");
+  return {
+    all,
+    open: open.length,
+    auto: open.filter((i) => i.auto && !i.needsMe).length,
+    needsMe: open.filter((i) => i.needsMe).length,
+    done: all.length - open.length,
+  };
+}
+
 export function autopilotView() {
+  const queue = queueNumbers();
+  const queueSummary = `${queue.open} open · ${queue.auto} auto${queue.needsMe ? ` · ${queue.needsMe} need you` : ""}`;
   if (!canRun()) {
+    const tile = (value, label) => `<div class="figure"><span class="value">${value}</span><span class="label">${label}</span></div>`;
+    const blocks = {
+      dashboard: {
+        html: `<div class="figures ap-figures">${tile(queue.open, "queued")}${tile(queue.auto, "safe to run alone")}${tile(queue.needsMe, "waiting on you")}${tile(queue.done, "done")}</div>`,
+        summary: queueSummary,
+      },
+      recap: {
+        html: noteRecap(queue.all.map((i) => i.note), (n) => (n.status === "done" ? "done" : n.status === "doing" ? "in progress" : "queued"), "Nothing queued yet."),
+        summary: queue.all.length ? `${plural(queue.all.length, "queue item")} so far` : "nothing queued yet",
+      },
+      queue: { html: queueBlock(), summary: queueSummary },
+    };
     return `${pageHead("Autopilot", "Hand over a goal once; your coding agent carries it to done while you do something else. The queue below is plain tasks tagged <code>#queue</code>.")}
       ${offlineCard()}
-      ${queueBlock()}`;
+      ${boardHtml("autopilot", blocks)}`;
   }
   const data = ap().data;
   const enabled = Boolean(data?.settings?.enabled);
@@ -421,21 +468,40 @@ export function autopilotView() {
     data ? `<button class="btn${enabled ? "" : " primary"}" data-action="ap-toggle" aria-pressed="${enabled}">${icon(enabled ? "pause" : "play")} ${enabled ? "Turn off" : "Turn on"}</button>` : "",
   );
   const brief = ap().brief ? `<details class="ap-brief" open><summary>The brief your agent gets</summary><pre class="pre-box">${esc(ap().brief)}</pre></details>` : "";
-  return `${head}
-    ${readOnly() ? "" : `<form id="ap-goal-form" class="ap-goal-form">
+  const jobs = data?.jobs || [];
+  const count = (...statuses) => jobs.filter((j) => statuses.includes(j.status)).length;
+  const selected = jobs.find((j) => j.id === ap().selected);
+  const blocks = {
+    dashboard: {
+      html: `<div id="ap-numbers">${data ? figures(data) : `<p class="muted small">Connecting…</p>`}</div>`,
+      summary: data ? `${enabled ? "on" : "off"} · ${count("running", "queued")} in progress · ${count("blocked")} need you · ${count("done")} done` : "connecting…",
+    },
+    recap: {
+      html: `<div id="ap-recap">${goalsRecap(data)}</div>`,
+      summary: jobs.length ? `${plural(jobs.length, "goal")} handed over` : "no goals yet",
+    },
+    goal: readOnly()
+      ? null
+      : {
+          html: `<form id="ap-goal-form" class="ap-goal-form">
       <textarea class="input" name="goal" id="ap-goal" rows="2" placeholder="What should get done? e.g. Add dark mode to the settings page, tests passing" aria-label="Goal"></textarea>
       <div class="ap-goal-row">
         <input class="input" name="workdir" id="ap-workdir" placeholder="Folder to work in (optional, e.g. the repo)" aria-label="Working folder" autocomplete="off">
         <button class="btn" type="button" data-action="ap-brief">${icon("list", "sm")} Preview brief</button>
         <button class="btn primary" type="submit">${icon("play", "sm")} Hand it over</button>
       </div>
-    </form>`}
-    ${brief}
-    <div id="ap-live">${liveParts()}</div>
-    <section class="column-block ap-log-block"><header><h2>Log</h2><span class="muted small">your agent's output, live</span></header>
-      <pre id="ap-log" class="pre-box ap-log" tabindex="0" aria-label="Log of the selected goal"></pre></section>
-    <div class="ap-cols ap-cols-bottom">
-      ${queueBlock()}
-      ${data ? settingsBlock(data.settings) : ""}
-    </div>`;
+    </form>
+    ${brief}`,
+          summary: "what should get done, and where",
+        },
+    goals: { html: `<div id="ap-live">${liveParts()}</div>`, summary: jobs.length ? `${plural(jobs.length, "goal")}${selected ? ` · selected: ${shortTitle(selected.goal, 60)}` : ""}` : "no goals yet" },
+    log: {
+      html: `<section class="ap-log-block"><p class="muted small ap-log-note">Your agent's output, live${selected ? `, for “${esc(shortTitle(selected.goal, 70))}”` : ""}.</p>
+      <pre id="ap-log" class="pre-box ap-log" tabindex="0" aria-label="Log of the selected goal"></pre></section>`,
+      summary: selected ? `of “${shortTitle(selected.goal, 60)}”` : "your agent's output, live",
+    },
+    queue: { html: queueBlock(), summary: queueSummary },
+    settings: data ? { html: settingsBlock(data.settings), summary: "agent, work folders, limits" } : null,
+  };
+  return `${head}${boardHtml("autopilot", blocks)}`;
 }

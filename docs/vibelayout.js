@@ -1,10 +1,11 @@
 // Pages as blocks you arrange: fold any block to one line, move it up or down (arrows or drag), and get the
-// same layout on every device. Vibe, Projects, People and Proof are built this way. The
+// same layout on every device. Every page with content of its own is built this way (see PAGES); each one
+// has a Dashboard block (its numbers) and a Recap block (what changed lately). The
 // layout lives in brain/CAIRN-LAYOUT.md, so the desktop app, the web app and the phone read the same file; a
 // copy in localStorage covers a read-only brain.
 
 import { escapeHtml as esc } from "./md.js";
-import { $, $$, icon } from "./ui.js";
+import { $, $$, icon, relativeTime } from "./ui.js";
 import { fileByPath, readOnly, state, upsertFile } from "./state.js";
 import { renderView } from "./app.js";
 
@@ -60,6 +61,116 @@ const PAGES = {
       { id: "recap", label: "Recap" },
       { id: "claims", label: "Claims" },
       { id: "publish", label: "Publish" },
+    ],
+    folded: [],
+  },
+  home: {
+    label: "Today",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "log", label: "Today's log" },
+      { id: "focus", label: "In focus" },
+    ],
+    folded: [],
+  },
+  board: {
+    label: "Board",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "cards", label: "Tasks" },
+    ],
+    folded: [],
+  },
+  ideas: {
+    label: "Ideas",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "cards", label: "Ideas" },
+    ],
+    folded: [],
+  },
+  decisions: {
+    label: "Decisions",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "log", label: "Decision log" },
+    ],
+    folded: [],
+  },
+  journal: {
+    label: "Journal",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "reviews", label: "Reviews to write" },
+      { id: "calendar", label: "Every day and mood", half: true },
+      { id: "lookback", label: "Look back", half: true },
+      { id: "search", label: "Search every day" },
+      { id: "days", label: "Recent days" },
+      { id: "pages", label: "All journal pages" },
+    ],
+    folded: ["pages"],
+  },
+  // Chat and Map are tools you work in, so the tool comes first and its numbers sit under it.
+  chat: {
+    label: "Chat",
+    panels: [
+      { id: "talk", label: "Conversation" },
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+    ],
+    folded: [],
+  },
+  autopilot: {
+    label: "Autopilot",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "goal", label: "Hand over a goal" },
+      { id: "goals", label: "Goals" },
+      { id: "log", label: "Log" },
+      { id: "queue", label: "Queue", half: true },
+      { id: "settings", label: "Settings", half: true },
+    ],
+    folded: ["settings"],
+  },
+  map: {
+    label: "Map",
+    panels: [
+      { id: "graph", label: "Map" },
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+    ],
+    folded: [],
+  },
+  canvas: {
+    label: "Canvas",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "boards", label: "Canvases" },
+    ],
+    folded: [],
+  },
+  notes: {
+    label: "Notes",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "all", label: "All notes" },
+    ],
+    folded: [],
+  },
+  code: {
+    label: "Code inbox",
+    panels: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "recap", label: "Recap" },
+      { id: "inbox", label: "Inbox" },
     ],
     folded: [],
   },
@@ -135,7 +246,7 @@ type: settings
 
 # Cairn layout
 
-How the pages built from blocks are arranged (${Object.values(PAGES).map((page) => page.label).join(", ")}), shared by the desktop app, the web app
+How the pages built from blocks are arranged, shared by the desktop app, the web app
 and the phone. Change it in Cairn: the arrow on a block folds it, the up and down buttons (or dragging the
 handle) move it. Editing these lines by hand works too. Block names:
 
@@ -294,10 +405,15 @@ export function boardHtml(page, blocks) {
   return `<div class="vibe-board" data-page="${page}">${panelsHtml(blocks, page)}</div>${note}`;
 }
 
-// The numbers at the top of a page: `tiles` is a list of { value, label, sub }.
+// The numbers at the top of a page: `tiles` is a list of { value, label, sub, title, go }. A tile with `go`
+// is a button that opens that page.
 export function dashboardHtml(tiles) {
   return `<div class="figures page-figures">${tiles
-    .map((tile) => `<div class="figure"${tile.title ? ` title="${esc(tile.title)}"` : ""}><span class="value">${esc(String(tile.value))}</span><span class="label">${esc(tile.label)}</span>${tile.sub ? `<span class="sub">${esc(tile.sub)}</span>` : ""}</div>`)
+    .map((tile) => {
+      const tag = tile.go ? "button" : "div";
+      const inner = `<span class="value">${esc(String(tile.value))}</span><span class="label">${esc(tile.label)}</span>${tile.sub ? `<span class="sub">${esc(tile.sub)}</span>` : ""}`;
+      return `<${tag} class="figure"${tile.go ? ` type="button" data-go="${esc(tile.go)}"` : ""}${tile.title ? ` title="${esc(tile.title)}"` : ""}>${inner}</${tag}>`;
+    })
     .join("")}</div>`;
 }
 
@@ -307,6 +423,18 @@ export function recapHtml(rows, empty) {
   return `<ol class="page-recap">${rows
     .map((row) => `<li>${row.when ? `<span class="t">${esc(row.when)}</span>` : ""}<span class="txt">${row.html}</span></li>`)
     .join("")}</ol>`;
+}
+
+// Recap rows for notes, newest change first: `describe(note)` is the text after the note's name.
+export function noteRecap(notes, describe, empty, limit = 6) {
+  const rows = [...notes]
+    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+    .slice(0, limit)
+    .map((note) => {
+      const detail = describe ? describe(note) : "";
+      return { when: relativeTime(note.mtime), html: `<button class="link-button" data-open="${esc(note.path)}">${esc(note.title)}</button>${detail ? ` <span class="muted">· ${esc(detail)}</span>` : ""}` };
+    });
+  return recapHtml(rows, empty);
 }
 
 // Drag a block by its handle and drop it on another: above that block's middle puts it before, below after.

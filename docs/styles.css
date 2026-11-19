@@ -1365,10 +1365,7 @@ body.log-open .log-fab { display: none; }
 .stat-card { display: flex; flex-direction: column; gap: 4px; padding: 12px 0 14px; border-top: 1px solid var(--line); }
 .stat-num { font-family: var(--display); font-size: 34px; line-height: 1; }
 .stat-label { font-size: 12.5px; color: var(--muted); }
-.memory-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; margin-bottom: 14px; }
-@media (max-width: 980px) { .memory-grid { grid-template-columns: minmax(0, 1fr); } }
 .memory-card { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); margin-bottom: 14px; }
-.memory-grid .memory-card { margin-bottom: 0; align-self: start; }
 .memory-card .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .memory-card .card-head h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 22px; }
 .heatmap { overflow-x: auto; padding-bottom: 4px; }
@@ -1412,8 +1409,6 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .day-title { font-weight: 600; color: var(--ink); text-decoration: none; }
 .day-entries { list-style: none; margin: 6px 0 0; padding: 0; }
 .day-entries li { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; padding: 3px 0; font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
-.all-pages summary { cursor: pointer; font-weight: 600; }
-.all-pages .list { margin-top: 8px; }
 .all-pages .row-item { display: flex; width: 100%; gap: 10px; align-items: center; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .all-pages .row-item .muted { margin-left: auto; font: 12px var(--mono); }
 @media (max-width: 640px) {
@@ -1744,19 +1739,12 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .ap-q.needs-me .ap-q-title { color: var(--muted); }
 .ap-q-flags { display: flex; gap: 6px; align-items: center; flex: none; }
 .ap-q-flags .chip { height: 22px; font-size: 12px; }
-.ap-settings summary { cursor: pointer; list-style: none; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-.ap-settings summary::-webkit-details-marker { display: none; }
-.ap-settings summary { display: flex; align-items: baseline; gap: 10px; }
-.ap-settings summary h2 { display: inline; }
-.ap-settings summary::after { content: "›"; margin-left: auto; font-size: 16px; color: var(--muted); transition: transform .15s; }
-.ap-settings[open] summary::after { transform: rotate(90deg); }
 .ap-settings form { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
 .ap-settings form > div:last-child { margin-top: 10px; }
 .ap-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .ap-log-block { margin-top: 4px; }
-.ap-cols-bottom { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
 @media (max-width: 900px) {
-  .ap-cols, .ap-cols-bottom { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .ap-cols { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .ap-nums { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -2346,9 +2334,25 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .vp-body > :is(.publish, .signin-cta, .my-brains, .proof-who) { margin-top: 0; }
 .vp-body > :is(.signin-cta, .my-brains):last-child { margin-bottom: 0; }
 .vp-body > .profile-card:first-child { margin-top: 0; }
+/* Every other page as blocks: the block's header names it, so the block's own heading and outer spacing go. */
+.vp-body > div > .figures { margin: 0; border-bottom: 0; }
+.vp-body > :is(.memory-stats, .memory-card, .home-log), .vp-body > .review-due:last-child { margin-bottom: 0; }
+.vp-body > .home-log .home-log-head h2 { display: none; }
+.vp-body > .ap-goal-form { padding: 0 0 4px; border-bottom: 0; }
+.vp-body > .ap-brief { margin-top: 10px; }
+.vp-body .recap-more { margin: 8px 0 0; }
+.vp-body .ap-log-note { margin: 0 0 6px; }
+.vp-body > .all-pages { padding: 0; border: 0; background: none; }
+/* Chat and the map are tools as tall as the screen: inside a block they give up the room its header takes. */
+.vp-body > .chat-page { height: calc(100dvh - 244px); }
+.vp-body > .map-layout .map-wrap { height: calc(100vh - 300px - var(--hub-tabs, 0px)); }
 @media (max-width: 1000px) {
   .vibe-board { grid-template-columns: minmax(0, 1fr); }
   .vibe-panel.half { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+  .vp-body > .chat-page { height: calc(100dvh - 204px); }
+  .vp-body > .map-layout .map-wrap { height: 62vh; }
 }
 @media (hover: none) and (pointer: coarse) {
   .vp-tools { opacity: 1; }

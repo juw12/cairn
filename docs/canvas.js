@@ -11,6 +11,7 @@ import { hydrateAssets, renderNote, resolveFrom } from "./vault.js";
 import { openNote } from "./drawer.js";
 import { pick } from "./palette.js";
 import { renderView, setView } from "./app.js";
+import { boardHtml, dashboardHtml, recapHtml } from "./vibelayout.js";
 
 const FOLDER = "canvases";
 const VIEW_KEY = "cairn.canvas.views";
@@ -209,7 +210,27 @@ export function canvasView() {
       <span class="cv-card-meta">${folder ? `${esc(folder)}/ · ` : ""}${file.mtime ? relativeTime(file.mtime) : ""}</span>
     </button>`;
   }).join("");
-  return `${head}<div class="cv-grid">${cards}</div>`;
+  const boards = files.map((file) => parseCanvas(file.text)).filter(Boolean);
+  const cardCount = boards.reduce((sum, data) => sum + data.nodes.filter((n) => n.type !== "group").length, 0);
+  const edgeCount = boards.reduce((sum, data) => sum + data.edges.length, 0);
+  const week = Date.now() - 7 * 86400000;
+  const edited = files.filter((file) => (file.mtime || 0) >= week).length;
+  const tiles = [
+    { value: files.length, label: files.length === 1 ? "canvas" : "canvases" },
+    { value: cardCount, label: cardCount === 1 ? "card" : "cards", sub: "on all canvases" },
+    { value: edgeCount, label: edgeCount === 1 ? "connection" : "connections" },
+    { value: edited, label: "edited this week" },
+  ];
+  const rows = files.slice(0, 6).map((file) => ({
+    when: file.mtime ? relativeTime(file.mtime) : "",
+    html: `<button class="link-button" data-cv-open="${esc(file.path)}">${esc(canvasName(file.path))}</button> <span class="muted">· edited</span>`,
+  }));
+  const newest = files[0];
+  return `${head}${boardHtml("canvas", {
+    dashboard: { html: dashboardHtml(tiles), summary: `${plural(files.length, "canvas", "canvases")} · ${plural(cardCount, "card")}` },
+    recap: { html: recapHtml(rows, "Nothing edited yet."), summary: `${canvasName(newest.path)}${newest.mtime ? ` · ${relativeTime(newest.mtime)}` : ""}` },
+    boards: { html: `<div class="cv-grid">${cards}</div>`, summary: plural(files.length, "canvas", "canvases") },
+  })}`;
 }
 
 function boardShell(path) {

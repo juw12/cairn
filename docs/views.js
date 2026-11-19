@@ -1,4 +1,6 @@
 // The main views (Today, Ideas, Board, Decisions, Notes, Journal, Code inbox, Context pack) and board drag and drop.
+// Today, Ideas, Board, Decisions, Notes and Code inbox are pages of blocks (vibelayout.js): a Dashboard, a Recap
+// and the page's own content, each of which folds and moves.
 // The sidebar holds five hubs (Today, Chat, Map, Build, People); Notes, Code inbox and Context pack sit under Tools.
 
 import * as core from "./core.js";
@@ -7,7 +9,8 @@ import { $, $$, STATUS_HINT, STATUS_LABEL, TYPE_META, byRecent, checklist, empty
 import { fileByPath, guide, markGuide, noteByPath, readOnly, saveNote, state } from "./state.js";
 import { bookmarks, countNotes, folderTree, searchNotes } from "./vault.js";
 import { render } from "./app.js";
-import { homeLogStrip } from "./voicelog.js";
+import { homeLogStrip, homeLogSummary } from "./voicelog.js";
+import { boardHtml, dashboardHtml, noteRecap } from "./vibelayout.js";
 
 // ============================================================ views
 
@@ -57,6 +60,34 @@ export function home() {
       ${rows.length ? `<div class="rows">${rows.join("")}</div>` : `<p class="empty">${empty}</p>`}
     </section>`;
 
+  const logStrip = homeLogStrip();
+  const label = (n) => `${TYPE_META[n.type].label}${n.status ? ` · ${STATUS_LABEL[n.status] || n.status}` : ""}`;
+  const blocks = {
+    dashboard: {
+      html: `<div class="figures">
+        ${figure("board", doing.length, "in progress")}
+        ${figure("ideas", ideasInPlay.length, "ideas in play")}
+        ${figure("decisions", proposed.length, "open decisions")}
+        ${figure("code", todoCount, "code TODOs")}
+      </div>`,
+      summary: `${doing.length} in progress · ${plural(ideasInPlay.length, "idea")} in play · ${plural(proposed.length, "open decision")}`,
+    },
+    recap: {
+      html: `${noteRecap(state.notes, label, "Nothing yet. Capture a thought in the bar above.")}
+        ${recent.length ? `<p class="recap-more"><button class="text-link" data-go="notes">All notes ${icon("arrow", "sm")}</button></p>` : ""}`,
+      summary: recent.length ? `last touched: ${recent[0].title}, ${relativeTime(recent[0].mtime)}` : "nothing yet",
+    },
+    log: logStrip ? { html: logStrip, summary: homeLogSummary() } : null,
+    focus: {
+      html: `<div class="columns-3">
+        ${column("Doing now", "board", "Board", doing.map((n) => rowItem(n, checklistMeta(n))), "Nothing in progress. Drag a task to Doing.")}
+        ${column("Fresh ideas", "ideas", "Ideas", fresh.map((n) => rowItem(n, relativeTime(n.mtime))), "No raw ideas. Capture one above.")}
+        ${column("Needs a decision", "decisions", "Decisions", proposed.map((n) => rowItem(n, "proposed")), "No open questions.")}
+      </div>`,
+      summary: `${doing.length} doing · ${fresh.length} fresh ${fresh.length === 1 ? "idea" : "ideas"} · ${proposed.length} to decide`,
+    },
+  };
+
   return `
     <header class="today">
       <div class="today-text">
@@ -74,19 +105,7 @@ export function home() {
       </figure>
     </header>
     ${guideHtml}
-    <div class="figures">
-      ${figure("board", doing.length, "in progress")}
-      ${figure("ideas", ideasInPlay.length, "ideas in play")}
-      ${figure("decisions", proposed.length, "open decisions")}
-      ${figure("code", todoCount, "code TODOs")}
-    </div>
-    ${homeLogStrip()}
-    <div class="columns-3">
-      ${column("Doing now", "board", "Board", doing.map((n) => rowItem(n, checklistMeta(n))), "Nothing in progress. Drag a task to Doing.")}
-      ${column("Fresh ideas", "ideas", "Ideas", fresh.map((n) => rowItem(n, relativeTime(n.mtime))), "No raw ideas. Capture one above.")}
-      ${column("Needs a decision", "decisions", "Decisions", proposed.map((n) => rowItem(n, "proposed")), "No open questions.")}
-    </div>
-    ${column("Recently touched", "notes", "All notes", recent.map((n) => rowItem(n, `${TYPE_META[n.type].label}${n.mtime ? " · " + relativeTime(n.mtime) : ""}`)), "Nothing yet.")}`;
+    ${boardHtml("home", blocks)}`;
 }
 
 function checklistMeta(note) {
@@ -135,13 +154,39 @@ function boardColumns(type) {
     .join("")}</div>`;
 }
 
+// The numbers and the latest changes of a board (tasks or ideas), for its Dashboard and Recap blocks.
+function boardBlocks(type, extra = "") {
+  const statuses = core.STATUSES[type];
+  const items = state.notes.filter((n) => n.type === type);
+  const count = (status) => items.filter((n) => n.status === status).length;
+  const week = Date.now() - 7 * 86400000;
+  const noun = type === "idea" ? "idea" : "task";
+  const tiles = statuses.map((status) => ({ value: count(status), label: STATUS_LABEL[status].toLowerCase(), title: STATUS_HINT[status] || "" }));
+  tiles.push({ value: items.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" });
+  if (type === "task") {
+    const lists = items.map(checklist).filter((c) => c.total);
+    const total = lists.reduce((sum, c) => sum + c.total, 0);
+    const ticked = lists.reduce((sum, c) => sum + c.done, 0);
+    tiles.push({ value: total ? `${Math.round((ticked / total) * 100)}%` : "–", label: "checklist items ticked", sub: total ? `${ticked} of ${total}` : "" });
+  }
+  const open = statuses.filter((status) => status !== "done" && status !== "parked");
+  return {
+    dashboard: { html: dashboardHtml(tiles), summary: `${plural(items.length, noun)} · ${open.map((status) => `${count(status)} ${STATUS_LABEL[status].toLowerCase()}`).join(" · ")}` },
+    recap: {
+      html: noteRecap(items, (n) => STATUS_LABEL[n.status] || n.status, type === "idea" ? "No ideas yet. Capture one in the bar above." : "No tasks yet. Add one below."),
+      summary: items.length ? `last: ${[...items].sort(byRecent)[0].title}` : `no ${noun}s yet`,
+    },
+    cards: { html: `${extra}${boardColumns(type)}`, summary: plural(items.length, noun) },
+  };
+}
+
 export function ideas() {
+  const spark = state.spark && !state.open ? `<div class="spark-card">${icon("idea")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Pick an idea and answer this in it, or capture what it makes you think of.</span></div></div>` : "";
   return `${pageHead("Ideas", readOnly()
     ? "What this brain is thinking about, from raw to ready. Open one to read it in full."
     : "Brainstorm here. Capture without judging, then drag ideas right as they firm up. Open one to spark it with a prompt or promote it to a task.",
     `<button class="btn" data-action="spark-random">${icon("shuffle")} Spark a prompt</button><button class="btn primary" data-action="new" data-type="idea">${icon("plus")} New idea</button>`)}
-    ${state.spark && !state.open ? `<div class="spark-card">${icon("idea")}<div><strong>${esc(state.spark)}</strong><br><span class="muted">Pick an idea and answer this in it, or capture what it makes you think of.</span></div></div>` : ""}
-    ${boardColumns("idea")}`;
+    ${boardHtml("ideas", boardBlocks("idea", spark))}`;
 }
 
 export function board() {
@@ -149,7 +194,7 @@ export function board() {
     ? "What this brain is working on, from to do to done. Open a card to read its checklist."
     : "Everything you are going to do, from to do to done. Drag cards between columns; open one to edit its checklist.",
     `<button class="btn primary" data-action="new" data-type="task">${icon("plus")} New task</button>`)}
-    ${boardColumns("task")}`;
+    ${boardHtml("board", boardBlocks("task"))}`;
 }
 
 function listRow(note) {
@@ -172,9 +217,28 @@ export function decisions() {
       return `<div class="group-title">${statusPill(status)} ${items.length}</div><div class="card list">${items.map(listRow).join("")}</div>`;
     })
     .join("");
+  const count = (status) => all.filter((n) => n.status === status).length;
+  const week = Date.now() - 7 * 86400000;
+  const tiles = [
+    { value: all.length, label: "decisions" },
+    ...core.STATUSES.decision.map((status) => ({ value: count(status), label: (STATUS_LABEL[status] || status).toLowerCase() })),
+    { value: all.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" },
+  ];
+  const latest = [...all].sort(byRecent)[0];
+  const blocks = {
+    dashboard: { html: dashboardHtml(tiles), summary: `${plural(all.length, "decision")} · ${count("proposed")} proposed` },
+    recap: {
+      html: noteRecap(all, (n) => STATUS_LABEL[n.status] || n.status, "No decisions yet."),
+      summary: latest ? `last: ${latest.title}` : "no decisions yet",
+    },
+    log: {
+      html: all.length ? groups : `<div class="card">${emptyState("decision", "No decisions yet", "Capture one with “decision: use SQLite” or press New decision. Each one gets a numbered file and a template.")}</div>`,
+      summary: plural(all.length, "decision"),
+    },
+  };
   return `${pageHead("Decisions", "A lightweight decision log: context, options, decision, consequences. Reviewed in pull requests like code, so the “why” never gets lost.",
     `<button class="btn primary" data-action="new" data-type="decision">${icon("plus")} New decision</button>`)}
-    ${all.length ? groups : `<div class="card">${emptyState("decision", "No decisions yet", "Capture one with “decision: use SQLite” or press New decision. Each one gets a numbered file and a template.")}</div>`}`;
+    ${boardHtml("decisions", blocks)}`;
 }
 
 function folderHtml(folder, depth = 0) {
@@ -212,9 +276,23 @@ export function notesView() {
   const empty = starred && !query
     ? emptyState("star", "No bookmarks yet", "Open a note and press the star to keep it one click away.")
     : emptyState("search", "Nothing matches", "Try another word, or clear the filters. Search understands tag:, path:, file:, type:, status:, \"exact phrase\" and -exclude.");
-  return `${pageHead("Notes", "Everything in the brain. Link notes with [[file-name]]; backlinks show up in each note.",
-    `<button class="btn primary" data-action="new" data-type="note">${icon("plus")} New note</button>`)}
-    <div class="toolbar">
+  const week = Date.now() - 7 * 86400000;
+  const ofType = (type) => state.notes.filter((n) => n.type === type).length;
+  const tiles = [
+    { value: state.notes.length, label: "notes in the brain" },
+    ...[["idea", "ideas"], ["task", "tasks"], ["decision", "decisions"], ["journal", "journal pages"]].map(([type, label]) => ({ value: ofType(type), label })),
+    { value: tagCounts.size, label: tagCounts.size === 1 ? "tag" : "tags" },
+    { value: state.notes.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" },
+  ];
+  const newest = [...state.notes].sort(byRecent)[0];
+  const blocks = {
+    dashboard: { html: dashboardHtml(tiles), summary: `${plural(state.notes.length, "note")} · ${plural(tagCounts.size, "tag")}` },
+    recap: {
+      html: noteRecap(state.notes, (n) => `${TYPE_META[n.type].label}${n.status ? ` · ${STATUS_LABEL[n.status] || n.status}` : ""}`, "Nothing yet."),
+      summary: newest ? `last touched: ${newest.title}, ${relativeTime(newest.mtime)}` : "nothing yet",
+    },
+    all: {
+      html: `<div class="toolbar">
       <div class="segmented" role="tablist" aria-label="Filter by type">${filters.map(([id, label]) => `<button class="${state.notesFilter === id ? "on" : ""}" data-filter="${id}" role="tab" aria-selected="${state.notesFilter === id}">${id === "bookmarks" ? icon("star", "sm") : ""}${label}</button>`).join("")}</div>
       <label class="search-field">${icon("search", "sm")}<span class="sr-only">Search notes</span><input class="input" id="notes-search" placeholder="Search… try tag:release or path:ideas/" value="${esc(state.notesQuery)}"></label>
       <div class="segmented layout-toggle" role="tablist" aria-label="Layout">
@@ -226,7 +304,13 @@ export function notesView() {
     ${query ? `<p class="muted search-summary">${plural(items.length, "note")} match <code>${esc(query)}</code></p>` : ""}
     ${layout === "folders"
       ? `<div class="card tree" id="notes-tree">${items.length ? folderHtml(folderTree(items)) : empty}</div>`
-      : `<div class="card list" id="notes-list">${items.length ? items.slice(0, shown).map(listRow).join("") : empty}</div>${more}`}`;
+      : `<div class="card list" id="notes-list">${items.length ? items.slice(0, shown).map(listRow).join("") : empty}</div>${more}`}`,
+      summary: `${plural(items.length, "note")}${query || state.notesTag || state.notesFilter !== "all" ? " shown" : ""}`,
+    },
+  };
+  return `${pageHead("Notes", "Everything in the brain. Link notes with [[file-name]]; backlinks show up in each note.",
+    `<button class="btn primary" data-action="new" data-type="note">${icon("plus")} New note</button>`)}
+    ${boardHtml("notes", blocks)}`;
 }
 
 // Big vaults: render the list a page at a time (a new filter or search starts again at one page).
@@ -253,20 +337,21 @@ export function sourceKey(item) {
 export function codeView() {
   const refresh = `<button class="btn" data-action="refresh-todos">${icon("refresh")} Rescan</button>`;
   const head = pageHead("Code inbox", "TODO, FIXME and HACK comments found in the code around your brain. Turn the ones that matter into tasks; each task remembers its file and line.", refresh);
-  if (state.todos === null) return `${head}<div class="card">${emptyState("code", "Scanning your code…", "Looking for TODO, FIXME and HACK comments.")}</div>`;
-  if (state.todosError) return `${head}<div class="card">${emptyState("code", "Couldn’t scan the code", esc(state.todosError))}</div>`;
-  if (!state.todos.length) {
-    const hint = state.info.emptyScanHint || "No TODO, FIXME or HACK comments found. Nice and tidy.";
-    return `${head}<div class="card">${emptyState("check", "Inbox zero", hint)}</div>`;
-  }
-  const tracked = new Set(state.notes.map((n) => (typeof n.meta.source === "string" ? n.meta.source : "")).filter(Boolean));
+  const todos = state.todos || [];
+  const fromCode = state.notes.filter((n) => typeof n.meta.source === "string" && n.meta.source);
+  const tracked = new Set(fromCode.map((n) => n.meta.source));
   const groups = new Map();
-  for (const item of state.todos) {
+  for (const item of todos) {
     if (!groups.has(item.path)) groups.set(item.path, []);
     groups.get(item.path).push(item);
   }
-  const html = [...groups.entries()]
-    .map(([path, items]) => `
+  let inbox;
+  if (state.todos === null) inbox = `<div class="card">${emptyState("code", "Scanning your code…", "Looking for TODO, FIXME and HACK comments.")}</div>`;
+  else if (state.todosError) inbox = `<div class="card">${emptyState("code", "Couldn’t scan the code", esc(state.todosError))}</div>`;
+  else if (!todos.length) inbox = `<div class="card">${emptyState("check", "Inbox zero", state.info.emptyScanHint || "No TODO, FIXME or HACK comments found. Nice and tidy.")}</div>`;
+  else {
+    inbox = [...groups.entries()]
+      .map(([path, items]) => `
       <section class="card file-group">
         <div class="file-head">${icon("code", "sm")}${esc(path)}<span class="muted" style="margin-left:auto">${plural(items.length, "item")}</span></div>
         ${items
@@ -279,8 +364,28 @@ export function codeView() {
           })
           .join("")}
       </section>`)
-    .join("");
-  return `${head}${html}`;
+      .join("");
+  }
+  const kinds = new Map();
+  for (const item of todos) kinds.set(item.tag, (kinds.get(item.tag) || 0) + 1);
+  const trackedCount = todos.filter((item) => tracked.has(sourceKey(item))).length;
+  const scanned = state.todos !== null && !state.todosError;
+  const tiles = [
+    { value: scanned ? todos.length : "–", label: "comments found" },
+    ...[...kinds.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([tag, count]) => ({ value: count, label: tag })),
+    { value: scanned ? groups.size : "–", label: groups.size === 1 ? "file" : "files" },
+    { value: scanned ? trackedCount : "–", label: "already tasks" },
+    { value: scanned ? todos.length - trackedCount : "–", label: "not tracked yet" },
+  ];
+  const blocks = {
+    dashboard: { html: dashboardHtml(tiles), summary: scanned ? `${plural(todos.length, "comment")} · ${trackedCount} tracked` : "scanning…" },
+    recap: {
+      html: noteRecap(fromCode, (n) => `${STATUS_LABEL[n.status] || n.status} · from ${n.meta.source}`, "No tasks made from code comments yet."),
+      summary: fromCode.length ? `${plural(fromCode.length, "task")} made from code` : "no tasks from code yet",
+    },
+    inbox: { html: inbox, summary: scanned ? plural(todos.length, "comment") : "" },
+  };
+  return `${head}${boardHtml("code", blocks)}`;
 }
 
 // ------------------------------------------------------------ context pack
@@ -387,12 +492,15 @@ export function wireBoard() {
       requestAnimationFrame(() => card.classList.add("dragging"));
     });
     card.addEventListener("dragend", () => {
+      dragging = null;
       card.classList.remove("dragging");
       $$(".column.drop").forEach((c) => c.classList.remove("drop"));
     });
   });
   $$(".column[data-column]").forEach((column) => {
+    // Only a card is dropped on a column: a block dragged by its handle passes over untouched.
     column.addEventListener("dragover", (event) => {
+      if (!dragging) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       column.classList.add("drop");
@@ -401,6 +509,7 @@ export function wireBoard() {
       if (!column.contains(event.relatedTarget)) column.classList.remove("drop");
     });
     column.addEventListener("drop", (event) => {
+      if (!dragging) return;
       event.preventDefault();
       column.classList.remove("drop");
       const path = event.dataTransfer.getData("text/plain") || dragging;

@@ -9,6 +9,7 @@ import { $, icon, pageHead, plural, toast, today } from "./ui.js";
 import { createNote, deleteNote, noteByPath, readOnly, saveNote, scheduleGitRefresh, state, upsertFile } from "./state.js";
 import { openNote } from "./drawer.js";
 import { render, setView } from "./app.js";
+import { boardHtml, openPanel, recapHtml } from "./vibelayout.js";
 
 const PREFS_KEY = "cairn.voicelog";
 const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true" class="icon"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>';
@@ -1027,44 +1028,77 @@ export function journalView() {
   const mindRange = [30, 90, 0].includes(state.mindRange) ? state.mindRange : 30;
   const { tags, links, people } = dl.mentions(all, mindRange ? dl.addDays(now, -(mindRange - 1)) : "0000-01-01", now);
   const due = editable ? dl.pendingReviews(all, state.notes, now) : [];
-  return `${pageHead("Journal & memories", "Your daily log, one Markdown page per day. Tap the mic button (or press L) to log by voice; everything lands in brain/journal/ as plain text.", actions)}
-    <section class="memory-stats">
+  const daysLogged = [...all.values()].filter((i) => i.entries.length).length;
+  const moodText = (text) => text.replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: ");
+  // Recap: the newest entries, across days.
+  const latest = [];
+  for (const day of [...all.keys()].sort().reverse()) {
+    for (const entry of [...all.get(day).entries].reverse()) latest.push({ day, entry });
+    if (latest.length >= 6) break;
+  }
+  const recapRows = latest.slice(0, 6).map(({ day, entry }) => ({
+    when: day === now ? entry.time || "today" : dl.prettyDay(day, "short"),
+    html: `${inline(moodText(entry.text))} <button class="link-btn muted" data-jl-day="${day}">open day</button>`,
+  }));
+  const mind = tags.length || links.length || people.length;
+  const blocks = {
+    dashboard: {
+      html: `<section class="memory-stats">
       <div class="stat-card"><span class="stat-num">${streak.current}</span><span class="stat-label">day streak${streak.loggedToday ? "" : editable && streak.current ? " · log today to keep it" : ""}</span></div>
       <div class="stat-card"><span class="stat-num">${streak.longest}</span><span class="stat-label">longest streak</span></div>
-      <div class="stat-card"><span class="stat-num">${[...all.values()].filter((i) => i.entries.length).length}</span><span class="stat-label">days logged · ${plural(totalEntries, "entry", "entries")}</span></div>
+      <div class="stat-card"><span class="stat-num">${daysLogged}</span><span class="stat-label">days logged · ${plural(totalEntries, "entry", "entries")}</span></div>
       <div class="stat-card"><span class="stat-num">${weekEntries}</span><span class="stat-label">entries this week</span></div>
       <div class="stat-card"><span class="stat-num">${avg === null ? "–" : `${avg.toFixed(1)}<small>/5</small>`}</span><span class="stat-label">mood, last ${range} days</span></div>
-    </section>
-    ${due.length ? reviewDueHtml(due) : ""}
-    <div class="memory-grid">
-      <section class="card memory-card heat-card">
+    </section>`,
+      summary: `${streak.current}-day streak · ${plural(daysLogged, "day")} logged · ${weekEntries} this week`,
+    },
+    recap: {
+      html: recapHtml(recapRows, editable ? "Nothing logged yet. Tap the mic button at the bottom to start." : "Nothing logged yet."),
+      summary: latest.length ? `last entry ${latest[0].day === now ? `today ${latest[0].entry.time || ""}`.trim() : dl.prettyDay(latest[0].day, "short")}` : "nothing logged yet",
+    },
+    reviews: due.length ? { html: reviewDueHtml(due), summary: `${plural(due.length, "review")} ready to write` } : null,
+    calendar: {
+      html: `<section class="memory-card heat-card">
         <div class="card-head"><h2>Every day</h2><span class="muted">last 12 months</span></div>
         ${heatmapHtml(all, now)}
         <div class="heat-legend"><span>Less</span><i class="heat l0"></i><i class="heat l1"></i><i class="heat l2"></i><i class="heat l3"></i><span>More</span></div>
         <div class="card-head" style="margin-top:14px"><h2>Mood</h2><span class="seg" role="group" aria-label="Mood range">${[30, 90].map((n) => `<button type="button" class="seg-btn ${range === n ? "on" : ""}" data-jl-range="${n}" aria-pressed="${range === n}">${n}d</button>`).join("")}</span></div>
         ${moodChart(series)}
-      </section>
-      <section class="card memory-card">
-        <div class="card-head"><h2>Look back</h2></div>
+      </section>`,
+      summary: `${plural(daysLogged, "day")} logged · mood ${avg === null ? "not set" : `${avg.toFixed(1)}/5`}`,
+    },
+    lookback: {
+      html: `<section class="memory-card">
         <ul class="lookbacks">${dl.lookBacks(all, now).map(lookBackRow).join("")}</ul>
         ${related.length ? `<div class="card-head" style="margin-top:12px"><h2>Linked to today</h2></div><ul class="related-days">${related.map((r) => `<li><button class="link-btn" data-jl-day="${r.day}">${esc(dl.prettyDay(r.day, "short"))}</button> <span class="muted">${r.shared.length ? r.shared.map(esc).join(", ") : `reads alike: ${r.words.map(esc).join(", ")}`}</span></li>`).join("")}</ul>` : ""}
         <div class="card-head" style="margin-top:12px"><h2>On your mind</h2><span class="seg" role="group" aria-label="On your mind range">${[[30, "30d"], [90, "90d"], [0, "All"]].map(([n, label]) => `<button type="button" class="seg-btn ${mindRange === n ? "on" : ""}" data-jl-mind="${n}" aria-pressed="${mindRange === n}">${label}</button>`).join("")}</span></div>
-        ${tags.length || links.length || people.length ? `<div class="tags">${people.slice(0, 6).map(([p, n]) => `<button class="tag person" data-jl-search="@${esc(p)}">@${esc(p)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${tags.slice(0, 6).map(([t, n]) => `<button class="tag" data-jl-search="#${esc(t)}">#${esc(t)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${links.slice(0, 6).map(([l, n]) => `<button class="tag" data-jl-search="${esc(l)}">${esc(core.resolveLink(state.notes, l)?.title || l)} <span class="muted">&nbsp;${n}</span></button>`).join("")}</div>` : `<p class="muted">No #tags, @people or [[links]] ${mindRange ? `in the last ${mindRange} days` : "yet"}.</p>`}
-      </section>
-    </div>
-    <section class="card memory-card">
-      <div class="card-head"><h2>Search every day</h2></div>
+        ${mind ? `<div class="tags">${people.slice(0, 6).map(([p, n]) => `<button class="tag person" data-jl-search="@${esc(p)}">@${esc(p)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${tags.slice(0, 6).map(([t, n]) => `<button class="tag" data-jl-search="#${esc(t)}">#${esc(t)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${links.slice(0, 6).map(([l, n]) => `<button class="tag" data-jl-search="${esc(l)}">${esc(core.resolveLink(state.notes, l)?.title || l)} <span class="muted">&nbsp;${n}</span></button>`).join("")}</div>` : `<p class="muted">No #tags, @people or [[links]] ${mindRange ? `in the last ${mindRange} days` : "yet"}.</p>`}
+      </section>`,
+      summary: "yesterday, last week, a year ago · on your mind",
+    },
+    search: {
+      html: `<section class="memory-card">
+      <label class="sr-only" for="journal-search">Search every day</label>
       <input class="input" id="journal-search" type="search" placeholder="Find anything you logged… (words, #tags, note names)" autocomplete="off" value="${esc(state.journalQuery || "")}">
       <div id="journal-results">${searchResults(all, state.journalQuery || "")}</div>
-    </section>
-    <section class="card memory-card">
-      <div class="card-head"><h2>Recent days</h2></div>
+    </section>`,
+      summary: state.journalQuery ? `searching “${state.journalQuery}”` : `across ${plural(all.size, "day")}`,
+    },
+    days: {
+      html: `<section class="memory-card">
       ${recent.length ? recent.map((d) => dayBlock(d, all.get(d))).join("") : `<p class="muted">Nothing logged yet. ${editable ? "Tap the mic button at the bottom to start." : ""}</p>`}
-    </section>
-    <details class="card memory-card all-pages">
-      <summary>All journal pages <span class="muted">(${pages.length})</span></summary>
-      <div class="list">${pages.map((n) => `<button class="row-item" data-open="${esc(n.path)}">${icon("journal", "sm")}<span>${esc(n.title)}</span><span class="muted">${esc(n.path)}</span></button>`).join("")}</div>
-    </details>`;
+    </section>`,
+      summary: recent.length ? `${plural(recent.length, "day")}, newest ${dl.prettyDay(recent[0], "short")}` : "nothing logged yet",
+    },
+    pages: {
+      html: pages.length
+        ? `<div class="memory-card all-pages"><div class="list">${pages.map((n) => `<button class="row-item" data-open="${esc(n.path)}">${icon("journal", "sm")}<span>${esc(n.title)}</span><span class="muted">${esc(n.path)}</span></button>`).join("")}</div></div>`
+        : `<p class="muted">No journal pages yet.</p>`,
+      summary: plural(pages.length, "page"),
+    },
+  };
+  return `${pageHead("Journal & memories", "Your daily log, one Markdown page per day. Tap the mic button (or press L) to log by voice; everything lands in brain/journal/ as plain text.", actions)}
+    ${boardHtml("journal", blocks)}`;
 }
 
 // Days that share #tags, @people or [[links]] with today come first; then days whose words read alike.
@@ -1190,10 +1224,14 @@ export function wireJournal() {
     const term = event.target.closest("[data-jl-search]");
     if (term) {
       state.journalQuery = term.dataset.jlSearch;
-      const input = $("#journal-search");
-      input.value = state.journalQuery;
-      $("#journal-results").innerHTML = searchResults(days(), state.journalQuery);
-      input.scrollIntoView({ block: "center", behavior: "smooth" });
+      // A folded Search block opens (and draws the results) before the page scrolls to it.
+      if (!openPanel("search", "journal")) {
+        const input = $("#journal-search");
+        if (input) input.value = state.journalQuery;
+        const results = $("#journal-results");
+        if (results) results.innerHTML = searchResults(days(), state.journalQuery);
+      }
+      $("#journal-search")?.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
     }
     const mindButton = event.target.closest("[data-jl-mind]");
@@ -1214,6 +1252,15 @@ export function wireJournal() {
 }
 
 // ============================================================ Home: today's log at a glance
+
+// The folded "Today's log" block on Today says this much.
+export function homeLogSummary() {
+  const all = days();
+  const now = today();
+  const entries = all.get(now)?.entries || [];
+  const streak = dl.streaks(all, now).current;
+  return `${plural(entries.length, "entry", "entries")}${streak ? ` · ${streak}-day streak` : ""}`;
+}
 
 export function homeLogStrip() {
   const all = days();
