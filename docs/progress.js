@@ -307,6 +307,52 @@ export function githubUsage(notes) {
   return notes.map(githubFromNote).filter(Boolean).sort((a, b) => (a.month < b.month ? 1 : -1));
 }
 
+// ------------------------------------------------------------ one brain, several computers
+
+/** The computer a session ran on, as its watcher or `cairn vibe start` named it. "" when it names none. */
+export function deviceOf(note) {
+  return String(note?.meta?.machine ?? "").trim();
+}
+
+/**
+ * The computers this brain's sessions ran on, the one used last first:
+ * [{ name, sessions, live, tokens, last }]. Sessions that name no computer are one entry named "", listed last.
+ * A computer that has left a machines/ note and no session yet is listed too.
+ */
+export function deviceList(notes) {
+  const found = new Map();
+  const entry = (name) => {
+    if (!found.has(name)) found.set(name, { name, sessions: 0, live: 0, tokens: 0, last: "" });
+    return found.get(name);
+  };
+  for (const note of notes) {
+    if (note.type === "session") {
+      const device = entry(deviceOf(note));
+      const seen = String(note.meta.ended || note.meta.started || note.meta.created || "");
+      device.sessions += 1;
+      device.live += note.status === "live" ? 1 : 0;
+      device.tokens += Number(note.meta.tokens) || 0;
+      if (seen > device.last) device.last = seen;
+      continue;
+    }
+    const reading = machineFromNote(note);
+    if (reading?.name) {
+      const device = entry(reading.name.trim());
+      if (reading.at > device.last) device.last = reading.at;
+    }
+  }
+  return [...found.values()].sort((a, b) => (a.name === "") - (b.name === "") || (a.last < b.last ? 1 : a.last > b.last ? -1 : a.name < b.name ? -1 : 1));
+}
+
+/** The notes as one computer has them: its sessions and its machines/ note. Every other kind of note is kept. */
+export function deviceNotes(notes, device) {
+  return notes.filter((note) => {
+    if (note.type === "session") return deviceOf(note) === device;
+    const reading = machineFromNote(note);
+    return reading ? Boolean(device) && reading.name.trim() === device : true;
+  });
+}
+
 export function formatMinutes(minutes) {
   if (minutes === null || minutes === undefined) return "";
   if (minutes < 1) return "under a minute";

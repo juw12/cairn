@@ -262,13 +262,54 @@ class OpenCodeTests(unittest.TestCase):
         [note] = sessions(self.brain)
         self.assertEqual(note["status"], "dropped")
 
+    def add_row(self, row):
+        connection = sqlite3.connect(self.db)
+        connection.execute(f"insert into session ({', '.join(row)}) values ({', '.join('?' for _ in row)})", list(row.values()))
+        connection.commit()
+        connection.close()
+
+    def test_the_first_pass_takes_the_whole_history_and_later_ones_the_last_days(self):
+        make_db(self.db, [self.row("ses_old", "Ancient", 60 * 24 * 40, 60 * 24 * 39), self.row("ses_new", "Recent", 60, 40)])
+        self.sync()
+        self.assertEqual({n["meta"]["external"] for n in sessions(self.brain)}, {"ses_old", "ses_new"}, "a new computer brings all it has")
+        self.add_row(self.row("ses_older", "Older still", 60 * 24 * 50, 60 * 24 * 49))
+        self.sync()
+        self.assertEqual({n["meta"]["external"] for n in sessions(self.brain)}, {"ses_old", "ses_new"}, "after that, 14 days back")
+        watch.watch_once(self.brain, vector=False, now_ms=self.now, db_path=self.db, days=0)
+        self.assertEqual({n["meta"]["external"] for n in sessions(self.brain)}, {"ses_old", "ses_new", "ses_older"}, "--days 0 reads everything")
+        with mock.patch.object(watch.machine, "device_name", return_value="Other laptop"):
+            self.add_row(self.row("ses_oldest", "The oldest", 60 * 24 * 60, 60 * 24 * 59))
+            self.sync()
+        self.assertIn("ses_oldest", {n["meta"]["external"] for n in sessions(self.brain)}, "each computer has its own first pass")
+
+    def test_a_session_names_its_computer_and_another_computers_is_left_alone(self):
+        make_db(self.db, [self.row("ses_here", "Made here", 300, 200)])
+        with mock.patch.object(watch.machine, "device_name", return_value="ACME Roadrunner 14"):
+            self.sync()
+            [here] = sessions(self.brain)
+            self.assertEqual(here["meta"]["machine"], "ACME Roadrunner 14")
+            # Two live notes from sessions this database does not hold: one names another computer, one names none.
+            started = watch._stamp(self.now - 600 * MINUTE)
+            for slug, extra in (("there", {"machine": "MacBook Pro 15,1"}), ("unnamed", {})):
+                meta = {"title": slug, "type": "session", "status": "live", "tags": [], "created": started[:10], "started": started,
+                        "source": "opencode", "external": f"ses_{slug}", **extra}
+                self.brain.write(f"sessions/{slug}.md", core.serialize_note(meta, f"## Log\n\n- {started[11:]} start: {slug}\n"), None)
+            self.sync()
+            by_slug = {n["slug"]: n for n in sessions(self.brain)}
+            self.assertEqual(by_slug["there"]["status"], "live", "the other computer ends its own sessions")
+            self.assertNotEqual(by_slug["unnamed"]["status"], "live", "one that names no computer is this one's to end")
+            # A note already stamped keeps its computer even when this watcher refreshes it.
+            current = self.brain.read(here["path"])
+            self.brain.write(here["path"], core.update_note_text(current["text"], {"machine": "Renamed", "status": "live"}), current["mtime"])
+            self.sync()
+            self.assertEqual({n["slug"]: n for n in sessions(self.brain)}[here["slug"]]["meta"]["machine"], "Renamed")
+
     def test_subagents_are_counted_not_listed_and_other_folders_skipped(self):
         make_db(self.db, [
             self.row("ses_parent", "Survey", 60, 40),
             self.row("ses_child", "Sub task", 50, 45, parent_id="ses_parent"),
             self.row("ses_child2", "Sub task 2", 50, 44, parent_id="ses_parent"),
             self.row("ses_far", "Elsewhere", 60, 40, directory="C:/somewhere/else"),
-            self.row("ses_old", "Ancient", 60 * 24 * 40, 60 * 24 * 39),
             self.row("ses_gone", "Archived", 60, 40, time_archived=self.now),
         ])
         self.sync()

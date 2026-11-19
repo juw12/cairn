@@ -362,6 +362,7 @@ export function resetLayout(page = "vibe") {
 }
 
 // `blocks` maps a block id to { html, summary }; empty blocks are left out. Two half blocks in a row pair up.
+// A block may give its own `label` for the cases where the usual title would be wrong.
 export function panelsHtml(blocks, page = "vibe") {
   const layout = pageLayout(page);
   const shown = layout.order.filter((id) => blocks[id]?.html);
@@ -369,7 +370,8 @@ export function panelsHtml(blocks, page = "vibe") {
   let pairedWithPrevious = false;
   return shown
     .map((id, index) => {
-      const { label, half } = meta.get(id);
+      const { half } = meta.get(id);
+      const label = blocks[id].label || meta.get(id).label;
       const nextHalf = meta.get(shown[index + 1])?.half;
       const pair = half && (pairedWithPrevious || nextHalf);
       pairedWithPrevious = Boolean(half && !pairedWithPrevious && nextHalf);

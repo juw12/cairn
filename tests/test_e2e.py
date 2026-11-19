@@ -88,6 +88,31 @@ OPENBOT_SEED = """() => {
   window.cairn.rerender();
 }"""
 
+# One brain with the sessions of two computers, each with its machines/ note.
+DEVICES_SEED = """() => {
+  const s = window.cairn.state;
+  const pad = (n) => String(n).padStart(2, "0");
+  const ago = (minutes) => {
+    const d = new Date(Date.now() - minutes * 60000);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const add = (path, meta, body) => {
+    const head = Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join("\\n");
+    s.files.push({ path, text: `---\\n${head}\\n---\\n\\n${body}\\n`, mtime: Date.now() });
+  };
+  const session = (slug, machine, extra) =>
+    add(`sessions/${slug}.md`, { title: slug, type: "session", source: "opencode", agent: "opencode", machine, ...extra }, `## Log\\n\\n- ${ago(5).slice(11)} start: ${slug}`);
+  session("pc-live", "ASUS EXPERTBOOK", { status: "live", started: ago(4), turn: "working", turn_at: ago(1), tokens: 1200 });
+  session("pc-done", "ASUS EXPERTBOOK", { status: "shipped", started: ago(90), ended: ago(60), tokens: 300 });
+  session("mac-live", "MacBook Pro", { status: "live", started: ago(2), turn: "working", turn_at: ago(1), tokens: 50 });
+  const machine = (slug, title, at, cpu) =>
+    add(`machines/${slug}.md`, { title, type: "note", tags: "[machine]", machine_at: at, machine_cpu: cpu, machine_cores: 8, machine_ram_gb: 16, load: "light", load_cpu: 12, load_ram: 40 }, "Written by the watcher.");
+  machine("asus-expertbook", "ASUS EXPERTBOOK", ago(3), "Intel Core Ultra 7");
+  machine("macbook-pro", "MacBook Pro", ago(45), "Intel Core i7");
+  s.notes = s.files.map((f) => window.cairn.core.noteFromFile(f.path, f.text, f.mtime));
+  window.cairn.rerender();
+}"""
+
 # A PC to chat with: remembers what was sent instead of running a model.
 CHAT_STUB = """() => {
   const s = window.cairn.state;
@@ -1034,6 +1059,44 @@ class EndToEndTests(unittest.TestCase):
         page.press("#capture-input", "Enter")
         page.wait_for_function("() => window.cairn.state.files.some((f) => f.path === 'feedback/offline-maps-saved-my-hike.md')")
         self.assertIn("status: new", self.note_text(page, "feedback/offline-maps-saved-my-hike.md"))
+        self.assertEqual(self.errors, [])
+
+    def test_vibe_device_bar_shows_one_computer_or_all_and_keeps_the_choice(self):
+        page = self.open()
+        self.go(page, "vibe")
+        self.assertEqual(page.locator(".vibe-devices").count(), 0)  # no second computer: nothing to choose
+        page.evaluate(DEVICES_SEED)
+        page.wait_for_selector(".vibe-devices")
+        chips = lambda: page.eval_on_selector_all(
+            ".vibe-devices .chip",
+            "els => els.map((e) => [e.dataset.device ?? null, e.querySelector('b').textContent, e.querySelector('.vd-live')?.textContent ?? '', e.getAttribute('aria-pressed')])",
+        )
+        # Every computer together first; the one used last leads the list.
+        self.assertEqual(chips(), [[None, "3", "2 live", "true"], ["MacBook Pro", "1", "1 live", "false"], ["ASUS EXPERTBOOK", "2", "1 live", "false"]])
+        self.assertIn("3 sessions", page.inner_text(".vibe-overview > header"))
+        self.assertEqual(page.locator(".rc-live > .rc-row").count(), 2)
+        self.assertEqual(sorted(page.locator(".rc-live .rc-device").all_inner_texts()), ["ASUS EXPERTBOOK", "MacBook Pro"])
+        self.assertEqual(page.inner_text(".vibe-machine h2"), "ASUS EXPERTBOOK")  # the newest reading
+
+        mac = '.vibe-devices .chip[data-device="MacBook Pro"]'
+        page.click(mac)
+        page.wait_for_function("() => document.querySelectorAll('.rc-live > .rc-row').length === 1")
+        self.assertEqual(page.get_attribute(mac, "aria-pressed"), "true")
+        page.wait_for_function("(sel) => document.activeElement.matches(sel)", arg=mac)  # focus stays on the chip
+        self.assertEqual(page.inner_text(".rc-live .rc-title").strip(), "mac-live")
+        self.assertEqual(page.locator(".rc-device").count(), 0)  # one computer shown: no need to name it on each row
+        self.assertIn("1 session", page.inner_text(".vibe-overview > header"))
+        self.assertIn("1 session · 50 tokens", page.inner_text(".vibe-device-note"))
+        self.assertEqual(page.inner_text(".vibe-machine h2"), "MacBook Pro")  # its own reading, not this computer's
+        self.assertEqual(page.inner_text('[data-panel="machine"] .vp-title'), "Computer")
+        self.assertIn("2 live", page.inner_text('.hub-tabs [data-go="vibe"]'))  # the tab's count is every computer's
+        self.assertEqual(page.evaluate("() => localStorage.getItem('cairn.vibeDevice')"), '"MacBook Pro"')
+
+        page.click(".vibe-devices .chip:not([data-device])")
+        page.wait_for_function("() => document.querySelectorAll('.rc-live > .rc-row').length === 2")
+        self.assertIsNone(page.evaluate("() => localStorage.getItem('cairn.vibeDevice')"))
+        self.assertEqual(page.locator(".vibe-device-note").count(), 0)
+        self.assertEqual(page.evaluate("() => document.documentElement.scrollWidth - innerWidth"), 0)
         self.assertEqual(self.errors, [])
 
     def test_vibe_view_on_a_phone_in_dark_mode(self):

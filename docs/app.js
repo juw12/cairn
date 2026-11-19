@@ -14,7 +14,7 @@ import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync,
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { addFriend, loadLeaderboard, publishStats, removeFriend, setLeaderboardStat, unpublishStats } from "./leaderboard.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, showAllClaims, vouchFor } from "./proofview.js";
-import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, toggleRow, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
+import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeDevice, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, toggleRow, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -372,6 +372,7 @@ function wireGlobal() {
       "vibe-sample": loadSampleSessions,
       "vibe-copy-hook": copyAgentHook,
       "vibe-filter": () => setVibeFilter(actionEl.dataset.source),
+    "vibe-device": () => setVibeDevice(actionEl.dataset.device),
       "vibe-more": () => showMoreSessions(actionEl.dataset.all === "1"),
       "vibe-outcome": () => setVibeOutcome(actionEl.dataset.outcome),
       "vibe-overview": () => setOverviewOutcome(actionEl.dataset.outcome),

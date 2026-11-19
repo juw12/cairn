@@ -236,6 +236,14 @@ stand by and take over within five minutes of it stopping.
   `vibe end` is closed after four hours without a step, and its next `vibe log --session <slug>` opens it again.
 - **Privacy:** the OpenCode database is opened read-only and only session metadata and message timestamps are read,
   never message text. Nothing leaves your machine. `--no-opencode` and `--no-vector` turn either source off.
+- **Several computers:** every session note names the computer it ran on (`machine:`), so two computers can write
+  into one brain. Sync the brain between them the way you already do (git), run Cairn on each, and the Vibe page
+  gets a device bar: **All devices** with the totals together, or one computer alone with its own sessions, live
+  count, tokens and load reading. The first pass on a computer takes every session its OpenCode still has, not just
+  the last 14 days (`--days 0` does that again later). A watcher only opens and closes the sessions of its own
+  computer. Another computer is as current as its last sync into the brain. `cairn vibe device` shows the name in
+  use (`CAIRN_DEVICE=...` sets another), and `cairn vibe device --adopt`, run once on the computer that made them,
+  puts its name on older sessions that name none. On a Mac the load reading comes from `vm_stat`, `pmset` and `ps`.
 - **GitHub Actions minutes:** with a GitHub token (the one `cairn publish` uses) the watcher reads your Actions
   usage once an hour and keeps one note per month in `github-usage/`. The Vibe page shows this month's free
   minutes as a meter, warns at 75%, 90% and 100% (or when the last 7 days' pace would pass 100% by month end),
@@ -558,6 +566,7 @@ cairn mcp                                # MCP server for Claude, Cursor, Copilo
 cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ and sync both ways
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
+cairn vibe device                        # the name this computer puts on its sessions (--adopt names older ones)
 cairn precedent brief "goal"             # a brief from your own history (learn, queue, next, log, install)
 cairn autopilot add "goal"               # your agent carries it to done (on, off, status, set)
 cairn telegram setup <bot token>         # a daily status report in Telegram (show, send, status, off)

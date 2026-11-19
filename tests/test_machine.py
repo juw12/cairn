@@ -115,6 +115,8 @@ class SnapshotTests(unittest.TestCase):
             mock.patch.object(machine, "_uptime_seconds", return_value=76 * 3600.0),
             mock.patch.object(machine, "_registry", side_effect=lambda key, name: registry[name]),
             mock.patch.object(machine.time, "sleep"),
+            mock.patch.object(machine, "IS_MAC", False),  # the registry stands in for the model on any system
+            mock.patch.dict(machine.os.environ, {"CAIRN_DEVICE": ""}),
         )
 
     def test_a_reading_has_the_specs_the_load_and_what_uses_it(self):
@@ -194,6 +196,108 @@ class SnapshotSoonTests(unittest.TestCase):
         with mock.patch.object(machine, "snapshot", return_value=None):
             self.assertEqual(machine.snapshot_soon(), {"level": "light"})
             self._settle()
+
+
+VM_STAT = """Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                              100000.
+Pages active:                           1500000.
+Pages inactive:                          800000.
+Pages speculative:                       148576.
+Pages throttled:                              0.
+Pages wired down:                        700000.
+Pages purgeable:                          20000.
+"Translation faults":                 123456789.
+Pages occupied by compressor:            945728.
+"""
+
+PS = """    1  12345   1:02.50 /sbin/launchd
+  412 524288  83:20.00 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+  413 262144   0:10.00 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+  900   2048 1-00:00:10 opencode
+garbage line
+"""
+
+
+class MacTests(unittest.TestCase):
+    """macOS readings are parsed from what its own tools print. No Mac runs these tests: the samples are the
+    documented output formats, so a real Mac is still the last word."""
+
+    def test_the_model_reads_with_spaces(self):
+        self.assertEqual(machine.mac_model_name("MacBookPro15,1\n"), "MacBook Pro 15,1")
+        self.assertEqual(machine.mac_model_name("Macmini8,1"), "Mac mini 8,1")
+        self.assertEqual(machine.mac_model_name("Mac14,2"), "Mac 14,2")
+        self.assertEqual(machine.mac_model_name("VMware7,1"), "VMware7,1")
+        self.assertEqual(machine.mac_model_name(""), "")
+
+    def test_memory_counts_cached_pages_as_free(self):
+        total = 16 * GB  # 4,194,304 pages of 4096 bytes
+        memory = machine.parse_vm_stat(VM_STAT, total)
+        self.assertEqual(memory["free"], (100000 + 800000 + 148576) * 4096)
+        self.assertEqual((memory["total"], memory["ram_pct"], memory["commit_pct"]), (total, 75, None))
+        self.assertIsNone(machine.parse_vm_stat("", total))
+        self.assertIsNone(machine.parse_vm_stat(VM_STAT, 0))
+
+    def test_power_and_processes(self):
+        battery = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t62%; discharging; 3:10 remaining present: true\n"
+        self.assertEqual(machine.parse_pmset(battery), "on battery 62%")
+        self.assertEqual(machine.parse_pmset(battery.replace("Battery Power", "AC Power")), "plugged in 62%")
+        self.assertEqual(machine.parse_pmset("Now drawing from 'AC Power'\n"), "", "a Mac mini has no battery")
+        self.assertEqual(machine.clock_seconds("1:02.50"), 62.5)
+        self.assertEqual(machine.clock_seconds("12:34:56"), 45296)
+        self.assertEqual(machine.clock_seconds("nonsense"), 0.0)
+        rows = machine.parse_ps(PS)
+        self.assertEqual(rows[0], (1, "launchd", 12345 * 1024, 62.5))
+        self.assertEqual(rows[1][:3], (412, "Google Chrome", 524288 * 1024), "a path with spaces keeps its last part")
+        self.assertEqual(rows[3], (900, "opencode", 2048 * 1024, 86410.0))
+        self.assertEqual(len(rows), 4)
+        groups = machine.group_processes(rows, {}, 0, 8)
+        self.assertEqual(machine.top_text(groups[0]), "Google Chrome x2: 0.8 GB")
+
+    def test_a_mac_reading_from_its_tools(self):
+        answers = {
+            "hw.memsize": str(16 * GB), "kern.boottime": "{ sec = 1000, usec = 0 } Thu Jan  1 00:16:40 1970",
+            "hw.model": "MacBookPro15,1", "machdep.cpu.brand_string": "Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz",
+        }
+
+        def run(command):
+            if command[0] == "sysctl":
+                return answers[command[-1]] + "\n"
+            return {"vm_stat": VM_STAT, "ps": PS, "pmset": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t100%; charged;\n"}[command[0]]
+
+        saved = (machine._specs, machine._mac_total)
+        machine._specs, machine._mac_total = None, 0
+        self.addCleanup(lambda: (setattr(machine, "_specs", saved[0]), setattr(machine, "_mac_total", saved[1])))
+        with mock.patch.object(machine, "IS_MAC", True), mock.patch.object(machine, "_run", side_effect=run), \
+                mock.patch.object(machine.time, "time", return_value=1000 + 7200.0), \
+                mock.patch.dict(machine.os.environ, {"CAIRN_DEVICE": ""}):
+            self.assertEqual(machine._mac_memory()["ram_pct"], 75)
+            self.assertEqual(machine._mac_uptime_seconds(), 7200.0)
+            with mock.patch.object(machine, "_memory", side_effect=machine._mac_memory):
+                specs = machine.specs()
+                self.assertEqual((specs["name"], specs["cpu"], specs["ram_gb"]), ("MacBook Pro 15,1", "Intel Core i9-9880H", 16.0))
+                self.assertEqual(machine.device_name(), "MacBook Pro 15,1")
+
+    def test_a_tool_that_is_missing_gives_no_reading(self):
+        with mock.patch.object(machine.subprocess, "run", side_effect=FileNotFoundError("no such tool")):
+            self.assertEqual(machine._run(["vm_stat"]), "")
+        with mock.patch.object(machine, "_run", return_value=""):
+            self.assertIsNone(machine.parse_vm_stat(machine._run(["vm_stat"]), 16 * GB))
+            self.assertIsNone(machine._mac_uptime_seconds())
+            self.assertEqual(machine.parse_ps(machine._run(["ps"])), [])
+
+
+class DeviceNameTests(unittest.TestCase):
+    def test_the_model_names_the_computer_unless_you_name_it(self):
+        with mock.patch.object(machine, "specs", return_value={"name": "ACME Roadrunner 14"}):
+            with mock.patch.dict(machine.os.environ, {"CAIRN_DEVICE": ""}):
+                self.assertEqual(machine.device_name(), "ACME Roadrunner 14")
+            with mock.patch.dict(machine.os.environ, {"CAIRN_DEVICE": "  Work   laptop "}):
+                self.assertEqual(machine.device_name(), "Work laptop")
+        with mock.patch.dict(machine.os.environ, {"CAIRN_DEVICE": ""}):
+            with mock.patch.object(machine, "specs", return_value={"name": ""}):
+                self.assertEqual(machine.device_name(), "This computer")
+            with mock.patch.object(machine, "specs", side_effect=OSError("denied")):
+                self.assertEqual(machine.device_name(), "This computer")
 
 
 if __name__ == "__main__":
