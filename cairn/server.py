@@ -204,6 +204,7 @@ class Handler(BaseHTTPRequestHandler):
                     "files": vibe.vibe_files(brain),
                     "git": vibe.git_activity_soon(brain, since, base),  # None until git has answered once
                     "machine": machine.snapshot_soon(),  # this computer and its load; None at first or where it cannot be read
+                    "device": machine.device_name(),  # what this computer is called on its session notes
                 })
             elif route == "/api/chat":
                 self._send_json(chat.summary())

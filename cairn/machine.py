@@ -5,8 +5,12 @@ could be flat out. This reads the real thing: the model and CPU, how busy the pr
 the last half minute, how full the memory is, and which apps take the most.
 
 Everything here is machine-wide. It says how the laptop feels, not which session caused it.
-Readings come from Windows (kernel32 through ctypes, and the registry). On other systems, or when a
-call fails, `snapshot()` returns None and the page simply shows no laptop figures.
+Readings come from Windows (kernel32 through ctypes, and the registry) or from macOS (sysctl, vm_stat,
+pmset, ps and one Mach call). On other systems, or when a call fails, `snapshot()` returns None and the
+page simply shows no laptop figures.
+
+`device_name()` is what this computer is called on session notes, so the Vibe page can tell two computers
+that share one brain apart.
 """
 
 from __future__ import annotations
@@ -15,6 +19,8 @@ import collections
 import datetime as dt
 import os
 import re
+import subprocess
+import sys
 import threading
 import time
 
@@ -37,6 +43,8 @@ _processes: dict = {"at": 0.0, "times": {}, "top": []}
 _specs: dict | None = None
 _soon_lock = threading.Lock()
 _soon: dict = {"at": float("-inf"), "value": None, "thread": None}
+IS_MAC = sys.platform == "darwin"
+_mac_total = 0  # bytes of memory, read once
 
 
 # ------------------------------------------------------------ the level (pure)
@@ -153,7 +161,7 @@ def _filetime(value) -> int:
 def _cpu_times() -> tuple[int, int] | None:
     """(busy, total) processor time since boot, all cores together."""
     if os.name != "nt":
-        return None
+        return _mac_cpu_times() if IS_MAC else None
     import ctypes
     from ctypes import wintypes
 
@@ -166,7 +174,7 @@ def _cpu_times() -> tuple[int, int] | None:
 
 def _memory() -> dict | None:
     if os.name != "nt":
-        return None
+        return _mac_memory() if IS_MAC else None
     import ctypes
     from ctypes import wintypes
 
@@ -195,7 +203,7 @@ def _memory() -> dict | None:
 def _power() -> str:
     """"plugged in", "on battery 62%", or "" for a desktop or an unknown state."""
     if os.name != "nt":
-        return ""
+        return parse_pmset(_run(["pmset", "-g", "batt"])) if IS_MAC else ""
     import ctypes
     from ctypes import wintypes
 
@@ -218,9 +226,9 @@ def _power() -> str:
 
 
 def _uptime_seconds() -> float | None:
-    """Seconds since Windows last started, sleep included: the figure Task Manager calls "Up time"."""
+    """Seconds since the computer last started, sleep included: the figure Task Manager calls "Up time"."""
     if os.name != "nt":
-        return None
+        return _mac_uptime_seconds() if IS_MAC else None
     import ctypes
 
     kernel32 = _kernel32()
@@ -231,7 +239,7 @@ def _uptime_seconds() -> float | None:
 def _process_rows() -> list[tuple[int, str, int, float]]:
     """(pid, image name, working set bytes, CPU seconds) for every process this user may look at."""
     if os.name != "nt":
-        return []
+        return parse_ps(_run(["ps", "-A", "-o", "pid=,rss=,time=,comm="])) if IS_MAC else []
     import ctypes
     from ctypes import wintypes
 
@@ -298,6 +306,108 @@ def _registry(key: str, name: str) -> str:
         return ""
 
 
+# ------------------------------------------------------------ macOS readings
+# The same figures on a Mac, from the tools macOS ships with (sysctl, vm_stat, pmset, ps) and one Mach call.
+# Each reading stands alone: one that fails leaves its figure out and never raises.
+
+
+def _run(command: list[str]) -> str:
+    """What a small system tool prints, or "" when it is missing, slow or fails."""
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout or ""
+
+
+def mac_model_name(model: str) -> str:
+    """"MacBookPro15,1" as "MacBook Pro 15,1": the model identifier, spaced so it reads."""
+    model = " ".join(str(model or "").split())
+    match = re.fullmatch(r"(MacBook|iMac|Mac)(Pro|Air|mini|Studio)?(\d+,\d+)", model)
+    return " ".join(part for part in match.groups() if part) if match else model
+
+
+def parse_vm_stat(text: str, total: int) -> dict | None:
+    """Memory from `vm_stat`, in the shape `_memory` gives. Free means ready for an app to take: free,
+    cached (inactive) and speculative pages. The rest is in use: app memory, wired and compressed."""
+    size = re.search(r"page size of (\d+) bytes", text or "")
+    pages = {m.group(1).strip().lower(): int(m.group(2)) for m in re.finditer(r"^(.+?):\s+(\d+)\.?\s*$", text or "", flags=re.M)}
+    if not size or not total or "pages free" not in pages:
+        return None
+    ready = sum(pages.get(key, 0) for key in ("pages free", "pages inactive", "pages speculative")) * int(size.group(1))
+    ready = min(ready, total)
+    return {"total": total, "free": ready, "ram_pct": round((total - ready) * 100 / total), "commit_pct": None}
+
+
+def parse_pmset(text: str) -> str:
+    """`pmset -g batt` as "plugged in 85%", "on battery 62%", or "" for a Mac without a battery."""
+    if "InternalBattery" not in (text or ""):
+        return ""
+    found = re.search(r"(\d{1,3})%", text)
+    percent = f" {found.group(1)}%" if found else ""
+    if "'AC Power'" in text:
+        return f"plugged in{percent}"
+    return f"on battery{percent}" if "'Battery Power'" in text else ""
+
+
+def clock_seconds(text: str) -> float:
+    """CPU time as `ps` prints it ("1:02.50", "12:34:56", "2-03:04:05") in seconds."""
+    days, _, rest = str(text).strip().rpartition("-")
+    seconds = 0.0
+    try:
+        for part in rest.split(":"):
+            seconds = seconds * 60 + float(part)
+        return seconds + (int(days) * 86400 if days else 0)
+    except ValueError:
+        return 0.0
+
+
+def parse_ps(text: str) -> list[tuple[int, str, int, float]]:
+    """Rows of `ps -A -o pid=,rss=,time=,comm=` as (pid, name, memory bytes, CPU seconds)."""
+    rows = []
+    for line in (text or "").splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        name = parts[3].strip().rstrip("/").rsplit("/", 1)[-1]  # the command comes as a full path, spaces and all
+        rows.append((int(parts[0]), name, int(parts[1]) * 1024, clock_seconds(parts[2])))
+    return rows
+
+
+def _mac_cpu_times() -> tuple[int, int] | None:
+    """(busy, total) processor ticks since boot from Mach's host_statistics (HOST_CPU_LOAD_INFO)."""
+    try:
+        import ctypes
+        import ctypes.util
+
+        libc = ctypes.CDLL(ctypes.util.find_library("c") or "/usr/lib/libSystem.B.dylib")
+        libc.mach_host_self.restype = ctypes.c_uint
+        libc.host_statistics.restype = ctypes.c_int
+        libc.host_statistics.argtypes = (ctypes.c_uint, ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint))
+        ticks = (ctypes.c_uint * 4)()  # user, system, idle, nice
+        count = ctypes.c_uint(4)
+        if libc.host_statistics(libc.mach_host_self(), 3, ticks, ctypes.byref(count)) != 0:
+            return None
+        user, system, idle, nice = (int(value) for value in ticks)
+    except Exception:  # no such library or call on this system: the page shows memory without a CPU figure
+        return None
+    busy = user + system + nice
+    return busy, busy + idle
+
+
+def _mac_memory() -> dict | None:
+    global _mac_total
+    if not _mac_total:
+        size = _run(["sysctl", "-n", "hw.memsize"]).strip()
+        _mac_total = int(size) if size.isdigit() else 0
+    return parse_vm_stat(_run(["vm_stat"]), _mac_total)
+
+
+def _mac_uptime_seconds() -> float | None:
+    started = re.search(r"sec\s*=\s*(\d+)", _run(["sysctl", "-n", "kern.boottime"]))
+    return max(0.0, time.time() - int(started.group(1))) if started else None
+
+
 # ------------------------------------------------------------ what the page gets
 
 
@@ -308,13 +418,32 @@ def specs() -> dict:
     if _specs is None:
         bios = r"HARDWARE\DESCRIPTION\System\BIOS"
         memory = _memory()
+        if IS_MAC:
+            name = mac_model_name(_run(["sysctl", "-n", "hw.model"]))
+            cpu = _run(["sysctl", "-n", "machdep.cpu.brand_string"])
+        else:
+            name = machine_name(_registry(bios, "SystemManufacturer"), _registry(bios, "SystemProductName"))
+            cpu = _registry(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString")
         _specs = {
-            "name": machine_name(_registry(bios, "SystemManufacturer"), _registry(bios, "SystemProductName")),
-            "cpu": clean_cpu_name(_registry(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString")),
+            "name": name,
+            "cpu": clean_cpu_name(cpu),
             "cores": os.cpu_count() or 0,
             "ram_gb": round(memory["total"] / 2**30, 1) if memory else 0,
         }
     return dict(_specs)
+
+
+def device_name() -> str:
+    """What this computer is called on its session notes and in the device switch: the model, as on its
+    machines/ note. Two computers of one model share that name, so $CAIRN_DEVICE can give one its own
+    ("Work laptop"). Never the computer name or the user name."""
+    override = " ".join(os.environ.get("CAIRN_DEVICE", "").split())
+    if override:
+        return override
+    try:
+        return specs()["name"] or "This computer"
+    except Exception:  # a name is a nicety too
+        return "This computer"
 
 
 def _cpu_percent(now: float) -> int | None:
@@ -359,6 +488,7 @@ def snapshot() -> dict | None:
                 return None
             now = time.monotonic()
             reading = specs()
+            reading["name"] = device_name()
             cpu_pct = _cpu_percent(now)
             level, reasons = load_level(cpu_pct, memory["ram_pct"], memory["commit_pct"])
             reading.update({

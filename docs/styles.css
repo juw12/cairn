@@ -2191,7 +2191,15 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .rc-clock, .rc-when { margin-left: auto; flex: none; font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .rc-clock { font-weight: 600; color: var(--accent-ink); }
 .rc-facts { margin: 2px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
-.rc-model, .rc-effort, .rc-tokens { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.rc-model, .rc-effort, .rc-tokens, .rc-device { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+/* Vibe: the computers a brain holds sessions of. Drawn when there are two or more. */
+.vibe-devices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; }
+.vibe-devices .chip { max-width: 100%; min-width: 0; }
+.vibe-devices .vd-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vibe-devices .chip b { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.vibe-devices .vd-here { opacity: 0.7; }
+.vibe-devices .vd-live { flex: none; font-weight: 600; }
+.vibe-device-note { margin: 0 0 8px; }
 .rc-last { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 4px 0 0; font-size: 13px; line-height: 1.45; cursor: pointer; }
 .rc-last .t, .rc-last .kind { flex: none; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .rc-last .txt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; min-width: 0; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; }

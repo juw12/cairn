@@ -134,6 +134,27 @@ class VibeCliTests(unittest.TestCase):
         self.assertIn("Live now: nothing", out)
         self.assertIn("Sessions: 0", out)
 
+    def test_a_session_names_its_computer_and_old_ones_can_be_adopted(self):
+        old = {"title": "Before", "type": "session", "status": "done", "tags": [], "created": "2026-01-02", "started": "2026-01-02T09:00"}
+        self.brain.init()
+        self.brain.write("sessions/2026-01-02-before.md", core.serialize_note(old, "## Log\n\n- 09:00 start: Before\n"), None)
+        self.brain.write("sessions/2026-01-03-mac.md", core.serialize_note({**old, "title": "Mac", "machine": "MacBook Pro 15,1"}, "## Log\n"), None)
+        with mock.patch.dict(os.environ, {"CAIRN_DEVICE": "Work laptop"}):
+            self.assertEqual(run_cli(self.root, "vibe", "start", "Named")[0], 0)
+            by_title = {n["title"]: n["meta"].get("machine") for n in self.brain.notes() if n["type"] == "session"}
+            self.assertEqual(by_title, {"Before": None, "Mac": "MacBook Pro 15,1", "Named": "Work laptop"})
+            code, out, _ = run_cli(self.root, "vibe", "device")
+            self.assertEqual(code, 0)
+            self.assertIn("Work laptop", out)
+            self.assertIn("1 session(s) name no computer", out)
+            code, out, _ = run_cli(self.root, "vibe", "device", "--adopt")
+            self.assertIn("1 session(s)", out)
+            notes = {n["title"]: n for n in self.brain.notes() if n["type"] == "session"}
+            self.assertEqual({t: n["meta"].get("machine") for t, n in notes.items()}, {"Before": "Work laptop", "Mac": "MacBook Pro 15,1", "Named": "Work laptop"})
+            self.assertEqual((notes["Before"]["status"], notes["Before"]["meta"]["started"]), ("done", "2026-01-02T09:00"), "nothing else changes")
+            self.assertIn("- 09:00 start: Before", notes["Before"]["body"])
+            self.assertIn("0 session(s)", run_cli(self.root, "vibe", "device", "--adopt")[1], "a second run finds nothing")
+
 
 @unittest.skipUnless(HAS_GIT, "git not installed")
 class VibeGitAndServerTests(unittest.TestCase):
@@ -195,6 +216,9 @@ class VibeGitAndServerTests(unittest.TestCase):
         self.assertEqual(len(paths), 2)
         self.assertTrue(paths[0].startswith("feedback/") and paths[1].startswith("sessions/"))
         self.assertTrue(data["git"]["available"])
+        session = core.parse_note(next(f["text"] for f in data["files"] if f["path"].startswith("sessions/")))
+        self.assertTrue(data["device"], "the page is told what this computer is called")
+        self.assertEqual(session["meta"]["machine"], data["device"], "and its sessions carry that name")
         self.assertEqual(data["git"]["commits"], [])
         # This computer's load rides along: a reading on Windows, null where it cannot be read.
         self.assertIn("machine", data)

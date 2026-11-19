@@ -1,6 +1,6 @@
 // Checks for docs/progress.js; run by tests/test_progress.py (needs Node).
 import assert from "node:assert/strict";
-import { MACHINE_FRESH_MIN, agentGroup, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubFromNote, githubUsage, historyRemaining, machineFromNote, machineReading, reportedProgress } from "../docs/progress.js";
+import { MACHINE_FRESH_MIN, agentGroup, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubFromNote, githubUsage, historyRemaining, machineFromNote, machineReading, reportedProgress } from "../docs/progress.js";
 
 const log = (...entries) => entries.map(([time, kind, text]) => ({ time, kind, text }));
 
@@ -168,5 +168,35 @@ assert.equal(formatMinutes(0), "under a minute");
 assert.equal(formatMinutes(45), "45 min");
 assert.equal(formatMinutes(125), "2 h 5 min");
 assert.equal(formatMinutes(120), "2 h");
+
+// Several computers in one brain: each session names its own, a machines/ note counts as one too.
+const session = (machine, status, extra = {}) => ({ type: "session", status, path: `sessions/${Math.random()}.md`, meta: { ...(machine === null ? {} : { machine }), ...extra } });
+const machineNote = (title, at) => ({ type: "note", title, meta: { title, load: "light", machine_at: at } });
+const brainNotes = [
+  session("ASUS", "live", { started: "2026-11-19T09:00", tokens: "1200" }),
+  session("ASUS", "shipped", { started: "2026-11-18T09:00", ended: "2026-11-18T10:00", tokens: 300 }),
+  session(" MacBook Pro ", "live", { started: "2026-11-19T11:00", tokens: "50" }),
+  session(null, "done", { started: "2026-11-20T08:00" }),
+  machineNote("ASUS", "2026-11-19T09:30"),
+  machineNote("Mac mini", "2026-11-01T08:00"),
+  { type: "task", status: "todo", meta: {} },
+];
+assert.equal(deviceOf(brainNotes[2]), "MacBook Pro");
+assert.equal(deviceOf(brainNotes[3]), "");
+assert.equal(deviceOf(undefined), "");
+assert.deepEqual(deviceList(brainNotes), [
+  { name: "MacBook Pro", sessions: 1, live: 1, tokens: 50, last: "2026-11-19T11:00" },
+  { name: "ASUS", sessions: 2, live: 1, tokens: 1500, last: "2026-11-19T09:30" },
+  { name: "Mac mini", sessions: 0, live: 0, tokens: 0, last: "2026-11-01T08:00" },
+  { name: "", sessions: 1, live: 0, tokens: 0, last: "2026-11-20T08:00" }, // names no computer: always last
+]);
+assert.deepEqual(deviceList([{ type: "task", meta: {} }]), []);
+// One computer's notes: its sessions and its machines/ note; everything that is not about a computer stays.
+const asus = deviceNotes(brainNotes, "ASUS");
+assert.deepEqual(asus.map((note) => note.type), ["session", "session", "note", "task"]);
+assert.equal(machineReading(null, asus).name, "ASUS");
+assert.deepEqual(deviceNotes(brainNotes, "MacBook Pro").map((note) => note.type), ["session", "task"]);
+assert.equal(machineReading(null, deviceNotes(brainNotes, "MacBook Pro")), null); // never another computer's reading
+assert.deepEqual(deviceNotes(brainNotes, "").map((note) => note.type), ["session", "task"]);
 
 console.log("progress checks passed");

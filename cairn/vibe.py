@@ -16,8 +16,8 @@ import subprocess
 import threading
 import time
 
-from . import core
-from .brain import Brain
+from . import core, machine
+from .brain import Brain, ConflictError
 
 RESULTS = ("shipped", "partial", "dropped")
 MAX_COMMITS = 20
@@ -167,6 +167,7 @@ def start(brain: Brain, title: str, task: str = "", agent: str = "") -> dict:
     existing = [f["path"] for f in brain.files()]
     path = core.note_path("session", title, existing, today)
     meta = {"title": title, "type": "session", "status": "live", "tags": [], "created": today, "started": now_stamp()}
+    meta["machine"] = machine.device_name()  # which computer it runs on, for the device switch on the Vibe page
     if task:
         meta["task"] = f"[[{task.strip().removeprefix('[[').removesuffix(']]')}]]"
     if agent:
@@ -177,6 +178,25 @@ def start(brain: Brain, title: str, task: str = "", agent: str = "") -> dict:
     body = f"## Goal\n\n{title}\n\n## Log\n\n- {_clock()} start: {title}\n"
     brain.write(path, core.serialize_note(meta, body), None)
     return brain.read(path)
+
+
+def adopt_sessions(brain: Brain, device: str = "") -> int:
+    """Put this computer's name on every session that names none. Returns how many.
+
+    Sessions written before computers were named carry no `machine`. Run this once on the computer they
+    were made on, before another computer starts adding its own to the same brain."""
+    device = device or machine.device_name()
+    adopted = 0
+    for file in vibe_files(brain):
+        note = core.note_from_file(file["path"], file["text"], file["mtime"])
+        if note["type"] != "session" or str(note["meta"].get("machine", "")).strip():
+            continue
+        try:
+            brain.write(file["path"], core.update_note_text(file["text"], {"machine": device}), file["mtime"])
+        except (ConflictError, OSError):  # being written right now: the next run takes it
+            continue
+        adopted += 1
+    return adopted
 
 
 def log(brain: Brain, text: str, kind: str = "note", session: str = "") -> dict:

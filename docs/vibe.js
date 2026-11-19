@@ -8,7 +8,7 @@ import { escapeHtml as esc } from "./md.js";
 import { $, $$, ask, icon, pageHead, plural, statusPill, toast, today } from "./ui.js";
 import { createNote, fileByPath, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { renderNav, renderView } from "./app.js";
-import { agentGroup, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubUsage, machineReading } from "./progress.js";
+import { agentGroup, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubUsage, machineReading } from "./progress.js";
 import { QUIET_MIN, compact, minutesText, recap, sessionState } from "./recap.js";
 import { chatReady } from "./chat.js";
 import { openShare } from "./share.js";
@@ -52,8 +52,51 @@ const clock = () => new Date().toTimeString().slice(0, 5);
 const stamp = () => `${today()}T${clock()}`;
 const oneLine = (text) => String(text).replace(/\s+/g, " ").trim();
 const canPoll = () => typeof state.store?.vibe === "function";
+// One brain can hold the sessions of several computers (each note names its own in `machine`). The page shows
+// them all, or one computer alone when you pick it in the device bar. null is "all"; "" is the sessions that
+// name no computer. The choice is kept in this browser.
+const DEVICE_KEY = "cairn.vibeDevice";
+let deviceLoaded = false;
+
+function shownDevice() {
+  if (!deviceLoaded) {
+    deviceLoaded = true;
+    try {
+      const kept = JSON.parse(localStorage.getItem(DEVICE_KEY));
+      if (typeof kept === "string" && state.vibeDevice === undefined) state.vibeDevice = kept;
+    } catch {
+      /* storage is off: the choice lasts until the page closes */
+    }
+  }
+  return typeof state.vibeDevice === "string" ? state.vibeDevice : null;
+}
+
+function vibeNotes() {
+  const device = shownDevice();
+  return device === null ? state.notes : deviceNotes(state.notes, device);
+}
+
+export function setVibeDevice(device) {
+  state.vibeDevice = typeof device === "string" ? device : null;
+  deviceLoaded = true;
+  try {
+    if (state.vibeDevice === null) localStorage.removeItem(DEVICE_KEY);
+    else localStorage.setItem(DEVICE_KEY, JSON.stringify(state.vibeDevice));
+  } catch {
+    /* storage is off */
+  }
+  state.vibeLimit = PAGE;
+  renderView();
+  $(".vibe-devices .chip.on")?.focus({ preventScroll: true });
+}
+
 // The computer the sessions run on: measured now by the local app, else the newest machines/ note a watcher left.
-const machine = () => machineReading(state.vibeMachine, state.notes);
+// Another computer picked in the device bar is read from its own note, never from this one's live reading.
+const machine = () => {
+  const device = shownDevice();
+  const here = device === null || !state.vibeHere || device === state.vibeHere;
+  return machineReading(here ? state.vibeMachine : null, vibeNotes());
+};
 
 // Folds inside a block (a recap section, one AI in the overview, a session row) stay as you left them through
 // live updates. The section folds are also kept on this device, so the page opens the way you arranged it.
@@ -102,8 +145,18 @@ export function liveSessions() {
     .sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
 }
 
+// The newest live session of this computer (the local app's git reading is about it); any computer's when
+// this one has none or is not named.
 export function liveSession() {
-  return liveSessions()[0] || null;
+  const live = liveSessions();
+  const here = state.vibeHere ? live.find((note) => [state.vibeHere, ""].includes(deviceOf(note))) : null;
+  return here || live[0] || null;
+}
+
+// The live sessions the page lists: the picked computer's, or every computer's.
+function shownLive() {
+  const device = shownDevice();
+  return device === null ? liveSessions() : liveSessions().filter((note) => deviceOf(note) === device);
 }
 
 function elapsedMinutes(note) {
@@ -163,7 +216,7 @@ function dayLabel(day) {
 }
 
 function sessionNotes() {
-  return state.notes.filter((n) => n.type === "session").sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
+  return vibeNotes().filter((n) => n.type === "session").sort((a, b) => (startedKey(a) < startedKey(b) ? 1 : -1));
 }
 
 // The AI and outcome filters as the list applies them: one that matches nothing falls back to "all".
@@ -216,7 +269,7 @@ function flash(el) {
 
 // From a lane in the overview to that session's row in the live recap, opened to its steps.
 export function jumpToLive(path) {
-  const data = recap(state.notes, stamp());
+  const data = recap(vibeNotes(), stamp());
   setFold(`rc-row:${path}`, true);
   setFold("rc-running", true);
   if (data.stale.some((entry) => entry.note.path === path)) setFold("rc-stale", true);
@@ -266,7 +319,7 @@ export function toggleSessionDay(day) {
 export function jumpToDay(day) {
   const folded = state.vibeFolded || (state.vibeFolded = new Set());
   folded.delete(day);
-  const onDay = state.notes.filter((note) => note.type === "session" && sessionDayOf(note) === day);
+  const onDay = vibeNotes().filter((note) => note.type === "session" && sessionDayOf(note) === day);
   const { filter } = vibeFilters(sessionNotes());
   const passes = (note) =>
     (filter === "all" || groupOf(note).key === filter) &&
@@ -358,6 +411,7 @@ export async function startSession() {
   // The commit the session starts from, so only commits made during it are counted.
   const extraMeta = { started: stamp() };
   if (state.vibeGit?.head) extraMeta.base = state.vibeGit.head;
+  if (state.vibeHere) extraMeta.machine = state.vibeHere;
   const note = await createNote({
     type: "session",
     title,
@@ -609,7 +663,7 @@ function machineStrip() {
     ? "measured now"
     : `as of ${machineWhen(reading)}${reading.fresh ? "" : ", may have changed since"}`;
   const foot = [reading.power, reading.uptime, reading.top?.length ? `Using the most: ${reading.top.slice(0, 4).join(" · ")}` : ""].filter(Boolean);
-  return `<section class="vibe-machine${reading.fresh ? "" : " stale"}" aria-label="This ${machineWord(reading).toLowerCase()}">
+  return `<section class="vibe-machine${reading.fresh ? "" : " stale"}" aria-label="${reading.live || !reading.name ? `This ${machineWord(reading).toLowerCase()}` : esc(reading.name)}">
     <header>
       <h2>${esc(reading.name || `This ${machineWord(reading).toLowerCase()}`)}</h2>
       ${spec ? `<span class="vm-spec">${esc(spec)}</span>` : ""}
@@ -817,6 +871,9 @@ async function poll() {
   // An app that just gained (or lost) the reading needs the strip drawn; after that it updates in place.
   if (Boolean(data.machine) !== Boolean(state.vibeMachine)) changed = true;
   state.vibeMachine = data.machine || null;
+  // Which computer this is, by the name its sessions carry: the device bar marks it.
+  if ((data.device || "") !== (state.vibeHere || "") && severalDevices) changed = true;
+  state.vibeHere = data.device || "";
   if (changed && state.view === "vibe") {
     renderNav();
     renderView();
@@ -926,7 +983,7 @@ function gitPanel(git) {
 // The most recently finished session, by when it ended (falls back to when it started).
 function lastSession() {
   const key = (note) => String(note.meta.ended || note.meta.started || note.meta.created || "");
-  return state.notes
+  return vibeNotes()
     .filter((n) => n.type === "session" && n.status !== "live")
     .sort((a, b) => (key(a) < key(b) ? 1 : -1))[0] || null;
 }
@@ -1111,7 +1168,7 @@ function overview(sessions) {
   const share = shares(keys.map((key) => counts[key] || 0));
   // A tile is pressed only when the list shows exactly its sessions: that status, from every source.
   const pressed = filters.filter === "all" ? filters.outcome : "all";
-  const live = liveSessions();
+  const live = shownLive();
   const segments = keys.map((key, index) => {
     const count = counts[key] || 0;
     const action = count && key !== "other" ? ` data-action="vibe-overview"` : "";
@@ -1277,6 +1334,7 @@ function recapRow(entry, alone = false) {
   const facts = [
     group.key === "other" ? "" : esc(group.label),
     folderName(note) ? esc(folderName(note)) : "",
+    severalDevices && shownDevice() === null && deviceOf(note) ? `<span class="rc-device" title="Computer">${esc(deviceOf(note))}</span>` : "",
     entry.model ? `<span class="rc-model" title="Model">${esc(entry.model)}</span>` : "",
     entry.effort ? `<span class="rc-effort" title="Reasoning effort">${esc(entry.effort)} effort</span>` : "",
     entry.tokens ? `<span class="rc-tokens" title="${entry.tokens.toLocaleString()} tokens in and out">${compact(entry.tokens)} tokens</span>` : "",
@@ -1325,7 +1383,7 @@ function recapFold(key, summary, body, fallback = false, section = false) {
 }
 
 function recapBand() {
-  const data = recap(state.notes, stamp());
+  const data = recap(vibeNotes(), stamp());
   const chips = Object.keys(RECAP_CHIPS)
     .filter((key) => data.counts[key])
     .map((key) => `<span class="rc-chip s-${key}"><b>${data.counts[key]}</b> ${RECAP_CHIPS[key]}</span>`)
@@ -1692,12 +1750,42 @@ function feedbackForm(sessions) {
   </form>`;
 }
 
+// The computers this brain holds sessions of, as chips: all of them, or one alone. Drawn only when there is a
+// choice to make. A session reaches this page through the brain, so another computer is as current as its last sync.
+let severalDevices = false;
+
+function deviceBar(list) {
+  if (list.length < 2) return "";
+  const shown = shownDevice();
+  const total = (key) => list.reduce((sum, device) => sum + device[key], 0);
+  const liveText = (count) => (count ? ` <span class="vd-live">${count} live</span>` : "");
+  const chip = (device, label, sessions, live) =>
+    `<button class="chip${device === shown ? " on" : ""}" data-action="vibe-device"${device === null ? "" : ` data-device="${esc(device)}"`} aria-pressed="${device === shown}"><span class="vd-name">${label}</span> <b>${sessions}</b>${liveText(live)}</button>`;
+  const name = (device) =>
+    device.name ? `${esc(device.name)}${device.name === state.vibeHere ? ` <span class="vd-here">this computer</span>` : ""}` : "No computer named";
+  const picked = list.find((device) => device.name === shown);
+  const elsewhere = picked && picked.name && state.vibeHere && picked.name !== state.vibeHere;
+  const lastSeen = picked ? recapWhen(core.stampMinutes(picked.last)) : "";
+  const note = picked
+    ? `<p class="muted small vibe-device-note">${plural(picked.sessions, "session")}${picked.tokens ? ` · ${compact(picked.tokens)} tokens` : ""}${lastSeen ? ` · last active ${esc(lastSeen)}` : ""}${elsewhere ? " · as of its last sync into this brain" : ""}</p>`
+    : "";
+  return `<div class="vibe-devices" role="group" aria-label="Computer">
+      ${chip(null, "All devices", total("sessions"), total("live"))}
+      ${list.map((device) => chip(device.name, name(device), device.sessions, device.live)).join("")}
+    </div>
+    ${note}`;
+}
+
 export function shareStats() {
-  openShare(core.vibeStats(state.notes, today()));
+  openShare(core.vibeStats(vibeNotes(), today()));
 }
 
 export function vibeView() {
-  const stats = core.vibeStats(state.notes, today());
+  // A computer that is no longer in the brain (or the only one left) cannot be the one shown.
+  const devices = deviceList(state.notes);
+  severalDevices = devices.length > 1;
+  if (shownDevice() !== null && !(severalDevices && devices.some((device) => device.name === shownDevice()))) state.vibeDevice = null;
+  const stats = core.vibeStats(vibeNotes(), today());
   const sessions = sessionNotes();
   // Detected sessions only "ship" in the sense that code changed; call it that unless a person ended one as shipped.
   const handShipped = sessions.some((note) => sessionSource(note) === "logged" && note.status === "shipped");
@@ -1713,8 +1801,8 @@ export function vibeView() {
     `${stats.sessions ? `<button class="btn" data-action="vibe-share" title="Your last 14 days as a picture to post">${icon("external")} Share stats</button>` : ""}
     <button class="btn${liveSession() ? "" : " primary"}" data-action="vibe-start">${icon("play")} ${liveSession() ? "Start another" : "Start session"}</button>`,
   );
-  const live = liveSessions();
-  const running = recap(state.notes, stamp());
+  const live = shownLive();
+  const running = recap(vibeNotes(), stamp());
   const reading = machine();
   const [minutes] = githubUsage(state.notes);
   const blocks = {
@@ -1722,7 +1810,12 @@ export function vibeView() {
       html: recapBand(),
       summary: Object.keys(RECAP_CHIPS).filter((key) => running.counts[key]).map((key) => `${running.counts[key]} ${RECAP_CHIPS[key]}`).join(" · ") || `nothing running${running.finishedTotal ? ` · ${running.finishedTotal} finished in the last day` : ""}`,
     },
-    machine: { html: machineStrip(), summary: reading ? `${EFFORT_LABEL[reading.level]} load · CPU ${reading.cpu_pct ?? "?"}% · memory ${reading.ram_pct ?? "?"}%` : "" },
+    machine: {
+      html: machineStrip(),
+      summary: reading ? `${EFFORT_LABEL[reading.level]} load · CPU ${reading.cpu_pct ?? "?"}% · memory ${reading.ram_pct ?? "?"}%` : "",
+      // Another computer picked in the device bar is not "This computer".
+      label: shownDevice() !== null && shownDevice() !== (state.vibeHere || "") ? "Computer" : "",
+    },
     github: { html: githubStrip(), summary: minutes ? `${thousands(minutes.used)} of ${thousands(minutes.limit)} free minutes · ${minutes.pct}%` : "" },
     overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
     figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },
@@ -1756,5 +1849,6 @@ export function vibeView() {
     },
   };
   return `${head}
+    ${deviceBar(devices)}
     ${boardHtml("vibe", blocks)}`;
 }

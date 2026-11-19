@@ -331,6 +331,18 @@ def cmd_vibe(brain: Brain, args) -> int:
             return _vibe_watch(brain, args)
         elif args.action == "github":
             return _vibe_github(brain, args)
+        elif args.action == "device":
+            from . import machine
+
+            device = machine.device_name()
+            if args.adopt:
+                adopted = vibe.adopt_sessions(brain, device)
+                print(f"{adopted} session(s) that named no computer now belong to {device}.")
+            else:
+                unnamed = sum(1 for n in vibe._notes(brain) if n["type"] == "session" and not str(n["meta"].get("machine", "")).strip())
+                print(f"This computer is called {device} on its session notes. Set CAIRN_DEVICE to give it another name.")
+                if unnamed:
+                    print(f"{unnamed} session(s) name no computer. If they were all made here: cairn vibe device --adopt")
         else:
             print(vibe.stats_text(brain))
     except vibe.VibeError as error:
@@ -712,7 +724,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Live progress for AI-assisted coding, kept in brain/sessions/. Tell your assistant to run "
         "`cairn vibe log` after each step and `cairn vibe check -- <tests>` to record results; the app shows it as it happens.",
     )
-    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github"])
+    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github", "device"])
     vibe_parser.add_argument("text", nargs="*", help="goal / log text / end summary; for check, the command after --")
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
@@ -723,7 +735,8 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--once", action="store_true", help="watch: one pass, then exit")
     vibe_parser.add_argument("--every", type=int, default=60, help="watch: seconds between passes (default 60)")
     vibe_parser.add_argument("--idle", type=int, default=30, help="watch: minutes without activity before a session ends (default 30)")
-    vibe_parser.add_argument("--days", type=int, default=14, help="watch: how far back to pick up OpenCode sessions (default 14)")
+    vibe_parser.add_argument("--days", type=int, default=14, help="watch: how far back to pick up OpenCode sessions (default 14; 0 for everything). The first pass on a computer always takes everything OpenCode still has")
+    vibe_parser.add_argument("--adopt", action="store_true", help="device: put this computer's name on every session that names none (run once, on the computer they were made on)")
     vibe_parser.add_argument("--everywhere", action="store_true", help="watch: OpenCode sessions from every folder, not just this repo")
     vibe_parser.add_argument("--last-reply", action="store_true", help="watch: also copy the closing reply of a finished OpenCode turn into its note (one short line), so you can read how it ended from your phone; off by default because notes sync")
     vibe_parser.add_argument("--no-opencode", action="store_true", help="watch: skip OpenCode")

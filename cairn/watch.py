@@ -56,6 +56,7 @@ QUIET_TYPES = ("model-switched", "agent-switched", "system")  # bookkeeping mess
 BATCH_RUNS = 20  # this many one-prompt runs in one folder in one day is a script, not a person
 REPLY_CHARS = 280
 MACHINE_FOLDER = "machines"
+HISTORY_KEY = "opencode_history"  # watch state: computer -> when its whole OpenCode history was read
 MACHINE_NOTE_MINUTES = 15  # an unchanged reading is written again after this long, so a reader can tell it is current
 MACHINE_MOVE_POINTS = 10  # CPU or memory moving this many points is worth a new note
 
@@ -512,6 +513,7 @@ def _opencode_note(session: dict, status: str) -> tuple[dict, str]:
         "agent": "opencode",
         "source": "opencode",
         "external": session["id"],
+        "machine": machine.device_name(),  # which computer it ran on: its database is the one being read
     }
     if session["model"]:
         meta["model"] = session["model"]
@@ -620,7 +622,8 @@ def sync_opencode(brain: Brain, sessions: list[dict], now_ms: int, idle_minutes:
         status = computed if (follow or current_status not in core.STATUSES["session"]) else current_status
         meta, body = _opencode_note(session, status)
         current = brain.read(note["path"])
-        changes = {key: value for key, value in meta.items() if key not in ("tags", "created")}
+        kept = ("tags", "created", "machine") if str(note["meta"].get("machine", "")).strip() else ("tags", "created")
+        changes = {key: value for key, value in meta.items() if key not in kept}
         text = core.update_note_text(current["text"], changes, body)
         if status == "live":
             text = _drop_property(text, "ended")
@@ -645,6 +648,14 @@ def _close(brain: Brain, note: dict, status: str, last: int, reason: str, extra:
     return True
 
 
+def elsewhere(note: dict) -> bool:
+    """True for a session another computer wrote (its `machine` names a different one). Two computers can
+    share a brain: each watcher ends only its own sessions, since it cannot see the other's apps or database.
+    A note with no `machine` is from before computers were named and is treated as this one's."""
+    owner = str(note["meta"].get("machine", "")).strip()
+    return bool(owner) and owner != machine.device_name()
+
+
 def close_missing_opencode(brain: Brain, seen_ids, now_ms: int, idle_minutes: int = IDLE_MINUTES) -> int:
     """End live OpenCode notes whose session is no longer in the database. Returns how many.
 
@@ -655,7 +666,7 @@ def close_missing_opencode(brain: Brain, seen_ids, now_ms: int, idle_minutes: in
     now = core.stamp_minutes(_stamp(now_ms))
     closed = 0
     for external, note in _external_index(brain, "opencode").items():
-        if note["status"] != "live" or external in seen:
+        if note["status"] != "live" or external in seen or elsewhere(note):
             continue
         last = core.session_last_activity(note)
         if last is None or now - last < idle_minutes:
@@ -674,8 +685,8 @@ def close_silent_reported(brain: Brain, now_ms: int, idle_minutes: int = REPORTE
     now = core.stamp_minutes(_stamp(now_ms))
     closed = 0
     for note in vibe.live_sessions(brain):
-        if note["meta"].get("source") == "opencode":
-            continue  # the OpenCode database decides when these end
+        if note["meta"].get("source") == "opencode" or elsewhere(note):
+            continue  # the OpenCode database decides when these end; another computer ends its own
         last = core.session_last_activity(note)
         if last is None or now - last < idle_minutes:
             continue
@@ -803,7 +814,7 @@ def repo_fingerprint(brain: Brain) -> str:
 
 
 def _vector_live(brain: Brain) -> dict | None:
-    live = [n for n in vibe.live_sessions(brain) if n["meta"].get("source") == "vector"]
+    live = [n for n in vibe.live_sessions(brain) if n["meta"].get("source") == "vector" and not elsewhere(n)]
     return live[-1] if live else None
 
 
@@ -811,7 +822,7 @@ def _vector_self_reported(brain: Brain) -> bool:
     """True when the assistant in Vector is reporting its own session (cairn vibe start --agent vector)."""
     return any(
         str(n["meta"].get("agent", "")).lower() == "vector" and n["meta"].get("source") != "vector"
-        for n in vibe.live_sessions(brain)
+        for n in vibe.live_sessions(brain) if not elsewhere(n)
     )
 
 
@@ -929,8 +940,8 @@ def _machine_changed(old: dict, reading: dict) -> bool:
 def sync_machine(brain: Brain, reading: dict | None = None) -> bool:
     """Note this computer's load while a session is live. True when the note was written.
     Quiet on purpose: an idle brain, an unreadable machine and an unchanged reading write nothing."""
-    if not vibe.live_sessions(brain):
-        return False
+    if not any(not elsewhere(note) for note in vibe.live_sessions(brain)):
+        return False  # nothing live on this computer
     reading = machine.snapshot() if reading is None else reading
     if not reading:
         return False
@@ -961,7 +972,13 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
     messages = []
     if opencode:
         path = db_path or opencode_db_path()
-        sessions = read_opencode(path, now_ms - days * 86_400_000, "" if everywhere else str(brain.root))
+        # The first pass on a computer takes every session OpenCode still has, so its history arrives whole.
+        # After that (or with --days N given once it has run) only the last `days` are read. --days 0 reads all.
+        device = machine.device_name()
+        history = _load_state(brain).get(HISTORY_KEY)
+        first = path.is_file() and not (isinstance(history, dict) and history.get(device))
+        since_ms = 0 if first or days <= 0 else now_ms - days * 86_400_000
+        sessions = read_opencode(path, since_ms, "" if everywhere else str(brain.root))
         sessions = rollup_batches(sessions, _external_index(brain, "opencode"))
         pending = needs_refresh(brain, sessions, now_ms, idle_minutes)
         attach_commits(pending, git)
@@ -973,6 +990,11 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
         gone = close_missing_opencode(brain, [s["id"] for s in sessions], now_ms, idle_minutes) if path.is_file() else 0
         if gone:
             messages.append(f"OpenCode: {gone} session(s) ended, no longer in OpenCode")
+        if first:
+            state = _load_state(brain)
+            done = state.get(HISTORY_KEY)
+            state[HISTORY_KEY] = {**(done if isinstance(done, dict) else {}), device: _stamp(now_ms)}
+            _save_state(brain, state)
     if vector:
         is_running = process_running(vector_names) if running is None else running
         action = sync_vector(brain, is_running, now_ms, idle_minutes)
