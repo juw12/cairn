@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 73,
+      "date": "2026-11-19",
+      "title": "Dashboard buttons from the phone",
+      "changes": [
+        "Dashboards on phone: a dashboard's buttons can run on your PC. Each press runs once, is refused when it is older than 5 minutes, and is taken back when the PC does not pick it up (#51)",
+        "Dashboards on phone: the open tab and folded blocks of a dashboard stay as they were when a newer copy arrives (#51)"
+      ]
+    },
+    {
       "build": 72,
       "date": "2026-11-19",
       "title": "Version history",
