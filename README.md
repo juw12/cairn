@@ -263,6 +263,17 @@ stand by and take over within five minutes of it stopping.
   accounts signed in on this computer, only for private repos, only from Cairn on the computer itself (never
   from a paired phone), and never without a confirmation. Mind GitHub's terms on how many free accounts one
   person may hold.
+- **Which account this computer pushes as:** where the GitHub CLI is signed in to several accounts, the Vibe
+  page shows **Pushes from this computer** with a chip per account, the one in use pressed (or
+  `cairn vibe github push-as [NAME]`). A press runs `gh auth switch`; the first press also runs
+  `gh auth setup-git`, after a confirmation, so that git asks the GitHub CLI for its GitHub sign-in. From then
+  on `git push`, `gh` and an assistant working on that computer all go out as the account picked, and a switch
+  made in a terminal shows on the page within seconds. Commits keep their author; only the sign-in changes,
+  the name GitHub puts on a push, a pull request and a release. It is checked on the computer, by comparing
+  the sign-in git would send with the CLI's, and no token is shown or stored. Never from a paired phone. A repo
+  whose address names a user or uses SSH keeps its own sign-in. To undo the first press:
+  `git config --global --unset-all credential.https://github.com.helper` (and the same line for
+  `gist.github.com`, which the GitHub CLI sets along with it).
 - **On the page:** sessions are grouped by day (click a day to fold it) and the outcome chips (shipped, no code
   change, no git) double as the legend and as filters. Day totals are clock time too.
 - **Time vibing** is clock time with at least one session working: two agents running side by side for an hour count

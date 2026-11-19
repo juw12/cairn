@@ -121,6 +121,18 @@ class PhoneTests(unittest.TestCase):
         _, info = self.call("GET", "/api/info", cookie=token)
         self.assertIs(json.loads(info)["githubMove"], False, "so the page does not offer the button there")
 
+    def test_a_phone_cannot_switch_the_account_this_computer_pushes_as(self):
+        from cairn import github_push
+
+        token, _ = self.pair()
+        with mock.patch.object(github_push, "switch") as switch, mock.patch.object(github_push, "status_soon") as status_soon:
+            response, _ = self.call("POST", "/api/github/push", {"account": "grace"}, cookie=token)
+            _, vibe = self.call("GET", "/api/vibe", cookie=token)
+        self.assertEqual(response.status, 404)
+        switch.assert_not_called()
+        status_soon.assert_not_called()
+        self.assertIsNone(json.loads(vibe)["push"], "and it is not told which accounts are signed in here")
+
     def test_expired_code_is_refused(self):
         with mock.patch.object(phone, "CODE_SECONDS", -1):
             pairing = self.phone.new_pairing()

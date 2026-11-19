@@ -77,6 +77,29 @@ class ServerTests(unittest.TestCase):
         status, _ = self.call("POST", "/api/github/move", {"repo": "vault", "from": "ada", "to": "grace"}, headers={"X-Cairn": ""})
         self.assertEqual(status, 403)
 
+    def test_who_pushes_rides_on_the_vibe_poll_and_a_switch_answers_with_the_new_state(self):
+        from cairn import github_push
+
+        before = {"accounts": ["ada", "grace"], "active": "ada", "pusher": "ada", "sure": True, "viaCli": True}
+        after = {**before, "active": "grace", "pusher": "grace", "message": "Pushes from this computer now go to GitHub as grace."}
+        with mock.patch.object(github_push, "status_soon", return_value=before), mock.patch.object(github_push, "switch", return_value=after) as switch:
+            _, vibe = self.call("GET", "/api/vibe")
+            status, result = self.call("POST", "/api/github/push", {"account": "grace"})
+        self.assertEqual(vibe["push"], before)
+        switch.assert_called_once_with("grace")
+        self.assertEqual((status, result), (200, after))
+
+    def test_a_refused_switch_says_why(self):
+        from cairn import github_push
+
+        with mock.patch.object(github_push, "switch", side_effect=github_push.PushError("The GitHub CLI is not signed in as mallory on this computer.")):
+            status, result = self.call("POST", "/api/github/push", {"account": "mallory"})
+        self.assertEqual((status, result["error"]), (400, "The GitHub CLI is not signed in as mallory on this computer."))
+        with mock.patch.object(github_push, "switch") as switch:
+            status, _ = self.call("POST", "/api/github/push", {"account": "grace"}, headers={"X-Cairn": ""})
+        self.assertEqual(status, 403)
+        switch.assert_not_called()
+
     def test_requires_header_and_host(self):
         status, _ = self.call("GET", "/api/files", headers={"X-Cairn": ""})
         self.assertEqual(status, 403)

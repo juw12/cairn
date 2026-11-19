@@ -544,6 +544,42 @@ export async function moveRepo(repo, from, to) {
   }
 }
 
+// Make another of your GitHub accounts the one this computer pushes as. The first time, git is told to ask the
+// GitHub CLI for its sign-in (one setting in git's config), so that is said before anything changes. After
+// that a press is the whole switch: it is as easily pressed back.
+export async function switchPusher(account) {
+  const push = state.vibePush;
+  if (!account || !push || typeof state.store?.githubPush !== "function") return;
+  if (push.viaCli && push.sure && sameAccount(account, push.pusher)) return;
+  if (!push.viaCli) {
+    const sure = await ask({
+      title: `Push from this computer as ${account}?`,
+      text: push.pusher
+        ? `git signs in to GitHub as ${push.pusher} here, with a sign-in it saved by itself. To follow this switch it has to ask the GitHub CLI instead.`
+        : "git has to ask the GitHub CLI for its GitHub sign-in to follow this switch.",
+      list: [
+        "Cairn runs gh auth setup-git once. That adds one setting to your git config, for github.com only.",
+        "From then on git push, gh and an assistant working on this computer all go out as the account picked here.",
+        "Commits keep their author. Only the sign-in changes: the name GitHub shows on a push, a pull request and a release.",
+        "The saved sign-in is not deleted. To go back to it: git config --global --unset-all credential.https://github.com.helper",
+      ],
+      confirm: `Push as ${account}`,
+      noInput: true,
+    });
+    if (!sure) return;
+  }
+  for (const button of $$("[data-action=vibe-gh-push]")) button.disabled = true;
+  try {
+    const { message, ...now } = await state.store.githubPush(account);
+    state.vibePush = now;
+    state.vibePushKey = JSON.stringify(now);
+    toast(message);
+  } catch (error) {
+    toast(error.message, { error: true });
+  }
+  renderView();
+}
+
 export function copyAgentHook() {
   navigator.clipboard?.writeText(AGENT_HOOK).then(
     () => toast("Copied. Paste it into AGENTS.md, CLAUDE.md or your assistant's instructions."),
@@ -800,11 +836,47 @@ function githubMoveRow(current, accounts) {
     </div>`;
 }
 
+// The accounts the GitHub CLI is signed in to on this computer, when there is a choice between them. Null on a
+// phone, in a browser without the local app, and with one account.
+function pushChoice() {
+  const push = state.vibePush;
+  return state.info?.canMoveRepos && push && Array.isArray(push.accounts) && push.accounts.length > 1 ? push : null;
+}
+
+// Which of your GitHub accounts this computer pushes as, with a button for each. git, the GitHub CLI and an
+// assistant working here all follow it, so the choice is made in one place.
+function githubPushSection() {
+  const push = pushChoice();
+  if (!push) return "";
+  const follows = push.viaCli && push.sure;
+  const chips = push.accounts
+    .map((name) => {
+      const on = sameAccount(name, push.pusher);
+      const title = on ? `Pushes go out as ${name}` : `Push from this computer as ${name}`;
+      return `<button type="button" class="chip${on ? " on" : ""}" data-action="vibe-gh-push" data-account="${esc(name)}" aria-pressed="${on}" title="${esc(title)}">${esc(name)}</button>`;
+    })
+    .join("");
+  const how = follows
+    ? "git push, the GitHub CLI and an assistant working on this computer follow this choice. Commits keep their author."
+    : push.pusher
+      ? `git signs in as ${push.pusher} with a sign-in it saved by itself. Pick an account and git asks the GitHub CLI instead, so every tool follows the one choice.`
+      : "git has no sign-in for GitHub here yet. Pick an account and git asks the GitHub CLI for it.";
+  return `<section class="vibe-ghpush" aria-label="GitHub account this computer pushes as">
+    <header>
+      <h2>Pushes from this computer</h2>
+      <span class="vm-spec">${push.pusher ? `go to GitHub as ${esc(push.pusher)}` : "no account picked yet"}</span>
+    </header>
+    <div class="gh-push" role="group" aria-label="Push as">${chips}</div>
+    <p class="muted small gh-note">${esc(how)}</p>
+  </section>`;
+}
+
 // How much of the month's free GitHub Actions minutes are gone, from the notes the watcher leaves in github-usage/:
-// one meter for the main account and one for every other account that has notes of its own.
+// one meter for the main account and one for every other account that has notes of its own. Under them, where
+// this computer is signed in to several accounts, the one it pushes as.
 function githubStrip() {
   const accounts = githubAccounts(state.notes);
-  return accounts.map((entry) => githubSection(entry, accounts)).join("");
+  return accounts.map((entry) => githubSection(entry, accounts)).join("") + githubPushSection();
 }
 
 function githubSection({ months, extra }, accounts) {
@@ -934,6 +1006,13 @@ async function poll() {
   // An app that just gained (or lost) the reading needs the strip drawn; after that it updates in place.
   if (Boolean(data.machine) !== Boolean(state.vibeMachine)) changed = true;
   state.vibeMachine = data.machine || null;
+  // Which GitHub account this computer pushes as: a switch made elsewhere (a terminal, an assistant) shows here too.
+  const pushKey = JSON.stringify(data.push || null);
+  if (pushKey !== (state.vibePushKey || "null")) {
+    state.vibePush = data.push || null;
+    state.vibePushKey = pushKey;
+    changed = true;
+  }
   // Which computer this is, by the name its sessions carry: the device bar marks it.
   if ((data.device || "") !== (state.vibeHere || "") && severalDevices) changed = true;
   state.vibeHere = data.device || "";
@@ -1883,7 +1962,7 @@ export function vibeView() {
       // Another computer picked in the device bar is not "This computer".
       label: shownDevice() !== null && shownDevice() !== (state.vibeHere || "") ? "Computer" : "",
     },
-    github: { html: githubStrip(), summary: minutesSummary },
+    github: { html: githubStrip(), summary: [minutesSummary, pushChoice()?.pusher ? `pushes as ${pushChoice().pusher}` : ""].filter(Boolean).join(" · ") },
     overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
     figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },
     activity: { html: activity(stats, sessions), summary: "sessions per day" },

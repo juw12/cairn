@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 75,
+      "date": "2026-11-19",
+      "title": "Which GitHub account this computer pushes as",
+      "changes": [
+        "Vibe: where the GitHub CLI is signed in to several accounts, a chip per account under the GitHub meters picks the one this computer pushes as. git, the GitHub CLI and an assistant working there all follow it, and a switch made in a terminal shows on the page (#55)",
+        "cairn vibe github push-as says which account pushes, and with a name switches to it (#55)"
+      ]
+    },
+    {
       "build": 74,
       "date": "2026-11-19",
       "title": "GitHub minutes of a second account",

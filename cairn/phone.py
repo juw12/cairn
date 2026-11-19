@@ -339,7 +339,7 @@ def make_phone_handler(base: type, phone: PhoneAccess) -> type:
 
     class PhoneHandler(base):
         desktop = None  # no /api/desktop from a phone
-        github_moves = False  # and no handing repos to another GitHub account
+        github_moves = False  # and no handing repos to another GitHub account or switching who this computer pushes as
 
         def _token(self) -> str:
             for part in (self.headers.get("Cookie") or "").split(";"):

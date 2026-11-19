@@ -388,10 +388,30 @@ def _vibe_github_move(brain: Brain, args, account: str) -> int:
     return 0
 
 
+def _vibe_github_push(args) -> int:
+    """`cairn vibe github push-as`: which of your GitHub accounts this computer pushes as.
+    `cairn vibe github push-as NAME` makes it NAME, one of the accounts the GitHub CLI is signed in to."""
+    from . import github_push
+
+    if len(args.text) > 2:
+        print("Usage: cairn vibe github push-as [ACCOUNT]", file=sys.stderr)
+        return 2
+    if len(args.text) == 1:
+        print(github_push.summary(github_push.status(fresh=True)))
+        return 0
+    try:
+        print(github_push.switch(args.text[1].strip().lstrip("@"))["message"])
+    except github_push.PushError as error:
+        print(error, file=sys.stderr)
+        return 1
+    return 0
+
+
 def _vibe_github(brain: Brain, args) -> int:
     """`cairn vibe github 1801 --at 2026-11-16T14:51`: count the month's Actions minutes on from the
     figure GitHub itself shows or mails. With no number, say what the month's note holds.
-    `--account NAME` is for another account you are signed in to; `move REPO --to NAME` hands a repo over."""
+    `--account NAME` is for another account you are signed in to; `move REPO --to NAME` hands a repo over;
+    `push-as [NAME]` says or sets which account this computer pushes as."""
     import datetime as dt
 
     from . import core, github_usage, publish
@@ -399,6 +419,8 @@ def _vibe_github(brain: Brain, args) -> int:
     account = (args.account or "").strip().lstrip("@")
     if args.text and args.text[0] == "move":
         return _vibe_github_move(brain, args, account)
+    if args.text and args.text[0] == "push-as":
+        return _vibe_github_push(args)
     try:
         account = github_usage.account_name(account) if account else ""
     except ValueError as error:
@@ -791,7 +813,7 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     vibe_parser = sub.add_parser(
         "vibe",
-        help="track a coding session live: start, log, check, end, status (and github: set the month's Actions minutes)",
+        help="track a coding session live: start, log, check, end, status (and github: the month's Actions minutes, and which account this computer pushes as)",
         description="Live progress for AI-assisted coding, kept in brain/sessions/. Tell your assistant to run "
         "`cairn vibe log` after each step and `cairn vibe check -- <tests>` to record results; the app shows it as it happens.",
     )
