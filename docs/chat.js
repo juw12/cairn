@@ -1,12 +1,14 @@
 // Chat: type, send, see the answer. Talks to the OpenCode models on the PC (your company build
 // included) through the local server, so it works from a paired phone too. The Glow tab opens your
-// own Glow app (Chat, Council, Arena) inside Cairn.
+// own Glow app (Chat, Council, Arena) inside Cairn. The page is three blocks (vibelayout.js): the
+// conversation first, then a Dashboard and a Recap of the chats.
 
 import { escapeHtml as esc, renderMarkdown } from "./md.js";
-import { $, icon, toast } from "./ui.js";
+import { $, icon, plural, toast } from "./ui.js";
 import { state } from "./state.js";
 import { session } from "./auth.js";
 import { relayRepo, relayStore, setRelayDevice, setRelayRepo, TOKEN_URL } from "./relay.js";
+import { boardHtml, dashboardHtml, openPanel, recapHtml } from "./vibelayout.js";
 
 export const GLOW_URL = "https://juw12.github.io/projects/glow/app.html";
 const MODEL_KEY = "cairn.chatModel";
@@ -132,6 +134,53 @@ export function startChatAbout(path, mode) {
   return true;
 }
 
+// Where the answers come from, in a word: this PC, or the PC behind the relay and whether it is awake.
+function pcStatus(c) {
+  if (direct()) return c.available ? "Ready" : "No OpenCode";
+  if (c.relayError) return "Not set up";
+  if (!c.pcSeen) return "–";
+  return Date.now() / 1000 - c.pcSeen > STALE_PC_S ? "Asleep" : "Online";
+}
+
+function chatNumbers(c) {
+  const list = c.list || [];
+  return { total: list.length, running: list.filter((item) => item.status === "running").length, loaded: c.list !== null };
+}
+
+function chatDashboard(c) {
+  const { total, running, loaded } = chatNumbers(c);
+  const model = savedModel(c.models);
+  const dayAgo = Date.now() / 1000 - 86400;
+  return dashboardHtml([
+    { value: loaded ? total : "–", label: total === 1 ? "chat" : "chats" },
+    { value: loaded ? running : "–", label: "answering now" },
+    { value: loaded ? (c.list || []).filter((item) => item.updated > dayAgo).length : "–", label: "active in the last day" },
+    { value: c.models.length || "–", label: c.models.length === 1 ? "model" : "models", sub: model ? `using ${model.split("/").pop()}` : "" },
+    { value: pcStatus(c), label: direct() ? "this PC" : "your PC, through GitHub" },
+  ]);
+}
+
+const dashboardSummary = (c) => {
+  const { total, running, loaded } = chatNumbers(c);
+  return loaded ? `${plural(total, "chat")} · ${running} answering · PC ${pcStatus(c).toLowerCase()}` : "loading…";
+};
+
+function chatRecap(c) {
+  const rows = [...(c.list || [])]
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0))
+    .slice(0, 6)
+    .map((item) => ({
+      when: item.status === "running" ? "answering…" : timeAgo(item.updated),
+      html: `<button type="button" class="link-button" data-chat-open="${esc(item.id)}">${esc(item.title || "New chat")}</button>`,
+    }));
+  return recapHtml(rows, c.list === null ? "Loading your chats…" : "No chats yet. Ask something above.");
+}
+
+const recapSummary = (c) => {
+  const latest = [...(c.list || [])].sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
+  return latest ? `last: ${latest.title || "New chat"}, ${timeAgo(latest.updated)}` : "no chats yet";
+};
+
 export function chatView() {
   const c = chatState();
   if (!canChat()) {
@@ -144,7 +193,7 @@ export function chatView() {
   const model = savedModel(models);
   const running = c.thread?.status === "running";
   const options = models.map((m) => `<option value="${esc(m)}"${m === model ? " selected" : ""}>${esc(m)}</option>`).join("");
-  return `
+  const talk = `
     <div class="chat-page${c.showList ? " show-list" : ""}">
       <aside class="chat-list" aria-label="Chats">
         <button type="button" class="btn primary chat-new" data-chat="new">${icon("plus", "sm")} New chat</button>
@@ -167,6 +216,11 @@ export function chatView() {
         </form>
       </section>
     </div>`;
+  return boardHtml("chat", {
+    talk: { html: talk, summary: c.thread?.title || "New chat" },
+    dashboard: { html: `<div id="chat-dash">${chatDashboard(c)}</div>`, summary: dashboardSummary(c) },
+    recap: { html: `<div id="chat-recap">${chatRecap(c)}</div>`, summary: recapSummary(c) },
+  });
 }
 
 export function glowView() {
@@ -192,6 +246,17 @@ export function wireGlow() {
 // Re-render just the moving parts, so the message box keeps what you are typing.
 function paint() {
   const c = chatState();
+  // The Dashboard and Recap blocks follow the list; a folded block only shows its one-line summary.
+  const dash = $("#chat-dash");
+  if (dash) dash.innerHTML = chatDashboard(c);
+  const recap = $("#chat-recap");
+  if (recap) recap.innerHTML = chatRecap(c);
+  const summary = (panel, text) => {
+    const line = $(`.vibe-panel[data-page="chat"][data-panel="${panel}"] .vp-sum`);
+    if (line) line.textContent = text;
+  };
+  summary("dashboard", dashboardSummary(c));
+  summary("recap", recapSummary(c));
   const log = $("#chat-log");
   if (!log) return;
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
@@ -328,17 +393,25 @@ function autoGrow(input) {
 // ============================================================ events
 
 export function wireChat() {
+  const root = $('.vibe-board[data-page="chat"]');
+  if (!root) return;
   const page = $(".chat-page");
-  if (!page) return;
   const c = chatState();
-  page.addEventListener("click", async (event) => {
+  root.addEventListener("click", async (event) => {
     const open = event.target.closest("[data-chat-open]");
-    if (open) return openChat(open.dataset.chatOpen);
+    if (open) {
+      if (page) return openChat(open.dataset.chatOpen);
+      // Picked in the Recap while the conversation is folded: unfold it, and it loads this chat.
+      c.current = open.dataset.chatOpen;
+      c.thread = null;
+      c.about = null;
+      return openPanel("talk", "chat");
+    }
     const action = event.target.closest("[data-chat]")?.dataset.chat;
     if (action === "new" || action === "plain") return newChat();
     if (action === "toggle-list") {
       c.showList = !c.showList;
-      page.classList.toggle("show-list", c.showList);
+      page?.classList.toggle("show-list", c.showList);
       return;
     }
     if (action === "stop" && c.current) {
@@ -352,6 +425,7 @@ export function wireChat() {
       refreshList();
     }
   });
+  if (!page) return;
   page.addEventListener("change", (event) => {
     const picker = event.target.closest("[data-chat-device]");
     if (!picker) return;

@@ -1,5 +1,6 @@
 // The Map view: a live, filterable graph of notes and their links, with local graphs, paths between
-// notes, keyboard navigation, insights and one-click link suggestions.
+// notes, keyboard navigation, insights and one-click link suggestions. The page is three blocks
+// (vibelayout.js): the map with its tools first, then a Dashboard and a Recap.
 
 import * as core from "./core.js";
 import * as G from "./graph.js";
@@ -9,6 +10,7 @@ import { createNote, noteByPath, readOnly, saveNote, state, upsertFile } from ".
 import { openNote } from "./drawer.js";
 import { renderView } from "./app.js";
 import { createView3D, reset3D } from "./map3d.js";
+import { boardHtml, dashboardHtml, noteRecap } from "./vibelayout.js";
 
 const LAYOUT_BUDGET_MS = 350;
 // Past this many dots the map takes the cheap paths: unlinked notes ring the linked core instead of
@@ -347,7 +349,7 @@ export function mapView() {
     .join("");
   const hidden = m.graph.nodes.length - m.nodes.filter((n) => n.kind === "note").length;
   const sub = `${plural(m.graph.nodes.length, "note")} · ${plural(m.graph.edges.length, "link")} · ${plural(facts.orphans.length, "orphan")} · ${plural(facts.islands, "island")}`;
-  return `${pageHead("Map", sub, `<button class="btn" data-action="map-reset">${icon("refresh")} Reset view</button>`)}
+  const graphHtml = `
     <div class="map-layout">
       <div class="card map-wrap${session.path ? " pathing" : ""}${is3d ? " is-3d" : ""}${m.big ? " big" : ""}" id="map-wrap">
         ${is3d ? `<canvas id="map-canvas" tabindex="0" role="img" aria-label="3D note map. Drag to turn it any way, right-drag or Shift-drag to pan, scroll to zoom. Arrow keys move between linked notes, Enter opens, Escape clears." aria-describedby="map-help"></canvas>
@@ -375,6 +377,30 @@ export function mapView() {
       </div>
       <aside class="map-side" aria-label="Map tools">${sidePanel(m)}</aside>
     </div>`;
+  const shownNotes = m.nodes.filter((n) => n.kind === "note").length;
+  const suggested = m.mentions.length + m.graph.unresolved.filter((u) => u.suggestion).length;
+  const hub = facts.hubs[0];
+  const blocks = {
+    graph: { html: graphHtml, summary: hidden ? `${shownNotes} of ${plural(m.graph.nodes.length, "note")} shown` : sub },
+    dashboard: {
+      html: dashboardHtml([
+        { value: m.graph.nodes.length, label: m.graph.nodes.length === 1 ? "note" : "notes" },
+        { value: m.graph.edges.length, label: m.graph.edges.length === 1 ? "link" : "links" },
+        { value: facts.orphans.length, label: "orphans", title: "Notes with no links in or out" },
+        { value: facts.islands, label: "islands", sub: facts.islands ? `largest: ${plural(facts.largest, "note")}` : "", title: "Groups of notes linked to each other but to nothing else" },
+        { value: facts.unresolved, label: "missing notes linked", title: "Links to notes that don't exist yet" },
+        { value: suggested, label: "suggested links", title: "Mentions of another note's name that are not links yet" },
+        ...(hub ? [{ value: hub.links, label: "links on the top hub", sub: hub.title }] : []),
+      ]),
+      summary: sub,
+    },
+    recap: {
+      html: noteRecap(state.notes, (n) => plural(m.degree(n.path), "link"), "Nothing yet."),
+      summary: hub ? `top hub: ${hub.title} (${plural(hub.links, "link")})` : "no links yet",
+    },
+  };
+  return `${pageHead("Map", sub, `<button class="btn" data-action="map-reset">${icon("refresh")} Reset view</button>`)}
+    ${boardHtml("map", blocks)}`;
 }
 
 function localChip(m) {
@@ -499,6 +525,9 @@ function setBox() {
 function slideBox(size) {
   if (!model.big) return setBox();
   dom.touched = true;
+  // Labels still waiting to be placed would redraw the map in the middle of the slide; they are
+  // placed when the finger rests or lifts instead.
+  clearTimeout(labelTimer);
   clearTimeout(dom.restTimer);
   dom.restTimer = setTimeout(() => {
     setBox();
@@ -1279,7 +1308,10 @@ export function wireMap() {
   }
   session.future = null;
   const wrap = $("#map-wrap");
-  if (!wrap || !model) return;
+  if (!wrap || !model) {
+    dom = null; // the Map block is folded: nothing is drawn, so nothing answers clicks or keys
+    return;
+  }
   if (settings.view === "3d" && $("#map-canvas")) wire3d(wrap);
   else wire2d(wrap);
   wirePanel(wrap);

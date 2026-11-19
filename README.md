@@ -164,10 +164,12 @@ thought. A session is a plain file in `brain/sessions/` with `status: live` whil
 steps; feedback lives in `brain/feedback/` with an optional 1-5 rating.
 
 Every block on the Vibe page (live recap, overview, numbers, activity, sessions, skills, models...) folds to one
-line with a summary, and moves up or down with its arrows or by dragging its handle. **Projects**, **People** and
-**Proof** are built the same way, each starting with a **Dashboard** (the numbers) and a **Recap** (what changed and
-what needs you). The layout is saved in `brain/CAIRN-LAYOUT.md` (one `page-order:` and `page-folded:` line per page),
-so the desktop app, the web app and your phone show the same pages.
+line with a summary, and moves up or down with its arrows or by dragging its handle. Every other page is built the
+same way (Today, Board, Ideas, Decisions, Journal, Projects, Chat, Autopilot, Map, Canvas, People, Proof, Notes and
+the Code inbox), each with a **Dashboard** (the numbers) and a **Recap** (what changed and what needs you). On Chat
+and the Map the tool comes first and the two blocks sit under it; move them where you like. The layout is saved in
+`brain/CAIRN-LAYOUT.md` (one `page-order:` and `page-folded:` line per page), so the desktop app, the web app and
+your phone show the same pages.
 
 The **Live recap** is the one list of sessions that are open: each row says *working*, *turn finished*, *stopped on
 an error* or *left open*, and opens to the full session (progress, steps, add a step, end it). Its sections

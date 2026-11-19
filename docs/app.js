@@ -29,7 +29,7 @@ import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
-import { movePanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
+import { movePanel, openPanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
 import { initDatabases } from "./database.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
@@ -227,6 +227,12 @@ export function renderView() {
   afterRender();
 }
 
+// A chat started from a session shows its banner in the Conversation block, so that block is unfolded.
+function openChatPage() {
+  setView("chat");
+  openPanel("talk", "chat");
+}
+
 function afterRender() {
   if ((state.view === "ideas" || state.view === "board") && !readOnly()) wireBoard();
   if (state.view === "map") wireMap();
@@ -370,8 +376,8 @@ function wireGlobal() {
       "vibe-outcome": () => setVibeOutcome(actionEl.dataset.outcome),
       "vibe-overview": () => setOverviewOutcome(actionEl.dataset.outcome),
       "vibe-lane": () => jumpToLive(actionEl.dataset.path),
-      "vibe-continue": () => startChatAbout(actionEl.dataset.path, "continue") && setView("chat"),
-      "vibe-newchat": () => startChatAbout(actionEl.dataset.path, "new") && setView("chat"),
+      "vibe-continue": () => startChatAbout(actionEl.dataset.path, "continue") && openChatPage(),
+      "vibe-newchat": () => startChatAbout(actionEl.dataset.path, "new") && openChatPage(),
       "vibe-share": shareStats,
       "vibe-to-list": jumpToList,
       "vibe-panel-fold": () => togglePanel(actionEl.dataset.panel, actionEl.dataset.page || "vibe"),
