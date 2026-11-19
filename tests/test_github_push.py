@@ -276,6 +276,11 @@ class PushPageTests(unittest.TestCase):
         github_usage.read_now(self.brain, "", dt.datetime.now(), http)
         page = self.open()
         page.wait_for_selector(".vibe-github + .vibe-ghpush")
+        page.click('.vibe-panel[data-panel="github"] [data-action=vibe-panel-fold]')  # folded, one short line says both
+        page.wait_for_selector('.vibe-panel.folded[data-panel="github"]')
+        self.assertEqual(page.locator('.vibe-panel[data-panel="github"] .vp-sum').inner_text(), "0% used · pushes as Grace")
+        page.click('.vibe-panel[data-panel="github"] [data-action=vibe-panel-fold]')
+        page.wait_for_selector(".vibe-ghpush")
         del self.pc.tokens["Grace"]
         page.wait_for_selector(".vibe-ghpush", state="detached")
         self.assertEqual(page.locator(".vibe-github").count(), 1)

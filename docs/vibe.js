@@ -1948,9 +1948,12 @@ export function vibeView() {
   const reading = machine();
   const meters = githubAccounts(state.notes).map((entry) => entry.months[0]);
   const [minutes] = meters;
+  // Folded, the GitHub block has one short line: with a choice of accounts the minutes shrink to a percent, so
+  // that who this computer pushes as still fits beside them in half a row.
+  const pusher = pushChoice()?.pusher || "";
   const minutesSummary = meters.length > 1
     ? meters.map((meter) => `${meter.account || "main"} ${meter.pct}%`).join(" · ")
-    : minutes ? `${thousands(minutes.used)} of ${thousands(minutes.limit)} free minutes · ${minutes.pct}%` : "";
+    : !minutes ? "" : pusher ? `${minutes.pct}% used` : `${thousands(minutes.used)} of ${thousands(minutes.limit)} free minutes · ${minutes.pct}%`;
   const blocks = {
     recap: {
       html: recapBand(),
@@ -1962,7 +1965,7 @@ export function vibeView() {
       // Another computer picked in the device bar is not "This computer".
       label: shownDevice() !== null && shownDevice() !== (state.vibeHere || "") ? "Computer" : "",
     },
-    github: { html: githubStrip(), summary: [minutesSummary, pushChoice()?.pusher ? `pushes as ${pushChoice().pusher}` : ""].filter(Boolean).join(" · ") },
+    github: { html: githubStrip(), summary: [minutesSummary, pusher ? `pushes as ${pusher}` : ""].filter(Boolean).join(" · ") },
     overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
     figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },
     activity: { html: activity(stats, sessions), summary: "sessions per day" },

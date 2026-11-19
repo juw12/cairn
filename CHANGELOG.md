@@ -3,6 +3,10 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 76 (2026-11-20): Who pushes, on the folded GitHub block
+
+- Vibe: folded, the GitHub minutes block still says which account this computer pushes as, next to the percent used ([#56](https://github.com/juw12/cairn/pull/56))
+
 ## Build 75 (2026-11-19): Which GitHub account this computer pushes as
 
 - Vibe: where the GitHub CLI is signed in to several accounts, a chip per account under the GitHub meters picks the one this computer pushes as. git, the GitHub CLI and an assistant working there all follow it, and a switch made in a terminal shows on the page ([#55](https://github.com/juw12/cairn/pull/55))

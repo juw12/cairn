@@ -2,6 +2,14 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 76,
+      "date": "2026-11-20",
+      "title": "Who pushes, on the folded GitHub block",
+      "changes": [
+        "Vibe: folded, the GitHub minutes block still says which account this computer pushes as, next to the percent used (#56)"
+      ]
+    },
+    {
       "build": 75,
       "date": "2026-11-19",
       "title": "Which GitHub account this computer pushes as",
