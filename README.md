@@ -663,12 +663,19 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 python -m unittest discover -s tests          # core, API, CLI, parity, e2e, Obsidian sync, map, sign-in, Workers, Telegram
 pip install playwright && playwright install chromium   # for the parity and e2e tests
 python scripts/make_media.py                  # regenerate the banner and screenshot
+python scripts/make_changelog.py              # rewrite CHANGELOG.md from docs/versions.json
 python scripts/live_github_check.py           # sign-in + edits against the real GitHub API on a throwaway repo
 ```
 
 The web app in `docs/` is plain HTML, CSS and ES modules with no build step. `cairn/core.py` and
 `docs/core.js` implement the same rules and are checked against each other by `tests/test_parity.py`.
 Design rationale (type, colour and the psychology behind it): [`plan/DESIGN.md`](plan/DESIGN.md).
+
+**Version history.** `docs/versions.json` holds one entry per build (the number in the service worker's cache
+name), newest first. The app shows it under Version history (bottom of the sidebar, Settings, command palette)
+and [`CHANGELOG.md`](CHANGELOG.md) is written from it. A change that moves the cache name adds its entry in the
+same pull request; `tests/test_versions.py` fails until it does.
+
 How it was planned and scored: [`PLAN.md`](PLAN.md), [`plan/rubric.md`](plan/rubric.md), [`plan/refine_log.md`](plan/refine_log.md).
 
 ## License

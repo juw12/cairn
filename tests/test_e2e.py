@@ -1061,6 +1061,41 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("status: new", self.note_text(page, "feedback/offline-maps-saved-my-hike.md"))
         self.assertEqual(self.errors, [])
 
+    def test_version_history_lists_every_build_and_opens_one_at_a_time(self):
+        versions_file = Path(__file__).resolve().parent.parent / "docs" / "versions.json"
+        builds = json.loads(versions_file.read_text(encoding="utf-8"))["releases"]
+        for viewport in ((1280, 900), (390, 844)):
+            with self.subTest(viewport=viewport):
+                page = self.open(viewport=viewport)
+                # On a phone the sidebar is behind the menu button; the button itself is the same one.
+                page.evaluate("document.querySelector('[data-action=\"versions\"]').click()")
+                page.wait_for_selector(".modal.versions .ver")
+                rows = page.eval_on_selector_all(
+                    ".modal.versions .ver",
+                    "nodes => nodes.map((n) => ({ open: n.open, build: n.querySelector('.ver-build').textContent, "
+                    "changes: n.querySelectorAll('li').length, current: !!n.querySelector('.pill') }))",
+                )
+                self.assertEqual([row["build"] for row in rows], [f"Build {build['build']}" for build in builds])
+                self.assertEqual([row["changes"] for row in rows], [len(build["changes"]) for build in builds])
+                # Only the build you are on is open and marked; the rest stay one line each.
+                self.assertEqual([row["open"] for row in rows], [True] + [False] * (len(rows) - 1))
+                self.assertEqual([row["current"] for row in rows], [True] + [False] * (len(rows) - 1))
+                self.assertIn(f"build {builds[0]['build']}", page.inner_text(".modal.versions p"))
+                page.click(".modal.versions .ver:nth-of-type(2) summary")
+                self.assertTrue(page.eval_on_selector(".modal.versions .ver:nth-of-type(2)", "n => n.open"))
+                link = page.get_attribute(".modal.versions .ver:nth-of-type(2) li a", "href")
+                self.assertRegex(link, r"^https://github\.com/juw12/cairn/pull/\d+$")
+                # Nothing runs off the side of the screen, and the list scrolls inside the dialog.
+                box = page.eval_on_selector(".modal.versions", "n => { const r = n.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom, n.scrollWidth, n.clientWidth]; }")
+                self.assertGreaterEqual(box[0], 0)
+                self.assertLessEqual(box[1], viewport[0])
+                self.assertGreaterEqual(box[2], 0)
+                self.assertLessEqual(box[3], viewport[1])
+                self.assertLessEqual(box[4], box[5])
+                page.keyboard.press("Escape")
+                page.wait_for_selector(".modal.versions", state="detached")
+                self.assertEqual(self.errors, [])
+
     def test_vibe_device_bar_shows_one_computer_or_all_and_keeps_the_choice(self):
         page = self.open()
         self.go(page, "vibe")

@@ -16,7 +16,7 @@ import { addFriend, loadLeaderboard, publishStats, removeFriend, setLeaderboardS
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, showAllClaims, vouchFor } from "./proofview.js";
 import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeDevice, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, toggleRow, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
-import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
+import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, openVersions, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
 import { startLiveSync } from "./live.js";
 import { chatView, glowView, startChatAbout, wireChat, wireGlow } from "./chat.js";
@@ -175,7 +175,8 @@ export function renderSidebarFoot() {
       ${state.info?.desktop
         ? `<button class="btn sm ghost" data-action="settings">${icon("gear", "sm")} Settings</button>`
         : `<a class="btn sm ghost" href="${REPO_URL}" target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>`}
-    </div>`);
+    </div>
+    <button class="btn sm ghost foot-versions" data-action="versions" title="Every build and what changed">${icon("history", "sm")} Version history</button>`);
   $("#sidebar-foot").innerHTML = parts.join("");
 }
 
@@ -409,6 +410,7 @@ function wireGlobal() {
       commit: commitBrain,
       sync: syncBrain,
       settings: openSettings,
+    versions: openVersions,
       "switch-brain": switchBrain,
       "obsidian-sync": () => syncObsidian(),
       "obsidian-unlink": unlinkObsidian,
