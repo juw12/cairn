@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 75 (2026-11-19): Which GitHub account this computer pushes as
+
+- Vibe: where the GitHub CLI is signed in to several accounts, a chip per account under the GitHub meters picks the one this computer pushes as. git, the GitHub CLI and an assistant working there all follow it, and a switch made in a terminal shows on the page ([#55](https://github.com/juw12/cairn/pull/55))
+- cairn vibe github push-as says which account pushes, and with a name switches to it ([#55](https://github.com/juw12/cairn/pull/55))
+
 ## Build 74 (2026-11-19): GitHub minutes of a second account
 
 - Vibe: a meter of GitHub Actions minutes for every account you are signed in to, not only the main one. Name the others with cairn vibe watch --github-account NAME ([#53](https://github.com/juw12/cairn/pull/53))

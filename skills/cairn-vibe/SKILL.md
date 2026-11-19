@@ -31,6 +31,7 @@ cairn vibe end --result shipped "toggle works"          # closes it and records 
 cairn vibe skill /refine "6.5 -> 8.7"     # record a skill run; any log text starting with a slash command counts as one
 cairn vibe status                         # the same numbers as the Vibe page, in the terminal
 cairn vibe github                         # this month's GitHub Actions minutes as the brain has them (a number sets GitHub's own figure)
+cairn vibe github push-as                 # which GitHub account this computer pushes as; the user picks it on the Vibe page and git follows, so push with plain git
 cairn feedback "toggle is hard to find on mobile" --rating 3 --from @alice   # feedback on the latest session, rating 1-5
 ```
 

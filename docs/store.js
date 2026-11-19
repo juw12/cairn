@@ -163,6 +163,11 @@ export class ServerStore {
   async githubMove(repo, from, to) {
     return this.request("POST", "api/github/move", { repo, from, to });
   }
+
+  // Make `account`, one of the accounts the GitHub CLI is signed in to here, the one this computer pushes as.
+  async githubPush(account) {
+    return this.request("POST", "api/github/push", { account });
+  }
 }
 
 // ------------------------------------------------------------ browser-only: a real folder on disk

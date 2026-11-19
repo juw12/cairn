@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, github_move, machine, mcp, precedent, vibe
+from . import __version__, autopilot, chat, github_move, github_push, machine, mcp, precedent, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -79,7 +79,7 @@ class Handler(BaseHTTPRequestHandler):
     web_dir: Path
     allowed_hosts: set[str]
     desktop = None  # optional DesktopHooks: state() -> dict, act(action, payload) -> dict
-    github_moves = True  # /api/github/move acts as you on GitHub; the phone listener turns it off
+    github_moves = True  # /api/github/move and /api/github/push act as you on GitHub; the phone listener turns them off
     server_version = f"Cairn/{__version__}"
 
     def log_message(self, *args):  # keep the terminal quiet
@@ -207,6 +207,8 @@ class Handler(BaseHTTPRequestHandler):
                     "git": vibe.git_activity_soon(brain, since, base),  # None until git has answered once
                     "machine": machine.snapshot_soon(),  # this computer and its load; None at first or where it cannot be read
                     "device": machine.device_name(),  # what this computer is called on its session notes
+                    # which GitHub account this computer pushes as; None at first, and always on a phone
+                    "push": github_push.status_soon() if self.github_moves else None,
                 })
             elif route == "/api/chat":
                 self._send_json(chat.summary())
@@ -303,6 +305,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(HTTPStatus.BAD_REQUEST, str(error))
         if route == "/api/github/move" and self.github_moves:
             return self._github_move()
+        if route == "/api/github/push" and self.github_moves:
+            return self._github_push()
         self._drain()
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
 
@@ -318,6 +322,15 @@ class Handler(BaseHTTPRequestHandler):
             self.changes.record(result["note"], self._client())
             result["file"] = self.brain.read(result["note"])
         self._send_json(result)
+
+    def _github_push(self):
+        """POST /api/github/push {account}: make another of the accounts the GitHub CLI is signed in to
+        the one this computer pushes as (cairn.github_push). Answers with the new state and a sentence."""
+        try:
+            body = self._body()
+            self._send_json(github_push.switch(str(body.get("account", ""))))
+        except (github_push.PushError, ValueError) as error:
+            self._error(HTTPStatus.BAD_REQUEST, str(error))
 
     def _chat(self, action: str):
         """Plain chat with your OpenCode models: send, stop, delete, refresh the model list."""
