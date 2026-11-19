@@ -13,7 +13,7 @@ import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { addFriend, loadLeaderboard, publishStats, removeFriend, setLeaderboardStat, unpublishStats } from "./leaderboard.js";
-import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, vouchFor } from "./proofview.js";
+import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, showAllClaims, vouchFor } from "./proofview.js";
 import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, toggleRow, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
@@ -431,6 +431,7 @@ function wireGlobal() {
       "create-brain": createMyBrain,
       "proof-check": checkMyClaims,
       "proof-forget": forgetProofLogin,
+      "proof-all": showAllClaims,
       "new-claim": newClaim,
       vouch: () => vouchFor(actionEl.dataset.subject, actionEl.dataset.claim),
       "held-use": useHeld,

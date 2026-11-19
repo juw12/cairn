@@ -21,9 +21,10 @@ VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canv
 # The sidebar has one entry per hub; a hub with several pages shows them as tabs (docs/state.js HUBS).
 HUBS = {
     "today": ["home", "board", "ideas", "decisions"],
+    "journal": ["journal"],
     "chat": ["chat", "glow", "autopilot"],
     "map": ["map", "canvas"],
-    "build": ["vibe", "projects", "journal"],
+    "build": ["vibe", "projects"],
     "people": ["people", "proof"],
 }
 # Pages with no sidebar entry: Ctrl+K (and the puzzle button in the sidebar foot) open them, as tabs of one strip.
@@ -283,10 +284,10 @@ class EndToEndTests(unittest.TestCase):
             tab: document.querySelector('.hub-tabs [aria-current="page"]')?.dataset.go ?? null,
         })""")
 
-    def test_sidebar_has_five_entries_and_no_group_labels(self):
+    def test_sidebar_has_six_entries_and_no_group_labels(self):
         page = self.open()
         entries = page.eval_on_selector_all("#nav button", "els => els.map((e) => e.querySelector('span').textContent)")
-        self.assertEqual(entries, ["Today", "Chat", "Map", "Build", "People"])
+        self.assertEqual(entries, ["Today", "Journal", "Chat", "Map", "Build", "People"])
         self.assertEqual(page.locator("#nav .nav-label").count(), 0)
         self.assertEqual(page.eval_on_selector_all("#nav button", "els => els.map((e) => e.dataset.hub)"), list(HUBS))
         self.assertEqual(self.errors, [])
@@ -307,17 +308,17 @@ class EndToEndTests(unittest.TestCase):
     def test_a_sidebar_entry_reopens_the_tab_used_last(self):
         page = self.open()
         self.assertEqual(page.get_attribute('#nav [data-hub="build"]', "data-go"), "vibe")
-        self.go(page, "journal")
+        self.go(page, "projects")
         self.go(page, "home")
         page.click('#nav [data-hub="build"]')
-        page.wait_for_function("() => window.cairn.state.view === 'journal'")
-        self.assertEqual(self.nav_state(page)["tab"], "journal")
+        page.wait_for_function("() => window.cairn.state.view === 'projects'")
+        self.assertEqual(self.nav_state(page)["tab"], "projects")
         # It is remembered in this browser, so it is still the choice after a reload.
         self.go(page, "home")
         page.reload()
         page.wait_for_selector("#nav button")
         self.assertEqual(page.evaluate("() => window.cairn.state.view"), "home")
-        self.assertEqual(page.get_attribute('#nav [data-hub="build"]', "data-go"), "journal")
+        self.assertEqual(page.get_attribute('#nav [data-hub="build"]', "data-go"), "projects")
         self.assertEqual(self.errors, [])
 
     def test_sidebar_entries_and_tabs_are_buttons_that_keep_the_keyboard_focus(self):
@@ -333,7 +334,7 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_function("() => window.cairn.state.view === 'map'")
         self.assertEqual(page.evaluate("() => document.activeElement.dataset.hub"), "map")
         reachable = page.eval_on_selector_all("#nav button, .hub-tabs .hub-tab", "els => els.map((e) => e.tagName === 'BUTTON' && e.tabIndex === 0)")
-        self.assertEqual(reachable, [True] * 7)
+        self.assertEqual(reachable, [True] * 8)
         self.assertEqual(self.errors, [])
 
     def test_tabs_fit_a_phone_and_the_drawer_closes_after_a_choice(self):
@@ -1851,7 +1852,7 @@ class EndToEndTests(unittest.TestCase):
             "board": ["dashboard", "recap", "cards"],
             "ideas": ["dashboard", "recap", "cards"],
             "decisions": ["dashboard", "recap", "log"],
-            "journal": ["dashboard", "recap", "reviews", "calendar", "lookback", "search", "days", "pages"],
+            "journal": ["dashboard", "recap", "calendar", "mind", "search", "pages"],
             "map": ["graph", "dashboard", "recap"],
             "canvas": ["dashboard", "recap", "boards"],
             "notes": ["dashboard", "recap", "all"],
@@ -1903,7 +1904,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(panels("board"), ["dashboard", "cards", "recap"], "dropping a card moves no block")
         self.assertEqual(page.locator('[data-page="board"][data-panel="dashboard"] .figure .value').first.inner_text(), str(int(todo) - 1))
 
-        # Journal: with the search block folded, a tag in Look back unfolds it and searches.
+        # Journal: with the search block folded, a tag in On your mind unfolds it and searches.
         self.go(page, "journal")
         page.wait_for_selector(".memory-stats")
         page.click('.vp-toggle[data-page="journal"][data-panel="search"]')

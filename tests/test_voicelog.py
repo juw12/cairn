@@ -260,12 +260,15 @@ class VoiceLogTests(unittest.TestCase):
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.locator(".heat-grid .heat").count(), 53 * 7)
         self.assertGreater(page.locator(".heat-grid .heat.l1, .heat-grid .heat.l2, .heat-grid .heat.l3").count(), 4)
-        self.assertGreaterEqual(page.locator(".lookback").count(), 3)
+        self.assertEqual(page.locator(".lookback-chip").count(), 4)
         self.assertEqual(page.locator(".mood-chart").count(), 1)
         page.fill("#journal-search", "#beta")
         page.wait_for_selector("#journal-results .search-hits li")
         self.assertGreaterEqual(page.locator("#journal-results .search-hits li").count(), 2)
-        page.click("[data-jl='review']")
+        # Nothing on the page asks for a review; saying "weekly review" still writes one.
+        self.assertEqual(page.locator("[data-jl='review'], [data-review], .review-due").count(), 0)
+        self.open_sheet_listening(page)
+        self.say(page, "weekly review")
         page.wait_for_function("() => window.cairn.state.files.some((f) => /^journal\\/\\d{4}-W\\d\\d\\.md$/.test(f.path))")
         review = page.evaluate("window.cairn.state.files.find((f) => /^journal\\/\\d{4}-W\\d\\d\\.md$/.test(f.path)).text")
         self.assertIn("review", review)
@@ -430,18 +433,90 @@ class VoiceLogTests(unittest.TestCase):
         )
         self.assertEqual(self.errors, [])
 
-    def test_mood_range_and_look_back_details(self):
+    def test_one_period_drives_the_page_and_a_day_opens_as_a_summary(self):
         page = self.open()
         go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
         self.assertEqual(page.get_attribute("[data-jl-range='30']", "aria-pressed"), "true")
+        month = page.locator("details.day-row").count()
         page.click("[data-jl-range='90']")
         page.wait_for_selector("[data-jl-range='90'][aria-pressed='true']")
         self.assertIn("90", page.get_attribute(".mood-chart", "aria-label") or "")
-        self.assertRegex(page.inner_text(".lookbacks"), r"\d\d:\d\d")
-        if page.locator(".lookback-more").count():
-            page.click(".lookback-more summary")
-            self.assertTrue(page.evaluate("document.querySelector('.lookback-more').open"))
+        self.assertIn("last 90 days", page.inner_text(".memory-stats"))
+        self.assertGreaterEqual(page.locator("details.day-row").count(), month)
+        # Any number of days, and the choice is still there after a reload.
+        page.fill("#journal-days", "3")
+        page.press("#journal-days", "Enter")
+        page.wait_for_function("() => window.cairn.state.journalRange === 3")
+        self.assertIn("last 3 days", page.inner_text(".memory-stats"))
+        self.assertLessEqual(page.locator("details.day-row").count(), 3)
+        self.assertEqual(page.input_value("#journal-days"), "3")
+        page.reload()
+        go_to(page, "journal")
+        page.wait_for_selector(".memory-stats")
+        self.assertEqual(page.evaluate("window.cairn.state.journalRange"), 3)
+        page.click("[data-jl-range='0']")
+        page.wait_for_selector("[data-jl-range='0'][aria-pressed='true']")
+        self.assertIn("all time", page.inner_text(".memory-stats"))
+        # A day is one line with its mood; opening it fills in the lines, and the full day is one click away.
+        row = page.locator("details.day-row").first
+        self.assertEqual(row.locator(".dr-body > *").count(), 0)
+        self.assertRegex(row.locator(".dr-mood").inner_text(), r"^\d\.\d \w+")
+        row.locator("summary").click()
+        row.locator(".dr-body .dr-list li").first.wait_for()
+        self.assertIn("Mood", row.locator(".dr-facts").inner_text())
+        row.locator(".dr-body [data-jl-day]").click()
+        page.wait_for_selector(".scrim")
+        self.assertEqual(self.errors, [])
+
+    def test_days_at_a_glance_mood_is_worked_out_and_cairns_page_wins(self):
+        page = self.open()
+        result = page.evaluate(
+            """async () => {
+              const dl = await import('./daylog.js');
+              const entries = (lines) => dl.parseEntries(lines.map((l) => `- ${l}`).join('\\n'));
+              const note = (path, slug, lines) => ({ type: 'journal', path, slug, title: slug, body: lines.map((l) => `- ${l}`).join('\\n') });
+              const session = (day, tokens, prompts) => ({ type: 'session', status: 'shipped', meta: { started: `${day}T09:00`, tokens },
+                body: '## Log\\n\\n' + prompts.map((p) => `- 09:00 prompt: ${p}`).join('\\n') });
+              const notes = [
+                note('Productivity Diary/2026-11-18.md', '2026-11-18', []),
+                note('journal/2026-11-18.md', '2026-11-18', ['09:00 [OpenCode] shipped the export, all tests passed #invoices #opencode', '10:00 release is live #invoices']),
+                note('diary/2026-11-17.md', '2026-11-17', ['08:00 one', '09:00 two', '10:00 three']),
+                note('journal/2026-11-17.md', '2026-11-17', ['08:30 Mood: low (2/5)']),
+                note('diary/2026-11-16.md', '2026-11-16', ['08:00 the build failed again, still stuck on the crash']),
+                note('journal/2026-11-16.md', '2026-11-16', []),
+                session('2026-11-18', 1200, ['great, thanks, ship it']),
+                session('2026-11-15', 300, ['why is this still broken']),
+              ];
+              const days = dl.journalDays(notes);
+              const sessions = dl.sessionDays(notes);
+              const rows = dl.daySummaries(days, sessions, '2026-11-01', '2026-11-18');
+              return {
+                paths: [...days.keys()].sort().map((d) => days.get(d).path),
+                rows: rows.map((r) => ({ day: r.day, entries: r.entries, sessions: r.sessions, tokens: r.tokens, auto: r.mood?.auto, score: r.mood?.score, topics: r.topics.map((t) => `${t.topic} ${t.count}`) })),
+                stats: dl.rangeStats(rows, 18),
+                tones: ['no errors, 0 failed', 'the deploy failed', 'walked the dog'].map(dl.toneOf),
+                quiet: dl.autoMood([], []),
+                heavyBad: dl.autoMood(entries(['08:00 failed', '09:00 error again']), [], 2).score < dl.autoMood(entries(['08:00 failed', '09:00 error again']), [], 1).score,
+              };
+            }"""
+        )
+        # Cairn's own page wins once it has an entry; an empty one gives way to the fuller page of the same date.
+        self.assertEqual(result["paths"], ["diary/2026-11-16.md", "journal/2026-11-17.md", "journal/2026-11-18.md"])
+        rows = {row["day"]: row for row in result["rows"]}
+        self.assertEqual(list(rows), ["2026-11-18", "2026-11-17", "2026-11-16", "2026-11-15"], "newest first, a session-only day included")
+        self.assertEqual((rows["2026-11-18"]["entries"], rows["2026-11-18"]["sessions"], rows["2026-11-18"]["tokens"]), (2, 1, 1200))
+        self.assertEqual(rows["2026-11-18"]["topics"], ["#invoices 2"], "the source tag #opencode is not a topic")
+        self.assertTrue(rows["2026-11-18"]["auto"])
+        self.assertGreater(rows["2026-11-18"]["score"], 3.5, "a day that reads well sits above the middle")
+        self.assertEqual((rows["2026-11-17"]["auto"], rows["2026-11-17"]["score"]), (False, 2), "a mood you set wins")
+        self.assertLess(rows["2026-11-16"]["score"], 3)
+        self.assertLess(rows["2026-11-15"]["score"], 3, "read from the prompt alone")
+        self.assertEqual((result["stats"]["days"], result["stats"]["entries"], result["stats"]["sessions"], result["stats"]["tokens"]), (3, 4, 2, 1500))
+        self.assertEqual(result["stats"]["busiest"]["day"], "2026-11-18")
+        self.assertEqual(result["tones"], [1, -1, 0])
+        self.assertIsNone(result["quiet"])
+        self.assertTrue(result["heavyBad"], "a heavy day that reads badly scores lower")
         self.assertEqual(self.errors, [])
 
 
@@ -641,7 +716,7 @@ class VoiceLogTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ round 4: reviews, alike days, a11y, worklet
 
-    def test_monthly_review_pending_reviews_and_alike_days(self):
+    def test_monthly_review_and_alike_days(self):
         page = self.open()
         result = page.evaluate(
             """async () => {
@@ -661,9 +736,6 @@ class VoiceLogTests(unittest.TestCase):
               return {
                 month,
                 weekSlug: dl.weeklyReview(days, [], '2026-10-19').slug,
-                dueMonth: dl.pendingReviews(days, [], '2026-11-03'),
-                dueMonthWritten: dl.pendingReviews(days, [{ type: 'journal', slug: '2026-10' }], '2026-11-03'),
-                dueWeek: dl.pendingReviews(days, [], '2026-10-27'),
                 alike: dl.similarDays(days, today, '2026-10-28'),
                 intent: dl.voiceIntent('monthly review').kind,
                 intent2: dl.voiceIntent('review my month').kind,
@@ -674,24 +746,22 @@ class VoiceLogTests(unittest.TestCase):
         self.assertEqual((month["title"], month["slug"]), ("October 2026", "2026-10"))
         for line in ("Days logged: 3 of 31", "Entries: 5", "Longest run: 2 days in a row", "Average mood: 4.0/5", "## Week by week", "## Decisions and ideas", "Busiest day"):
             self.assertIn(line, month["body"])
-        self.assertEqual([(r["kind"], r["slug"], r["entries"]) for r in result["dueMonth"]], [("month", "2026-10", 5)])
-        self.assertEqual(result["dueMonthWritten"], [])
-        # Last week (19 to 25 October) has one entry and no review: due, with the same slug the weekly review writes.
-        self.assertEqual([(r["kind"], r["slug"]) for r in result["dueWeek"]], [("week", result["weekSlug"])])
+        self.assertRegex(result["weekSlug"], r"^2026-W\d\d$")
         self.assertEqual([r["day"] for r in result["alike"]], ["2026-10-05"])
         self.assertIn("invoice", result["alike"][0]["words"])
         self.assertEqual((result["intent"], result["intent2"]), ("month-review", "month-review"))
 
-    def test_journal_monthly_review_mind_range_and_linked_days(self):
+    def test_journal_monthly_review_by_voice_and_on_your_mind_follows_the_period(self):
         page = self.open()
         go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
-        self.assertEqual(page.get_attribute("[data-jl-mind='30']", "aria-pressed"), "true")
-        page.click("[data-jl-mind='0']")
-        page.wait_for_selector("[data-jl-mind='0'][aria-pressed='true']")
+        page.click("[data-jl-range='0']")
+        page.wait_for_selector("[data-jl-range='0'][aria-pressed='true']")
         all_time = page.locator(".memory-card .tags .tag").count()
         self.assertGreater(all_time, 0)
-        page.click("[data-review='month']")
+        self.assertIn("all time", page.inner_text('[data-page="journal"][data-panel="mind"]'))
+        self.open_sheet_listening(page)
+        self.say(page, "monthly review")
         month = page.evaluate(TODAY_JS)[:7]
         page.wait_for_function("(p) => window.cairn.state.files.some((f) => f.path === p)", arg=f"journal/{month}.md")
         text = page.evaluate("(p) => window.cairn.state.files.find((f) => f.path === p).text", f"journal/{month}.md")
@@ -699,30 +769,14 @@ class VoiceLogTests(unittest.TestCase):
         self.assertIn("Days logged:", text)
         self.assertEqual(self.errors, [])
 
-    def test_review_due_banner_writes_last_weeks_review(self):
+    def test_no_page_asks_for_a_review(self):
         page = self.open()
-        due = page.evaluate("""async () => {
-          const dl = await import('./daylog.js');
-          const s = window.cairn.state;
-          const d = new Date();
-          const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          return dl.pendingReviews(dl.journalDays(s.notes), s.notes, today);
-        }""")
+        page.wait_for_selector(".home-log")
+        self.assertEqual(page.locator("[data-review], .review-due").count(), 0)
         go_to(page, "journal")
         page.wait_for_selector(".memory-stats")
-        week = next((r for r in due if r["kind"] == "week"), None)
-        if not week:
-            self.assertEqual(page.locator(".review-due [data-review='week']").count(), 0)
-            return
-        page.click(".review-due [data-review='week']")
-        page.wait_for_function("(p) => window.cairn.state.files.some((f) => f.path === p)", arg=f"journal/{week['slug']}.md")
-        # The new review opens in the drawer; close it and the banner is gone from the journal behind.
-        page.wait_for_selector(".scrim")
-        page.keyboard.press("Escape")
-        page.wait_for_selector(".scrim", state="detached")
-        go_to(page, "journal")
-        page.wait_for_selector(".memory-stats")
-        self.assertEqual(page.locator(".review-due [data-review='week']").count(), 0)
+        self.assertEqual(page.locator("[data-review], [data-jl='review'], .review-due").count(), 0)
+        self.assertNotIn("review", page.inner_text("#view").lower())
         self.assertEqual(self.errors, [])
 
     def test_saves_are_announced_by_one_persistent_live_region(self):

@@ -1,7 +1,7 @@
 // The main views (Today, Ideas, Board, Decisions, Notes, Journal, Code inbox, Context pack) and board drag and drop.
 // Today, Ideas, Board, Decisions, Notes and Code inbox are pages of blocks (vibelayout.js): a Dashboard, a Recap
 // and the page's own content, each of which folds and moves.
-// The sidebar holds five hubs (Today, Chat, Map, Build, People); Notes, Code inbox and Context pack sit under Tools.
+// The sidebar holds six hubs (Today, Journal, Chat, Map, Build, People); Notes, Code inbox and Context pack sit under Tools.
 
 import * as core from "./core.js";
 import { renderMarkdown, escapeHtml as esc } from "./md.js";

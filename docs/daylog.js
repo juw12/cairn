@@ -391,10 +391,19 @@ export function journalDays(notes) {
   for (const note of notes) {
     if (note.type !== "journal") continue;
     const day = DAY_RE.test(note.slug) ? note.slug : (DAY_RE.test(String(note.title)) ? note.title : null);
-    if (!day || days.has(day)) continue;
-    days.set(day, { day, path: note.path, note, entries: parseEntries(note.body) });
+    if (!day) continue;
+    const info = { day, path: note.path, note, entries: parseEntries(note.body) };
+    const kept = days.get(day);
+    if (!kept || dayRank(info) > dayRank(kept)) days.set(day, info);
   }
   return days;
+}
+
+// Two pages can carry the same date (another app's daily note next to Cairn's own journal/<day>.md).
+// Cairn's page wins as soon as it has an entry, since that is where the log is written; else the fuller page.
+function dayRank(info) {
+  const own = info.path === `journal/${info.day}.md`;
+  return (own && info.entries.length ? 1e9 : 0) + info.entries.length * 2 + (own ? 1 : 0);
 }
 
 export function streaks(days, today) {
@@ -662,32 +671,136 @@ export function monthlyReview(days, notes, anyDayInMonth) {
   return { title: `${monthName} ${year}`, slug: start.slice(0, 7), body: lines.join("\n") };
 }
 
-// Reviews worth writing now: last week, and (in the first week of a month) last month,
-// when they have entries but no review page yet.
-export function pendingReviews(days, notes, today) {
-  const written = new Set(notes.filter((n) => n.type === "journal").map((n) => n.slug));
-  const count = (from, to) => {
-    let n = 0;
-    for (const [day, info] of days) if (day >= from && day <= to) n += info.entries.length;
-    return n;
-  };
-  const out = [];
-  const lastWeek = addDays(weekStart(today), -7);
-  const { year, week } = isoWeek(lastWeek);
-  const weekSlug = `${year}-W${String(week).padStart(2, "0")}`;
-  const weekEntries = count(lastWeek, addDays(lastWeek, 6));
-  if (weekEntries && !written.has(weekSlug)) {
-    out.push({ kind: "week", day: lastWeek, slug: weekSlug, title: `Week ${week}, ${year}`, entries: weekEntries });
-  }
-  if (Number(today.slice(8)) <= 7) {
-    const lastMonth = addMonths(monthStart(today), -1);
-    const monthSlug = lastMonth.slice(0, 7);
-    const monthEntries = count(lastMonth, addDays(monthStart(today), -1));
-    if (monthEntries && !written.has(monthSlug)) {
-      out.push({ kind: "month", day: lastMonth, slug: monthSlug, title: `${MONTH_TITLES[Number(lastMonth.slice(5, 7)) - 1]} ${lastMonth.slice(0, 4)}`, entries: monthEntries });
-    }
+// ------------------------------------------------------------ a day at a glance: sessions, mood, topics
+
+// Tags that say who wrote a line, not what it is about.
+const SOURCE_TAGS = new Set(["opencode", "vector", "claude", "codex", "copilot", "gemini", "cursor", "review", "mood"]);
+const PROMPT_LINE_RE = /^- (?:\d{1,2}:\d{2}\s+)?prompt:\s*(.+)$/gm;
+const GOOD_RE = /\b(?:shipped|merged|verified|pass(?:ed|es|ing)?|fixed|solved|finished|completed?|released|deployed|live|green|works?|working|success(?:ful|fully)?|done|win|won|proud|happy|glad|love[ds]?|great|good|nice|thanks?|thank you|perfect|improved|faster)\b/g;
+const BAD_RE = /\b(?:fail(?:ed|s|ing|ures?)?|errors?|blocked|stuck|killed|timeouts?|timed out|refused|rejected|broken?|crash(?:ed|es|ing)?|cannot|can'?t|wrong|lag(?:gy|s|ging)?|bugs?|buggy|regressions?|retracted|reverted|missing|slow|tired|stressed|annoy(?:ed|ing)|frustrat(?:ed|ing)|worse|worst|bad|sad|angry|hate|ugly|not working|doesn'?t work|didn'?t work|no good)\b/g;
+// "no errors", "0 failed", "fixed the bug": trouble that is gone reads as good.
+const CLEARED_RE = /\b(?:no|0|zero|without|fixed|fix(?:es)?|solved|resolved)\s+(?:(?:the|a|an|more|console|known|new|open)\s+)*(?:errors?|fail(?:ed|ures?)?|bugs?|crash(?:es)?|regressions?|timeouts?|lag)\b/g;
+
+// Agent sessions per day: how many, their tokens, and the prompts you typed (your own words, for the mood).
+export function sessionDays(notes) {
+  const out = new Map();
+  for (const note of notes) {
+    if (note.type !== "session") continue;
+    const stamp = [note.meta?.started, note.meta?.created].find((v) => typeof v === "string" && DAY_RE.test(v.slice(0, 10)));
+    if (!stamp) continue;
+    const day = stamp.slice(0, 10);
+    if (!out.has(day)) out.set(day, { sessions: 0, tokens: 0, shipped: 0, prompts: [] });
+    const info = out.get(day);
+    info.sessions += 1;
+    info.tokens += Number(note.meta.tokens) || 0;
+    if (note.status === "shipped") info.shipped += 1;
+    for (const match of String(note.body || "").matchAll(PROMPT_LINE_RE)) info.prompts.push(match[1].trim());
   }
   return out;
+}
+
+// +1 when a line reads well, -1 when it reads like trouble, 0 when neither wins.
+export function toneOf(text) {
+  let low = String(text || "").toLowerCase();
+  const cleared = (low.match(CLEARED_RE) || []).length;
+  low = low.replace(CLEARED_RE, " ");
+  const good = (low.match(GOOD_RE) || []).length + cleared;
+  const bad = (low.match(BAD_RE) || []).length;
+  return good > bad ? 1 : bad > good ? -1 : 0;
+}
+
+// The mood of a day without asking for it. A mood you set yourself always wins. Otherwise it is read from
+// your own words (the prompts you typed to agents), from how the day's log lines read (trouble counts three
+// times, since it is rarer than "done"), and from how busy the day was against your usual day (`load`).
+export function autoMood(entries, prompts = [], load = null) {
+  const set = entries.filter((e) => e.mood).map((e) => e.mood.score);
+  if (set.length) {
+    const score = set.reduce((a, b) => a + b, 0) / set.length;
+    return { score, auto: false, label: MOODS[Math.round(score) - 1].label, reason: "set by you" };
+  }
+  const lines = entries.filter((e) => e.kind !== "mood");
+  if (!lines.length && !prompts.length) return null;
+  const tally = (texts) => {
+    const tones = texts.map(toneOf);
+    return { good: tones.filter((t) => t > 0).length, bad: tones.filter((t) => t < 0).length };
+  };
+  const own = tally(prompts);
+  const log = tally(lines.map((e) => e.text));
+  const ownTone = (own.good - own.bad) / (own.good + own.bad + 3);
+  const logTone = (log.good - 3 * log.bad) / (log.good + 3 * log.bad + 4);
+  const tone = prompts.length ? 1.5 * ownTone + logTone : 2 * logTone;
+  const heavy = load !== null && load >= 1.75;
+  const busy = heavy && tone < 0 ? -0.4 : heavy && tone > 0 ? 0.2 : 0;
+  const score = Math.min(5, Math.max(1, 3 + tone + busy));
+  const parts = [];
+  if (prompts.length) parts.push(`your prompts ${own.good} good, ${own.bad} bad`);
+  if (lines.length) parts.push(`log lines ${log.good} good, ${log.bad} trouble`);
+  if (load !== null) parts.push(`${heavy ? "heavy day, " : ""}${load.toFixed(1)}x your usual day`);
+  return { score, auto: true, label: MOODS[Math.round(score) - 1].label, reason: parts.join(" · ") };
+}
+
+// What a line is about: its first #tag that is not a source or a number, else its kind (task, idea...).
+export function topicOf(entry) {
+  const tag = entry.tags.find((t) => !SOURCE_TAGS.has(t) && !/^\d+$/.test(t));
+  if (tag) return `#${tag}`;
+  return entry.kind === "log" ? "" : entry.kind;
+}
+
+// One row per day from `fromDay` to `toDay`, newest first: entries, sessions, tokens, mood and top topics.
+// Days with neither an entry nor a session are left out. `load` compares a day (entries plus sessions) with
+// your usual day lately: the median of the 14 newest days that have anything.
+export function daySummaries(days, sessions, fromDay, toDay) {
+  const keys = new Set([...days.keys()].filter((d) => days.get(d).entries.length).concat([...sessions.keys()]));
+  const weight = (day) => (days.get(day)?.entries.length || 0) + (sessions.get(day)?.sessions || 0);
+  const newest = [...keys].filter((d) => d <= toDay).sort().reverse();
+  const weights = newest.slice(0, 14).map(weight).sort((a, b) => a - b);
+  const median = weights.length ? weights[Math.floor((weights.length - 1) / 2)] || 1 : 1;
+  const rows = [];
+  for (const day of newest) {
+    if (day < fromDay) break;
+    const entries = days.get(day)?.entries || [];
+    const work = sessions.get(day) || { sessions: 0, tokens: 0, shipped: 0, prompts: [] };
+    const topics = new Map();
+    for (const entry of entries) {
+      const topic = topicOf(entry);
+      if (!topic) continue;
+      if (!topics.has(topic)) topics.set(topic, { topic, count: 0, last: entry });
+      const kept = topics.get(topic);
+      kept.count += 1;
+      kept.last = entry;
+    }
+    rows.push({
+      day,
+      entries: entries.length,
+      sessions: work.sessions,
+      tokens: work.tokens,
+      shipped: work.shipped,
+      prompts: work.prompts.length,
+      load: weights.length > 1 ? weight(day) / median : null,
+      mood: autoMood(entries, work.prompts, weights.length > 1 ? weight(day) / median : null),
+      topics: [...topics.values()].sort((a, b) => b.count - a.count || (a.topic < b.topic ? -1 : 1)),
+    });
+  }
+  return rows;
+}
+
+// Totals over the rows of a range (see daySummaries) that spans `span` calendar days.
+export function rangeStats(rows, span) {
+  const logged = rows.filter((r) => r.entries);
+  const entries = logged.reduce((n, r) => n + r.entries, 0);
+  const moods = rows.filter((r) => r.mood).map((r) => r.mood.score);
+  const busiest = logged.reduce((top, r) => (!top || r.entries > top.entries ? r : top), null);
+  return {
+    span,
+    days: logged.length,
+    entries,
+    perDay: logged.length ? entries / logged.length : 0,
+    busiest,
+    mood: moods.length ? moods.reduce((a, b) => a + b, 0) / moods.length : null,
+    moodAuto: rows.some((r) => r.mood?.auto),
+    sessions: rows.reduce((n, r) => n + r.sessions, 0),
+    tokens: rows.reduce((n, r) => n + r.tokens, 0),
+  };
 }
 
 // ------------------------------------------------------------ days that read alike

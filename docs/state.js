@@ -36,9 +36,10 @@ export const VIEWS = [
 // those, so they stay one click away without taking a place in the menu.
 export const HUBS = [
   { id: "today", label: "Today", icon: "home", views: ["home", "board", "ideas", "decisions"], count: "board" },
+  { id: "journal", label: "Journal", icon: "journal", views: ["journal"] },
   { id: "chat", label: "Chat", icon: "chat", views: ["chat", "glow", "autopilot"] },
   { id: "map", label: "Map", icon: "map", views: ["map", "canvas"] },
-  { id: "build", label: "Build", icon: "code", views: ["vibe", "projects", "journal"], count: "vibe" },
+  { id: "build", label: "Build", icon: "code", views: ["vibe", "projects"], count: "vibe" },
   { id: "people", label: "People", icon: "users", views: ["people", "proof"] },
   { id: "tools", label: "Tools", icon: "puzzle", views: ["notes", "code", "context", "obsidian", "plugins"], hidden: true },
 ];
