@@ -9,7 +9,8 @@ import { $, icon, pageHead, plural, toast, today } from "./ui.js";
 import { createNote, deleteNote, noteByPath, readOnly, saveNote, scheduleGitRefresh, state, upsertFile } from "./state.js";
 import { openNote } from "./drawer.js";
 import { render, setView } from "./app.js";
-import { boardHtml, openPanel, recapHtml } from "./vibelayout.js";
+import { boardHtml, openPanel } from "./vibelayout.js";
+import { compact } from "./recap.js";
 
 const PREFS_KEY = "cairn.voicelog";
 const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true" class="icon"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>';
@@ -95,9 +96,22 @@ function inline(text) {
   return html.replace(/^\s*<p>/, "").replace(/<\/p>\s*$/, "");
 }
 
+// Parsed once per set of notes: a busy brain has megabytes of journal, and several blocks ask for the days.
+let dayCache = { notes: null, days: null };
+
 function days() {
-  return dl.journalDays(state.notes);
+  if (dayCache.notes !== state.notes) dayCache = { notes: state.notes, days: dl.journalDays(state.notes) };
+  return dayCache.days;
 }
+
+// Something worked out from the notes, kept until the notes change (`key` carries anything else it depends on).
+function memo(key, make) {
+  days();
+  dayCache[key] ??= make();
+  return dayCache[key];
+}
+
+const sessionsByDay = () => memo("sessions", () => dl.sessionDays(state.notes));
 
 // ============================================================ the centre button
 
@@ -167,12 +181,6 @@ export function initVoiceLog() {
     if (event.target.closest?.("[data-log-open]")) openLogSheet();
     const memory = event.target.closest?.(".home-log-memory[data-jl-day]");
     if (memory) openDay(memory.dataset.jlDay);
-    const review = event.target.closest?.("[data-review]");
-    if (review) {
-      const day = review.dataset.reviewDay || today();
-      if (review.dataset.review === "month") monthlyReview(day);
-      else weeklyReview(day);
-    }
   });
   syncLogFab();
 }
@@ -1006,75 +1014,112 @@ async function saveReview(review) {
 
 // ============================================================ Journal & memories view
 
+const RANGE_KEY = "cairn.journalRange";
+const RANGES = [[7, "7d"], [30, "30d"], [90, "90d"], [365, "1y"], [0, "All"]];
+const DAY_PAGE = 14;
+let journalRows = [];
+
+// The period the whole page reads: a number of days ending today, 0 for everything. Kept in this browser.
+function journalRange() {
+  if (state.journalRange === undefined) {
+    let saved = 30;
+    try {
+      saved = Number(localStorage.getItem(RANGE_KEY) ?? 30);
+    } catch {
+      /* storage is off: 30 days */
+    }
+    state.journalRange = Number.isInteger(saved) && saved >= 0 && saved <= 36500 ? saved : 30;
+  }
+  return state.journalRange;
+}
+
+function setJournalRange(count) {
+  state.journalRange = count;
+  state.journalShown = DAY_PAGE;
+  try {
+    localStorage.setItem(RANGE_KEY, String(count));
+  } catch {
+    /* storage is off: the choice lasts until the page closes */
+  }
+  render();
+}
+
 export function journalView() {
   const all = days();
   const now = today();
+  const sessions = sessionsByDay();
+  const range = journalRange();
+  const everything = memo(`rows:${now}`, () => dl.daySummaries(all, sessions, "0000-01-01", now));
+  const first = everything.length ? everything[everything.length - 1].day : now;
+  const from = range ? dl.addDays(now, -(range - 1)) : first;
+  const span = dl.dayDiff(from, now) + 1;
+  const rows = everything.filter((row) => row.day >= from);
+  journalRows = everything;
+  const stats = dl.rangeStats(rows, span);
+  const total = dl.rangeStats(everything, dl.dayDiff(first, now) + 1);
   const streak = dl.streaks(all, now);
-  const range = state.moodRange === 90 ? 90 : 30;
-  const series = dl.moodSeries(all, now, range);
-  const avg = dl.averageMood(series);
-  const weekFrom = dl.weekStart(now);
-  let weekEntries = 0;
-  for (const [day, info] of all) if (day >= weekFrom && day <= now) weekEntries += info.entries.length;
-  const totalEntries = [...all.values()].reduce((n, info) => n + info.entries.length, 0);
+  const period = range ? `last ${plural(range, "day")}` : "all time";
   const pages = state.notes.filter((n) => n.type === "journal").sort((a, b) => (a.slug < b.slug ? 1 : -1));
   const editable = canWrite();
   const actions = editable
-    ? `<button class="btn" data-jl="review">${icon("list")} Weekly review</button><button class="btn" data-review="month" data-review-day="${now}">${icon("list")} Monthly review</button><button class="btn" data-action="journal-today">${icon("journal")} Today's page</button><button class="btn primary" data-jl="log">${MIC} Log now</button>`
+    ? `<button class="btn" data-action="journal-today">${icon("journal")} Today's page</button><button class="btn primary" data-jl="log">${MIC} Log now</button>`
     : "";
-  const recent = [...all.keys()].sort().reverse().filter((d) => all.get(d).entries.length).slice(0, 5);
   const todayInfo = all.get(now);
-  const related = todayInfo ? linkedDays(all, todayInfo.entries, now) : [];
-  const mindRange = [30, 90, 0].includes(state.mindRange) ? state.mindRange : 30;
-  const { tags, links, people } = dl.mentions(all, mindRange ? dl.addDays(now, -(mindRange - 1)) : "0000-01-01", now);
-  const due = editable ? dl.pendingReviews(all, state.notes, now) : [];
-  const daysLogged = [...all.values()].filter((i) => i.entries.length).length;
-  const moodText = (text) => text.replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: ");
-  // Recap: the newest entries, across days.
-  const latest = [];
-  for (const day of [...all.keys()].sort().reverse()) {
-    for (const entry of [...all.get(day).entries].reverse()) latest.push({ day, entry });
-    if (latest.length >= 6) break;
-  }
-  const recapRows = latest.slice(0, 6).map(({ day, entry }) => ({
-    when: day === now ? entry.time || "today" : dl.prettyDay(day, "short"),
-    html: `${inline(moodText(entry.text))} <button class="link-btn muted" data-jl-day="${day}">open day</button>`,
-  }));
+  const related = todayInfo ? memo(`linked:${now}`, () => linkedDays(all, todayInfo.entries, now)) : [];
+  const { tags, links, people } = dl.mentions(all, from, now);
   const mind = tags.length || links.length || people.length;
+  const series = [];
+  const moodByDay = new Map(rows.map((row) => [row.day, row.mood]));
+  for (let i = span - 1; i >= 0; i--) {
+    const day = dl.addDays(now, -i);
+    const mood = moodByDay.get(day);
+    series.push({ day, score: mood ? mood.score : null, auto: Boolean(mood?.auto) });
+  }
+  const moodText = stats.mood === null ? "–" : `${stats.mood.toFixed(1)}<small>/5</small>`;
+  const shown = Math.max(DAY_PAGE, state.journalShown || 0);
+  const custom = RANGES.some(([n]) => n === range) ? "" : range;
+  const rangeBar = `<div class="journal-range" role="group" aria-label="Period">
+      <span class="seg">${RANGES.map(([n, label]) => `<button type="button" class="seg-btn ${range === n ? "on" : ""}" data-jl-range="${n}" aria-pressed="${range === n}">${label}</button>`).join("")}</span>
+      <label class="jr-custom ${custom ? "on" : ""}"><span class="sr-only">Any number of days</span><input class="input" id="journal-days" type="number" inputmode="numeric" min="1" max="36500" placeholder="any" value="${custom}"> days</label>
+      <span class="muted small">${esc(dl.prettyDay(from, "short"))} to today · ${plural(span, "day")}</span>
+    </div>`;
   const blocks = {
     dashboard: {
       html: `<section class="memory-stats">
-      <div class="stat-card"><span class="stat-num">${streak.current}</span><span class="stat-label">day streak${streak.loggedToday ? "" : editable && streak.current ? " · log today to keep it" : ""}</span></div>
-      <div class="stat-card"><span class="stat-num">${streak.longest}</span><span class="stat-label">longest streak</span></div>
-      <div class="stat-card"><span class="stat-num">${daysLogged}</span><span class="stat-label">days logged · ${plural(totalEntries, "entry", "entries")}</span></div>
-      <div class="stat-card"><span class="stat-num">${weekEntries}</span><span class="stat-label">entries this week</span></div>
-      <div class="stat-card"><span class="stat-num">${avg === null ? "–" : `${avg.toFixed(1)}<small>/5</small>`}</span><span class="stat-label">mood, last ${range} days</span></div>
-    </section>`,
-      summary: `${streak.current}-day streak · ${plural(daysLogged, "day")} logged · ${weekEntries} this week`,
+      <div class="stat-card"><span class="stat-num">${streak.current}</span><span class="stat-label">day streak · longest ${streak.longest}${streak.loggedToday ? "" : editable && streak.current ? " · log today to keep it" : ""}</span></div>
+      <div class="stat-card"><span class="stat-num">${stats.days}<small>/${span}</small></span><span class="stat-label">days logged, ${period}</span></div>
+      <div class="stat-card"><span class="stat-num">${compact(stats.entries)}</span><span class="stat-label">${stats.entries === 1 ? "entry" : "entries"} · ${stats.perDay.toFixed(stats.perDay < 10 ? 1 : 0)} a logged day</span></div>
+      <div class="stat-card"><span class="stat-num">${stats.busiest ? stats.busiest.entries : "–"}</span><span class="stat-label">busiest day${stats.busiest ? ` · ${esc(dl.prettyDay(stats.busiest.day, "short"))}` : ""}</span></div>
+      <div class="stat-card"><span class="stat-num">${moodText}</span><span class="stat-label">mood${stats.moodAuto ? " · worked out for you" : ""}</span></div>
+      ${stats.sessions ? `<div class="stat-card"><span class="stat-num">${compact(stats.sessions)}</span><span class="stat-label">agent ${stats.sessions === 1 ? "session" : "sessions"}${stats.tokens ? ` · ${compact(stats.tokens)} tokens` : ""}</span></div>` : ""}
+    </section>
+    ${range && everything.length ? `<p class="muted small journal-total">All time: ${plural(total.days, "day")} logged · ${plural(total.entries, "entry", "entries")}${total.sessions ? ` · ${plural(total.sessions, "agent session")}` : ""}${total.mood === null ? "" : ` · mood ${total.mood.toFixed(1)}/5`} · since ${esc(dl.prettyDay(first, "short"))}.</p>` : ""}`,
+      summary: `${streak.current}-day streak · ${stats.days} of ${plural(span, "day")} logged · mood ${stats.mood === null ? "not known" : `${stats.mood.toFixed(1)}/5`}`,
     },
     recap: {
-      html: recapHtml(recapRows, editable ? "Nothing logged yet. Tap the mic button at the bottom to start." : "Nothing logged yet."),
-      summary: latest.length ? `last entry ${latest[0].day === now ? `today ${latest[0].entry.time || ""}`.trim() : dl.prettyDay(latest[0].day, "short")}` : "nothing logged yet",
+      html: `<div class="lookback-chips" role="group" aria-label="Look back">${dl.lookBacks(all, now).map(lookBackChip).join("")}</div>
+      ${rows.length
+        ? `<ol class="page-recap day-list">${rows.slice(0, shown).map((row) => dayRow(row, now)).join("")}</ol>${rows.length > shown ? `<button type="button" class="btn sm ghost day-more" data-jl-more>Show ${plural(Math.min(DAY_PAGE, rows.length - shown), "more day")} · ${rows.length - shown} left</button>` : ""}`
+        : `<p class="muted small page-recap-empty">${everything.length ? `Nothing logged in the ${period}. Pick a longer period above.` : editable ? "Nothing logged yet. Tap the mic button at the bottom to start." : "Nothing logged yet."}</p>`}`,
+      summary: rows.length ? `${plural(rows.length, "day")} · newest ${rows[0].day === now ? "today" : dl.prettyDay(rows[0].day, "short")}` : "nothing logged in this period",
     },
-    reviews: due.length ? { html: reviewDueHtml(due), summary: `${plural(due.length, "review")} ready to write` } : null,
     calendar: {
       html: `<section class="memory-card heat-card">
         <div class="card-head"><h2>Every day</h2><span class="muted">last 12 months</span></div>
-        ${heatmapHtml(all, now)}
+        ${memo(`heat:${now}`, () => heatmapHtml(all, now))}
         <div class="heat-legend"><span>Less</span><i class="heat l0"></i><i class="heat l1"></i><i class="heat l2"></i><i class="heat l3"></i><span>More</span></div>
-        <div class="card-head" style="margin-top:14px"><h2>Mood</h2><span class="seg" role="group" aria-label="Mood range">${[30, 90].map((n) => `<button type="button" class="seg-btn ${range === n ? "on" : ""}" data-jl-range="${n}" aria-pressed="${range === n}">${n}d</button>`).join("")}</span></div>
+        <div class="card-head" style="margin-top:14px"><h2>Mood</h2><span class="muted">${period}</span></div>
         ${moodChart(series)}
       </section>`,
-      summary: `${plural(daysLogged, "day")} logged · mood ${avg === null ? "not set" : `${avg.toFixed(1)}/5`}`,
+      summary: `${plural(total.days, "day")} logged · mood ${stats.mood === null ? "not known" : `${stats.mood.toFixed(1)}/5`}`,
     },
-    lookback: {
+    mind: {
       html: `<section class="memory-card">
-        <ul class="lookbacks">${dl.lookBacks(all, now).map(lookBackRow).join("")}</ul>
-        ${related.length ? `<div class="card-head" style="margin-top:12px"><h2>Linked to today</h2></div><ul class="related-days">${related.map((r) => `<li><button class="link-btn" data-jl-day="${r.day}">${esc(dl.prettyDay(r.day, "short"))}</button> <span class="muted">${r.shared.length ? r.shared.map(esc).join(", ") : `reads alike: ${r.words.map(esc).join(", ")}`}</span></li>`).join("")}</ul>` : ""}
-        <div class="card-head" style="margin-top:12px"><h2>On your mind</h2><span class="seg" role="group" aria-label="On your mind range">${[[30, "30d"], [90, "90d"], [0, "All"]].map(([n, label]) => `<button type="button" class="seg-btn ${mindRange === n ? "on" : ""}" data-jl-mind="${n}" aria-pressed="${mindRange === n}">${label}</button>`).join("")}</span></div>
-        ${mind ? `<div class="tags">${people.slice(0, 6).map(([p, n]) => `<button class="tag person" data-jl-search="@${esc(p)}">@${esc(p)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${tags.slice(0, 6).map(([t, n]) => `<button class="tag" data-jl-search="#${esc(t)}">#${esc(t)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${links.slice(0, 6).map(([l, n]) => `<button class="tag" data-jl-search="${esc(l)}">${esc(core.resolveLink(state.notes, l)?.title || l)} <span class="muted">&nbsp;${n}</span></button>`).join("")}</div>` : `<p class="muted">No #tags, @people or [[links]] ${mindRange ? `in the last ${mindRange} days` : "yet"}.</p>`}
+        <div class="card-head"><h2>On your mind</h2><span class="muted">${period}</span></div>
+        ${mind ? `<div class="tags">${people.slice(0, 6).map(([p, n]) => `<button class="tag person" data-jl-search="@${esc(p)}">@${esc(p)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${tags.slice(0, 8).map(([t, n]) => `<button class="tag" data-jl-search="#${esc(t)}">#${esc(t)} <span class="muted">&nbsp;${n}</span></button>`).join("")}${links.slice(0, 6).map(([l, n]) => `<button class="tag" data-jl-search="${esc(l)}">${esc(core.resolveLink(state.notes, l)?.title || l)} <span class="muted">&nbsp;${n}</span></button>`).join("")}</div>` : `<p class="muted">No #tags, @people or [[links]] ${range ? `in the ${period}` : "yet"}.</p>`}
+        ${related.length ? `<div class="card-head" style="margin-top:12px"><h2>Linked to today</h2></div><ul class="related-days">${related.map((r) => `<li><button class="link-btn" data-jl-day="${r.day}">${esc(dl.prettyDay(r.day, "short"))}</button> <span class="muted">${r.shared.length ? `${r.shared.slice(0, 5).map(esc).join(", ")}${r.shared.length > 5 ? ` +${r.shared.length - 5}` : ""}` : `reads alike: ${r.words.map(esc).join(", ")}`}</span></li>`).join("")}</ul>` : ""}
       </section>`,
-      summary: "yesterday, last week, a year ago · on your mind",
+      summary: mind ? [...people.slice(0, 1).map(([p]) => `@${p}`), ...tags.slice(0, 3).map(([t]) => `#${t}`)].join(" ") || "links" : "nothing tagged in this period",
     },
     search: {
       html: `<section class="memory-card">
@@ -1084,12 +1129,6 @@ export function journalView() {
     </section>`,
       summary: state.journalQuery ? `searching “${state.journalQuery}”` : `across ${plural(all.size, "day")}`,
     },
-    days: {
-      html: `<section class="memory-card">
-      ${recent.length ? recent.map((d) => dayBlock(d, all.get(d))).join("") : `<p class="muted">Nothing logged yet. ${editable ? "Tap the mic button at the bottom to start." : ""}</p>`}
-    </section>`,
-      summary: recent.length ? `${plural(recent.length, "day")}, newest ${dl.prettyDay(recent[0], "short")}` : "nothing logged yet",
-    },
     pages: {
       html: pages.length
         ? `<div class="memory-card all-pages"><div class="list">${pages.map((n) => `<button class="row-item" data-open="${esc(n.path)}">${icon("journal", "sm")}<span>${esc(n.title)}</span><span class="muted">${esc(n.path)}</span></button>`).join("")}</div></div>`
@@ -1098,7 +1137,57 @@ export function journalView() {
     },
   };
   return `${pageHead("Journal & memories", "Your daily log, one Markdown page per day. Tap the mic button (or press L) to log by voice; everything lands in brain/journal/ as plain text.", actions)}
+    ${rangeBar}
     ${boardHtml("journal", blocks)}`;
+}
+
+// One line per day: the date, its mood, how much happened and what it was about. Opening it fills in the rest.
+function dayRow(row, now) {
+  const numbers = [
+    row.entries ? plural(row.entries, "entry", "entries") : "",
+    row.sessions ? plural(row.sessions, "session") : "",
+    row.tokens ? `${compact(row.tokens)} tokens` : "",
+  ].filter(Boolean).join(" · ");
+  const topics = row.topics.filter((t) => t.topic.startsWith("#")).slice(0, 4).map((t) => `${esc(t.topic)}&nbsp;${t.count}`).join(" · ");
+  const mood = row.mood
+    ? `<span class="dr-mood m${Math.round(row.mood.score)}" title="${esc(row.mood.reason)}">${row.mood.score.toFixed(1)} ${esc(row.mood.label)}${row.mood.auto ? "" : " · you set"}</span>`
+    : `<span class="dr-mood"></span>`;
+  return `<li><details class="day-row" data-day="${row.day}">
+    <summary><span class="dr-date">${row.day === now ? "Today" : esc(dl.prettyDay(row.day, "short"))}</span>${mood}<span class="dr-nums">${numbers}</span><span class="dr-topics">${topics}</span></summary>
+    <div class="dr-body"></div>
+  </details></li>`;
+}
+
+function shortLine(text, limit = 150) {
+  const plain = dl.plainText(text).replace(/^\[[^\]]+\]\s*/, "").replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: ");
+  return plain.length > limit ? `${plain.slice(0, limit - 1).trimEnd()}…` : plain;
+}
+
+// An opened day: a short day lists its lines; a long one lists what it was about, with the last line of each.
+function dayBody(row, info) {
+  const entries = info?.entries || [];
+  let list = "";
+  if (entries.length && entries.length <= 6) {
+    list = entries.map((e) => `<li><span class="entry-time">${esc(e.time || "·")}</span><span>${esc(shortLine(e.text, 220))}</span></li>`).join("");
+  } else if (entries.length) {
+    const top = row.topics.slice(0, 6);
+    const rest = entries.length - top.reduce((n, t) => n + t.count, 0);
+    list = top.map((t) => `<li><button type="button" class="tag" data-jl-search="${esc(t.topic)}">${esc(t.topic)} <span class="muted">&nbsp;${t.count}</span></button><span><span class="entry-time">${esc(t.last.time || "")}</span> ${esc(shortLine(t.last.text))}</span></li>`).join("")
+      + (rest > 0 ? `<li><span class="muted">other</span><span class="muted">${plural(rest, "more line")}</span></li>` : "");
+  }
+  const facts = [
+    row.mood ? `Mood ${row.mood.score.toFixed(1)}/5 ${row.mood.label} (${row.mood.auto ? row.mood.reason : "set by you"})` : "",
+    row.shipped ? `${row.shipped} shipped` : "",
+    row.prompts ? plural(row.prompts, "prompt") : "",
+  ].filter(Boolean).join(" · ");
+  return `${list ? `<ul class="dr-list">${list}</ul>` : ""}
+    <p class="muted small dr-facts">${esc(facts)}</p>
+    ${info ? `<button type="button" class="btn sm" data-jl-day="${row.day}">Open the full day${entries.length ? ` · ${plural(entries.length, "entry", "entries")}` : ""}</button>` : ""}`;
+}
+
+function lookBackChip({ label, day, info }) {
+  const count = info?.entries?.length || 0;
+  return `<button type="button" class="tag lookback-chip${count ? "" : " empty"}" data-jl-day="${day}" title="${esc(dl.prettyDay(day))}">${esc(label)} <span class="muted">&nbsp;${count ? plural(count, "entry", "entries") : "nothing"}</span></button>`;
 }
 
 // Days that share #tags, @people or [[links]] with today come first; then days whose words read alike.
@@ -1107,15 +1196,6 @@ function linkedDays(all, entries, now, limit = 5) {
   const seen = new Set(shared.map((r) => r.day));
   const alike = dl.similarDays(all, entries, now, limit).filter((r) => !seen.has(r.day)).map((r) => ({ ...r, shared: [] }));
   return shared.concat(alike).slice(0, limit);
-}
-
-function reviewDueHtml(due) {
-  return `<section class="card review-due" aria-label="Reviews ready to write">
-    ${due.map((r) => `<div class="review-due-row">
-      <span>${icon("list")} <b>${esc(r.title)}</b> <span class="muted">has ${plural(r.entries, "entry", "entries")} and no review yet.</span></span>
-      <button class="btn sm" type="button" data-review="${r.kind}" data-review-day="${r.day}">Write the ${r.kind === "month" ? "monthly" : "weekly"} review</button>
-    </div>`).join("")}
-  </section>`;
 }
 
 const HEAT_WEEKS = 53;
@@ -1142,7 +1222,7 @@ function moodChart(series) {
   const yOf = (score) => 70 - (score - 1) * 15;
   const points = series.map((p, i) => ({ x: left + i * step, y: p.score === null ? null : yOf(p.score), p }));
   const known = points.filter((pt) => pt.y !== null);
-  if (!known.length) return `<p class="muted mood-empty">No moods yet. Pick a mood in the log, or say “mood good”.</p>`;
+  if (!known.length) return `<p class="muted mood-empty">No mood yet. Log something and Cairn works it out, or say “mood good” to set it yourself.</p>`;
   const path = known.map((pt, i) => `${i ? "L" : "M"}${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(" ");
   const area = `${path} L${known[known.length - 1].x.toFixed(1)} 70 L${known[0].x.toFixed(1)} 70 Z`;
   const rows = [1, 3, 5].map((score) => `<line x1="${left}" x2="${width}" y1="${yOf(score)}" y2="${yOf(score)}" class="grid"/>
@@ -1151,31 +1231,10 @@ function moodChart(series) {
     ${rows}
     <path d="${area}" class="area"/>
     <path d="${path}" class="line"/>
-    ${known.map((pt) => `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="3"><title>${esc(dl.prettyDay(pt.p.day, "short"))}: ${pt.p.score.toFixed(1)}/5</title></circle>`).join("")}
+    ${known.map((pt) => `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="3"><title>${esc(dl.prettyDay(pt.p.day, "short"))}: ${pt.p.score.toFixed(1)}/5${pt.p.auto ? " (worked out)" : ""}</title></circle>`).join("")}
     <text x="${left}" y="88" class="axis">${esc(dl.prettyDay(series[0].day, "short"))}</text>
     <text x="${width}" y="88" class="axis" text-anchor="end">today</text>
   </svg>`;
-}
-
-function lookBackItem(e) {
-  return `<li>${e.time ? `<span class="entry-time">${esc(e.time)}</span> ` : ""}${inline(e.text.replace(/^(Task|Idea|Decision|Note):\s*/, "$1: ").replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: "))}</li>`;
-}
-
-function lookBackRow({ label, day, info }) {
-  const entries = info?.entries || [];
-  return `<li class="lookback ${entries.length ? "" : "empty"}">
-    <div class="lookback-head"><strong>${esc(label)}</strong> <button class="link-btn muted" data-jl-day="${day}">${esc(dl.prettyDay(day, "short"))}</button></div>
-    ${entries.length
-      ? `<ul>${entries.slice(0, 3).map(lookBackItem).join("")}</ul>${entries.length > 3 ? `<details class="lookback-more"><summary>and ${entries.length - 3} more</summary><ul>${entries.slice(3).map(lookBackItem).join("")}</ul></details>` : ""}`
-      : `<p class="muted">Nothing logged.</p>`}
-  </li>`;
-}
-
-function dayBlock(day, info) {
-  return `<div class="day-block">
-    <button class="day-title link-btn" data-jl-day="${day}">${esc(dl.prettyDay(day))}</button>
-    <ul class="day-entries">${info.entries.map((e) => `<li><span class="entry-time">${esc(e.time || "·")}</span><span>${inline(e.text.replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: "))}</span></li>`).join("")}</ul>
-  </div>`;
 }
 
 function searchResults(all, query) {
@@ -1234,21 +1293,29 @@ export function wireJournal() {
       $("#journal-search")?.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
     }
-    const mindButton = event.target.closest("[data-jl-mind]");
-    if (mindButton) {
-      state.mindRange = Number(mindButton.dataset.jlMind);
-      return render();
-    }
     const rangeButton = event.target.closest("[data-jl-range]");
-    if (rangeButton) {
-      state.moodRange = Number(rangeButton.dataset.jlRange);
+    if (rangeButton) return setJournalRange(Number(rangeButton.dataset.jlRange));
+    if (event.target.closest("[data-jl-more]")) {
+      state.journalShown = Math.max(DAY_PAGE, state.journalShown || 0) + DAY_PAGE;
       return render();
     }
     const action = event.target.closest("[data-jl]");
     if (!action) return;
     if (action.dataset.jl === "log") openLogSheet();
-    if (action.dataset.jl === "review") weeklyReview();
   }, { signal });
+  // Any number of days: type it and press Enter.
+  $("#journal-days")?.addEventListener("change", (event) => {
+    const count = Math.round(Number(event.target.value));
+    if (count >= 1) setJournalRange(Math.min(count, 36500));
+  }, { signal });
+  // A day in the recap is filled in when it is opened, so a long period stays a short list.
+  view.addEventListener("toggle", (event) => {
+    const row = event.target.closest?.("details.day-row");
+    const body = row?.querySelector(".dr-body");
+    if (!row?.open || !body || body.childElementCount) return;
+    const summary = journalRows.find((r) => r.day === row.dataset.day);
+    if (summary) body.innerHTML = dayBody(summary, days().get(summary.day));
+  }, { signal, capture: true });
 }
 
 // ============================================================ Home: today's log at a glance
@@ -1270,7 +1337,6 @@ export function homeLogStrip() {
   const entries = all.get(now)?.entries || [];
   const memory = dl.lookBacks(all, now).filter((l) => l.label !== "Yesterday" && l.info?.entries?.length).pop();
   const last = entries.slice(-2).reverse();
-  const due = canWrite() ? dl.pendingReviews(all, state.notes, now)[0] : null;
   return `<section class="home-log" aria-label="Today's log">
     <div class="home-log-main">
       <div class="home-log-head">
@@ -1285,7 +1351,6 @@ export function homeLogStrip() {
       ? `<button class="home-log-memory" data-jl-day="${memory.day}" type="button"><span class="eyebrow">${esc(memory.label)}</span><span>${inline(memory.info.entries[0].text.replace(/^Mood:\s*(?:[^\p{L}\p{N}\s(]+\s*)?/u, "Mood: "))}</span></button>`
       : ""}
     <div class="home-log-actions">
-      ${due ? `<button class="btn" type="button" data-review="${due.kind}" data-review-day="${due.day}">${icon("list")} ${esc(due.title)} review</button>` : ""}
       ${canWrite() ? `<button class="btn primary" type="button" data-log-open>${MIC} Log by voice</button>` : ""}
       <button class="btn ghost" type="button" data-go="journal">Memories ${icon("arrow", "sm")}</button>
     </div>

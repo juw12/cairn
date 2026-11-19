@@ -169,6 +169,8 @@ publish: true
 ---
 What you did, what changed because of it.`;
 
+const CLAIM_PAGE = 12;
+
 function proofDashboard(claims, check) {
   const checked = check?.checked && !check.running ? check.checked : null;
   const links = claims.reduce((sum, claim) => sum + claim.evidence.length + claim.attestations.length, 0);
@@ -183,19 +185,39 @@ function proofDashboard(claims, check) {
   ])}${checked ? levelSummary(checked) : ""}`;
 }
 
-// What needs you first: claims with no evidence, then links GitHub refused, then what each claim reached.
+// A claim's name short enough for one line: "Built Kas Keluarga: a private family ledger..." is "Built Kas Keluarga".
+function shortClaim(title) {
+  const text = String(title || "").trim();
+  const head = text.split(/[:.;,(]| - | — /)[0].trim();
+  const short = head.length >= 4 && head.length <= 44 ? head : text;
+  return short.length > 44 ? `${short.slice(0, 43).trimEnd()}…` : short;
+}
+
+// What needs you first, one line each: claims with no evidence, then links GitHub refused. The rest is counted
+// per state with a few names, since the full sentences are in the Claims block right below.
 function proofRecap(claims, check, byPath) {
   if (check?.running && !check.checked) return recapHtml([{ when: "now", html: `Checking ${plural(claims.length, "claim")} on GitHub…` }], "");
-  const rows = claims.map((claim) => {
+  const name = (claim) => `<button class="link-button" data-open="${esc(claim.path)}" title="${esc(claim.title)}">${esc(shortClaim(claim.title))}</button>`;
+  const names = (list) => `${list.slice(0, 3).map(name).join(", ")}${list.length > 3 ? ` <span class="muted">+${list.length - 3}</span>` : ""}`;
+  const rows = [];
+  const open = [];
+  const levels = new Map();
+  for (const claim of claims) {
     const checked = byPath.get(claim.path);
     const failed = (checked?.results || []).filter((result) => result && !result.ok).length;
-    const title = `<button class="link-button" data-open="${esc(claim.path)}">${esc(claim.title)}</button>`;
-    if (!claim.evidence.length && !claim.attestations.length) return { order: 0, when: "to do", html: `${title} has no evidence links yet` };
-    if (failed) return { order: 1, when: "failed", html: `${title}: GitHub did not confirm ${plural(failed, "link")}` };
-    if (checked?.level) return { order: 3, when: `L${checked.level}`, html: `${title} is ${esc(proof.levelInfo(checked.level).label.toLowerCase())}` };
-    return { order: 2, when: "open", html: `${title} is not checked yet` };
-  });
-  return recapHtml(rows.sort((a, b) => a.order - b.order).slice(0, 8), "No claims yet. Write the first one with New claim.");
+    if (!claim.evidence.length && !claim.attestations.length) rows.push({ order: 0, when: "to do", html: `${name(claim)} has no evidence links yet` });
+    else if (failed) rows.push({ order: 1, when: "failed", html: `${name(claim)}: GitHub did not confirm ${plural(failed, "link")}` });
+    else if (checked?.level) levels.set(checked.level, [...(levels.get(checked.level) || []), claim]);
+    else open.push(claim);
+  }
+  const first = rows.sort((a, b) => a.order - b.order).slice(0, 6);
+  if (rows.length > first.length) first.push({ order: 1, when: "", html: `<span class="muted">and ${rows.length - first.length} more that need a look, in Claims below</span>` });
+  if (open.length) first.push({ when: "open", html: `${plural(open.length, "claim")} not checked yet: ${names(open)}` });
+  for (const level of [...levels.keys()].sort((a, b) => b - a)) {
+    const list = levels.get(level);
+    first.push({ when: `L${level}`, html: `${plural(list.length, "claim")} ${esc(proof.levelInfo(level).label.toLowerCase())}: ${names(list)}` });
+  }
+  return recapHtml(first, "No claims yet. Write the first one with New claim.");
 }
 
 export function proofView() {
@@ -217,8 +239,11 @@ export function proofView() {
         <input id="proof-login" name="login" class="input" placeholder="octocat" spellcheck="false">
         <button class="btn" type="submit">Check my claims</button>
       </form>`;
+  const shown = state.proofAll ? claims : claims.slice(0, CLAIM_PAGE);
   const list = claims.length
-    ? `<div class="claim-list">${claims.map((claim) => claimCard(claim, { checked: byPath.get(claim.path), pending: check?.running, subject, local })).join("")}</div>`
+    ? `<div class="claim-list">${shown.map((claim) => claimCard(claim, { checked: byPath.get(claim.path), pending: check?.running, subject, local })).join("")}</div>${
+        claims.length > shown.length ? `<button type="button" class="btn sm ghost claim-more" data-action="proof-all">Show all ${claims.length} claims · ${claims.length - shown.length} more</button>` : ""
+      }`
     : `<div class="claim-empty-state">
         <h3>No claims yet</h3>
         <p>A claim is any note with a <code>claim:</code> line. Point <code>evidence:</code> at your repos, merged pull requests, commits or releases and Cairn checks each one on GitHub.</p>
@@ -247,6 +272,11 @@ export function proofView() {
       local ? actions : "",
     )}
     ${boardHtml("proof", blocks)}`;
+}
+
+export function showAllClaims() {
+  state.proofAll = true;
+  renderView();
 }
 
 export async function newClaim() {
