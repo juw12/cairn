@@ -4,7 +4,7 @@ import * as core from "./core.js";
 import { FolderStore, ConflictError } from "./store.js";
 import { escapeHtml as esc } from "./md.js";
 import { $, TYPE_META, ask, icon, plural, toast, today } from "./ui.js";
-import { createNote, fileByPath, loadAll, markGuide, noteByPath, refreshGit, saveNote, scheduleGitRefresh, state, upsertFile } from "./state.js";
+import { REPO_URL, createNote, fileByPath, loadAll, markGuide, noteByPath, refreshGit, saveNote, scheduleGitRefresh, state, upsertFile } from "./state.js";
 import { sourceKey } from "./views.js";
 import { closeDrawer, openNote } from "./drawer.js";
 import { showWelcome } from "./welcome.js";
@@ -386,6 +386,49 @@ export async function openPhoneDashboards() {
   });
 }
 
+// ============================================================ version history
+
+function versionDate(day) {
+  return new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+const versionChange = (text) =>
+  esc(text).replace(/#(\d+)/g, `<a href="${REPO_URL}/pull/$1" target="_blank" rel="noopener">#$1</a>`);
+
+// Every build with its date and what changed. versions.json ships with the app (and is kept for offline),
+// so the newest entry is the build this page runs; CHANGELOG.md is written from the same file.
+export async function openVersions() {
+  let releases;
+  try {
+    const response = await fetch("versions.json");
+    if (!response.ok) throw new Error(response.status);
+    releases = (await response.json()).releases;
+  } catch {
+    toast("The version history could not be read.", { error: true });
+    return;
+  }
+  const current = releases[0];
+  const first = releases[releases.length - 1];
+  modal(`
+    <div class="modal versions" role="dialog" aria-modal="true" aria-labelledby="versions-title">
+      <h2 id="versions-title">Version history</h2>
+      <p>You are on build ${current.build} from ${versionDate(current.date)}. ${plural(releases.length, "build")} since ${versionDate(first.date)}.</p>
+      <div class="ver-list">
+        ${releases.map((release, index) => `
+        <details class="ver"${index === 0 ? " open" : ""}>
+          <summary>
+            <span class="ver-build">Build ${release.build}</span>
+            <span class="ver-date">${versionDate(release.date)}</span>
+            <span class="ver-title">${esc(release.title)}</span>
+            ${index === 0 ? `<span class="pill">This version</span>` : `<span class="ver-count">${plural(release.changes.length, "change")}</span>`}
+          </summary>
+          <ul>${release.changes.map((change) => `<li>${versionChange(change)}</li>`).join("")}</ul>
+        </details>`).join("")}
+      </div>
+      <div class="actions"><button type="button" class="btn primary" data-cancel>Done</button></div>
+    </div>`, () => {});
+}
+
 export async function openSettings() {
   let info;
   try {
@@ -430,6 +473,7 @@ export async function openSettings() {
       </fieldset>` : ""}
       <div class="settings-update">
         <span>Cairn ${esc(info.version)}${info.build ? ` <span class="muted">· ${esc(info.build)}</span>` : ""}</span>
+        <button class="btn sm ghost" data-settings="versions">${icon("history", "sm")} Version history</button>
         ${info.updates ? `<button class="btn sm" data-settings="check-update">${icon("refresh", "sm")} Check for updates</button>` : `<span class="muted">Updates come with your package manager.</span>`}
       </div>
       <p class="hint">Closing the window keeps Cairn running in the tray. Quit it from the tray icon.</p>
@@ -458,6 +502,10 @@ export async function openSettings() {
       if (button.dataset.settings === "switch") {
         close();
         return openBrainDialog();
+      }
+      if (button.dataset.settings === "versions") {
+        close();
+        return openVersions();
       }
       if (button.dataset.settings === "phone-pair") {
         close();

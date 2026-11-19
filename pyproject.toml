@@ -36,4 +36,4 @@ cairn = "cairn"
 "cairn.web" = "docs"
 
 [tool.setuptools.package-data]
-"cairn.web" = ["*.html", "*.js", "*.css", "*.webmanifest", "icons/*", "media/*"]
+"cairn.web" = ["*.html", "*.js", "*.css", "*.json", "*.webmanifest", "icons/*", "media/*"]

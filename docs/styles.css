@@ -158,6 +158,7 @@ code { font-family: var(--mono); font-size: max(12px, .88em); padding: 1px 5px; 
 .git-card .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .git-card .branch { display: flex; align-items: center; gap: 6px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 .foot-row { display: flex; gap: 4px; }
+.foot-versions { align-self: flex-start; margin-top: -4px; color: var(--muted); }
 
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
@@ -813,6 +814,23 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .modal.settings .check { margin-top: 12px; flex-wrap: wrap; }
 .settings-update { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 18px 0 6px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13.5px; }
 .modal .hint { color: var(--muted); font-size: 12.5px; }
+/* Version history: one line per build, folded until asked for. */
+.modal.versions { display: flex; flex-direction: column; width: min(640px, 100%); max-height: calc(100vh - 32px); }
+.ver-list { overflow: auto; border-top: 1px solid var(--line); }
+.ver { border-bottom: 1px solid var(--line); }
+.ver summary { display: grid; grid-template-columns: 70px 100px minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; padding: 9px 0; cursor: pointer; list-style: none; font-size: 13.5px; }
+.ver summary::-webkit-details-marker { display: none; }
+.ver summary:hover .ver-title { text-decoration: underline; }
+.ver-build { font-family: var(--mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+.ver-date, .ver-count { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.ver-title { color: var(--ink); overflow-wrap: anywhere; }
+.modal .ver ul { margin: 0 0 12px; padding-left: 18px; max-height: none; overflow: visible; font-family: var(--font); font-size: 13.5px; }
+.modal .ver li { padding: 2px 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .modal.versions { padding: 18px; }
+  .ver summary { grid-template-columns: 70px minmax(0, 1fr) auto; }
+  .ver-title { grid-column: 1 / -1; grid-row: 2; }
+}
 
 /* ------------------------------------------------------------ touch: comfortable targets on phones and small tablets */
 

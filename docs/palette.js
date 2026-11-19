@@ -6,7 +6,7 @@ import { VIEWS, createNote, noteByPath, readOnly, refreshTodos, state } from "./
 import { bookmarkOpenNote, closeOtherTabs, closeSplit, closeTab, cycleTab, flushPending, insertIntoOpenNote, openInNewTab, openNote, openTabs, pickSplit, renameOpenNote, reopenClosedTab } from "./drawer.js";
 import { chooseCanvas, newCanvas } from "./canvas.js";
 import { pluginCommands, pluginViews } from "./plugins.js";
-import { capture, commitBrain, newNote, openSettings, openToday, saveContext, switchBrain, syncBrain, toggleTheme } from "./actions.js";
+import { capture, commitBrain, newNote, openSettings, openToday, openVersions, saveContext, switchBrain, syncBrain, toggleTheme } from "./actions.js";
 import { syncObsidian } from "./obsidian.js";
 import { fillTemplate, searchNotes, searchScore, templates } from "./vault.js";
 import { startTour } from "./tour.js";
@@ -75,6 +75,7 @@ function commands() {
     { label: "Toggle light / dark theme", kind: "App", icon: "moon", run: toggleTheme },
     { label: "Take the tour", kind: "Help", icon: "help", run: startTour },
     { label: "Keyboard shortcuts", kind: "Help  ?", icon: "help", run: showShortcuts },
+    { label: "Version history", kind: "Help", icon: "history", run: openVersions },
     { label: "Switch brain", kind: "App", icon: "folder", run: switchBrain },
   );
   if (state.info?.canGit) list.push({ label: "Commit brain", kind: "Project", icon: "git", run: commitBrain });
