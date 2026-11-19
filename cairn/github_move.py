@@ -107,8 +107,11 @@ def move(brain: Brain | None, repo: str, source: str, target: str, http=None, to
     except publish.PublishError as error:
         raise MoveError(str(error)) from None
     http = publish.make_http(token) if http is None else http
-    check(repo, source, target, http)
-    status, data = http("POST", f"/repos/{source}/{repo}/transfer", {"new_owner": target})
+    try:
+        check(repo, source, target, http)
+        status, data = http("POST", f"/repos/{source}/{repo}/transfer", {"new_owner": target})
+    except publish.PublishError as error:  # no connection: nothing was asked
+        raise MoveError(str(error)) from None
     if status != 202:
         raise MoveError(f"GitHub refused to move {repo} to {target} ({_refusal(status, data)}).")
     stamp = (dt.datetime.now() if now is None else now).strftime("%Y-%m-%dT%H:%M")

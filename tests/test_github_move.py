@@ -114,6 +114,15 @@ class MoveTests(unittest.TestCase):
         self.assertIn("422: Validation Failed. grace already has a repository named vault", message)
         self.assertFalse((self.brain.dir / "github-usage").exists())
 
+    def test_no_connection_is_a_sentence_not_a_crash(self):
+        def offline(method: str, path: str, body: dict | None = None):
+            raise publish.PublishError("Can't reach GitHub. Check your connection or proxy and try again.")
+
+        with self.assertRaises(github_move.MoveError) as raised:
+            github_move.move(self.brain, "vault", "ada", "grace", http=offline, token_of=self.token_of, now=self.NOW)
+        self.assertIn("Can't reach GitHub", str(raised.exception))
+        self.assertFalse((self.brain.dir / "github-usage").exists())
+
     def test_without_a_brain_the_request_still_goes_out(self):
         result = self.move(brain=None)
         self.assertEqual((result["note"], len(self.posts())), ("", 1))
