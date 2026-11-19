@@ -355,7 +355,8 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
     reply of a finished OpenCode turn is copied into its note only when `vibeWatchReplies` is on.
     While a session is live, this computer's load is noted in machines/ unless `vibeWatchLaptop` is off.
     The month's GitHub Actions minutes are noted in github-usage/ about once an hour unless
-    `vibeWatchGithub` is off; without it the figure on the Vibe page (and the phone) never moves."""
+    `vibeWatchGithub` is off; without it the figure on the Vibe page (and the phone) never moves.
+    `vibeWatchGithubAccounts` names other accounts the GitHub CLI is signed in to; each gets its own meter."""
     everywhere = config.get("vibeWatchEverywhere")
     if everywhere is None:
         everywhere = (Path(root) / ".obsidian").is_dir()
@@ -366,7 +367,14 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
         "last_reply": bool(config.get("vibeWatchReplies", False)),
         "laptop": bool(config.get("vibeWatchLaptop", True)),
         "github": bool(config.get("vibeWatchGithub", True)),
+        "github_accounts": _account_names(config.get("vibeWatchGithubAccounts")),
     }
+
+
+def _account_names(value) -> tuple[str, ...]:
+    """The setting as account names: a list, or one line with commas or spaces."""
+    names = value.replace(",", " ").split() if isinstance(value, str) else value if isinstance(value, (list, tuple)) else ()
+    return tuple(str(name).strip() for name in names if str(name).strip())
 
 
 def vibe_watch_pass(brain: Brain, config: Config, owner: str, **overrides) -> list[str] | None:

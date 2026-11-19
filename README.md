@@ -249,6 +249,20 @@ stand by and take over within five minutes of it stopping.
   minutes as a meter, warns at 75%, 90% and 100% (or when the last 7 days' pace would pass 100% by month end),
   and keeps the daily and monthly history. Only private repos count; it is an estimate and GitHub's own meter
   decides. The calls only read; `--no-github` turns them off.
+- **A second GitHub account:** minutes count for the account that owns a repo, whoever pushes to it. If the
+  GitHub CLI is signed in to another account of yours (`gh auth login`, with the `user` scope so it may read
+  billing: `gh auth refresh -h github.com -s user`), `cairn vibe watch --github-account NAME` notes its minutes
+  too, in `github-usage/NAME/`, and the Vibe page shows a meter for each account. In the desktop app the setting
+  is `vibeWatchGithubAccounts`. One computer can write the main account's note and another the second account's
+  (`--no-github --github-account NAME`), so two never write the same note. `cairn vibe github --account NAME`
+  reads or sets that account's figure.
+- **Moving a repo's minutes:** when one account is nearly out and another has room, the meter offers the busiest
+  private repos with a button, **repo → other account** (or `cairn vibe github move REPO --to NAME`). It asks
+  GitHub to transfer the repo: GitHub mails the new owner, nothing moves until that link is opened (within a
+  day), the old owner stays on as a collaborator and can still push, and the old address redirects. Only between
+  accounts signed in on this computer, only for private repos, only from Cairn on the computer itself (never
+  from a paired phone), and never without a confirmation. Mind GitHub's terms on how many free accounts one
+  person may hold.
 - **On the page:** sessions are grouped by day (click a day to fold it) and the outcome chips (shipped, no code
   change, no git) double as the legend and as filters. Day totals are clock time too.
 - **Time vibing** is clock time with at least one session working: two agents running side by side for an hour count

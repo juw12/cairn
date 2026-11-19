@@ -868,3 +868,10 @@ class MachineNoteTests(unittest.TestCase):
             lines = watch.watch_once(self.brain, opencode=False, vector=False, github=True)
         self.assertEqual(quiet, [])
         self.assertEqual(lines, ["GitHub: Actions minutes noted in github-usage/"])
+
+    def test_a_pass_notes_other_accounts_by_name_even_without_the_main_one(self):
+        """One computer writes the main account's note; another may be the only one signed in to a second account."""
+        with mock.patch.object(watch.github_usage, "sync", return_value=True) as sync:
+            lines = watch.watch_once(self.brain, opencode=False, vector=False, github=False, github_accounts=("grace",))
+        sync.assert_called_once_with(self.brain, None, None, account="grace")
+        self.assertEqual(lines, ["GitHub: Actions minutes of grace noted in github-usage/grace/"])

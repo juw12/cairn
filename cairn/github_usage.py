@@ -9,12 +9,17 @@ GitHub's own meter is the authority, and the billing rows this reads can sum to 
 So the figure can be set to GitHub's number (`cairn vibe github 1801`, from its mail or billing page):
 the note keeps that reading and adds what the billing rows show since, scaled by how far the rows
 were behind at that moment. Read-only towards GitHub; it needs the same token `cairn publish` uses.
+
+A second account you are signed in to with the GitHub CLI (`cairn vibe watch --github-account NAME`)
+gets its own notes in `github-usage/NAME/`, read with that account's own sign-in, so the Vibe page
+shows a meter for each. Minutes count for the account that owns a repo, whoever pushes to it.
 """
 
 from __future__ import annotations
 
 import calendar
 import datetime as dt
+import re
 import subprocess
 import time
 
@@ -32,8 +37,10 @@ TOP_REPOS = 6
 PLAN_MINUTES = {"free": 2000, "pro": 3000}
 DEFAULT_MINUTES = 2000
 WARN_PCT, CRITICAL_PCT = 75, 90  # the points GitHub itself mails at, with 100
+LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")  # a GitHub account name, and so a safe folder name
 
-_retry_after = 0.0
+_retry_after = 0.0  # the main account
+_retry_accounts: dict[str, float] = {}  # every other account, by name
 
 
 def multiplier(sku: str) -> int:
@@ -161,17 +168,28 @@ def calibrate(reading: dict, anchor: dict, now: dt.datetime, final: bool = False
 # ------------------------------------------------------------ the note
 
 
-def note_path(month: str) -> str:
-    return f"{FOLDER}/{month}.md"
+def account_name(account: str) -> str:
+    """A second account's name as given, or ValueError when it cannot be a GitHub account."""
+    name = str(account or "").strip().lstrip("@")
+    if not LOGIN_RE.fullmatch(name):
+        raise ValueError(f"{account!r} is not a GitHub account name.")
+    return name
 
 
-def usage_note(reading: dict) -> tuple[str, str]:
+def note_path(month: str, account: str = "") -> str:
+    """Where a month's reading is kept: `github-usage/2026-11.md` for the main account (the one the
+    default token belongs to), `github-usage/NAME/2026-11.md` for any other."""
+    return f"{FOLDER}/{account_name(account)}/{month}.md" if account else f"{FOLDER}/{month}.md"
+
+
+def usage_note(reading: dict, account: str = "") -> tuple[str, str]:
     """(path, text) of the note that carries one month's reading. Frontmatter is what the Vibe page
     reads; the body says the same for a person (or a phone opening the brain from GitHub)."""
     repos = "; ".join(f"{name} {minutes}" for name, minutes in reading["repos"])
     final = bool(reading.get("final"))
+    command = f"cairn vibe github <minutes> --account {account}" if account else "cairn vibe github <minutes>"
     meta = {
-        "title": f"GitHub Actions {reading['month']}",
+        "title": f"GitHub Actions {reading['month']}" + (f" ({account})" if account else ""),
         "type": "note",
         "tags": ["github"],
         "gh_account": str(reading.get("account", "")),
@@ -210,7 +228,7 @@ def usage_note(reading: dict) -> tuple[str, str]:
             }
         )
         lines += [
-            "It counts on from GitHub's own figure (set with `cairn vibe github <minutes>`), adding what",
+            f"It counts on from GitHub's own figure (set with `{command}`), adding what",
             "GitHub's billing rows show since.",
             "",
             f"- {reading['used']:,} of {reading['limit']:,} free minutes used ({reading['pct']}%), {left:,} left",
@@ -228,7 +246,7 @@ def usage_note(reading: dict) -> tuple[str, str]:
     else:
         lines += [
             "It is summed from GitHub's billing rows, which can read lower than GitHub's own meter: run",
-            "`cairn vibe github <minutes>` with the number GitHub shows or mails to count on from that.",
+            f"`{command}` with the number GitHub shows or mails to count on from that.",
             "",
             f"- {reading['used']:,} of {reading['limit']:,} free minutes used ({reading['pct']}%)",
         ]
@@ -244,18 +262,18 @@ def usage_note(reading: dict) -> tuple[str, str]:
     if any(reading["days"]):
         lines += ["", "| Day | Minutes |", "| --- | ---: |"]
         lines += [f"| {reading['month']}-{index:02d} | {minutes} |" for index, minutes in enumerate(reading["days"], 1)]
-    return note_path(reading["month"]), core.serialize_note(meta, "\n".join(lines) + "\n")
+    return note_path(reading["month"], account), core.serialize_note(meta, "\n".join(lines) + "\n")
 
 
-def _note_meta(brain: Brain, month: str) -> dict | None:
-    path = note_path(month)
+def _note_meta(brain: Brain, month: str, account: str = "") -> dict | None:
+    path = note_path(month, account)
     if not brain.resolve(path).exists():
         return None
     return core.parse_note(brain.read(path)["text"])["meta"]
 
 
-def _write(brain: Brain, reading: dict) -> None:
-    path, text = usage_note(reading)
+def _write(brain: Brain, reading: dict, account: str = "") -> None:
+    path, text = usage_note(reading, account)
     if brain.resolve(path).exists():
         brain.write(path, text, brain.read(path)["mtime"])
     else:
@@ -291,8 +309,31 @@ def fetch_public_repos(http) -> set[str]:
 
 
 def fetch_usage(http, login: str, year: int, month: int) -> list[dict]:
-    data = _get(http, f"/users/{login}/settings/billing/usage?year={year}&month={month}", "read your Actions usage")
+    path = f"/users/{login}/settings/billing/usage?year={year}&month={month}"
+    status, data = http("GET", path)
+    if status == 404:
+        # GitHub answers "Not Found" to a sign-in that may not see billing, which reads like a typo.
+        raise publish.PublishError(
+            f"GitHub would not show the Actions usage of {login}. Its sign-in needs the `user` scope: "
+            "make it the active account (gh auth switch) and run  gh auth refresh -h github.com -s user"
+        )
+    if status >= 300 or data is None:
+        message = data.get("message", "") if isinstance(data, dict) else ""
+        raise publish.PublishError(f"GitHub refused to read your Actions usage ({status}{': ' + message if message else ''}).")
     return list(data.get("usageItems") or [])
+
+
+def account_token(account: str) -> str:
+    """The GitHub CLI's token for one of the accounts signed in on this computer. Never printed or
+    stored: it goes straight into the calls for that account."""
+    name = account_name(account)
+    try:
+        result = subprocess.run(["gh", "auth", "token", "--hostname", "github.com", "--user", name], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        result = None
+    if result and result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    raise publish.PublishError(f"The GitHub CLI is not signed in as {name} on this computer. Sign in once with: gh auth login")
 
 
 def _months_back(year: int, month: int, count: int) -> list[tuple[int, int]]:
@@ -311,50 +352,75 @@ def _is_fresh(meta: dict | None, now: dt.datetime) -> bool:
     return abs(age.total_seconds()) < REFRESH_MINUTES * 60
 
 
-def _note_months(brain: Brain, now: dt.datetime, http, new_anchor: dict | None = None) -> dict:
+def _note_months(brain: Brain, now: dt.datetime, http, new_anchor: dict | None = None, account: str = "") -> dict:
     """Ask GitHub, write this month's note (counting on from `new_anchor`, else from the reading the
-    note already keeps) and fill in past months once. Returns this month's reading."""
+    note already keeps) and fill in past months once. Returns this month's reading. `account` names
+    an account besides the main one: its own sign-in is used and its notes go in its own folder."""
     today = _utc(now).date()  # GitHub's month runs on UTC
     month = f"{today.year:04d}-{today.month:02d}"
-    http = publish.make_http(publish.find_token()) if http is None else http
+    if http is None:
+        http = publish.make_http(account_token(account) if account else publish.find_token())
     login, limit = fetch_account(http)
+    if account and login.lower() != account.lower():
+        raise publish.PublishError(f"That sign-in belongs to {login}, not {account}.")
     public = fetch_public_repos(http)
     stamp = now.strftime("%Y-%m-%dT%H:%M")
     reading = quota(fetch_usage(http, login, today.year, today.month), public, today.year, today.month, today.day, limit)
-    anchor = anchor_of(_note_meta(brain, month), month) if new_anchor is None else new_anchor
+    anchor = anchor_of(_note_meta(brain, month, account), month) if new_anchor is None else new_anchor
     if anchor is not None:
         if anchor.get("api") is None:
             anchor = {**anchor, "api": reading["used"]}  # read just now, so the rows' sum of this moment
         reading = calibrate(reading, anchor, now)
     reading = {**reading, "account": login, "at": stamp}
-    _write(brain, reading)
+    _write(brain, reading, account)
     for year, past in _months_back(today.year, today.month, HISTORY_MONTHS):
         name = f"{year:04d}-{past:02d}"
-        meta = _note_meta(brain, name)
+        meta = _note_meta(brain, name, account)
         if (meta or {}).get("gh_final") == "yes":
             continue
         closed = quota(fetch_usage(http, login, year, past), public, year, past, 31, limit)
         kept = anchor_of(meta, name)  # a month that was counted from GitHub's figure closes on it too
         closed = calibrate(closed, kept, now, final=True) if kept else closed
-        _write(brain, {**closed, "account": login, "at": stamp, "final": True})
+        _write(brain, {**closed, "account": login, "at": stamp, "final": True}, account)
     return reading
 
 
-def sync(brain: Brain, now: dt.datetime | None = None, http=None) -> bool:
+def sync(brain: Brain, now: dt.datetime | None = None, http=None, account: str = "") -> bool:
     """Note this month's Actions minutes when the note is missing or an hour old, and fill in past
     months once. True when the current month's note was written. Quiet on purpose: no token, no
-    network and a refusal from GitHub write nothing and are tried again later."""
+    network and a refusal from GitHub write nothing and are tried again later. `account` notes
+    another account you are signed in to, in its own folder and with its own wait."""
     global _retry_after
     now = dt.datetime.now() if now is None else now
     month = _utc(now).strftime("%Y-%m")
     try:
-        if _is_fresh(_note_meta(brain, month), now) or time.monotonic() < _retry_after:
+        retry_after = _retry_accounts.get(account.lower(), 0.0) if account else _retry_after
+        if _is_fresh(_note_meta(brain, month, account), now) or time.monotonic() < retry_after:
             return False
-        _note_months(brain, now, http)
+        _note_months(brain, now, http, account=account)
         return True
     except (publish.PublishError, ConflictError, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
-        _retry_after = time.monotonic() + RETRY_SECONDS
+        if account:
+            _retry_accounts[account.lower()] = time.monotonic() + RETRY_SECONDS
+        else:
+            _retry_after = time.monotonic() + RETRY_SECONDS
         return False
+
+
+def read_now(brain: Brain, account: str = "", now: dt.datetime | None = None, http=None) -> dict:
+    """Ask GitHub at once, whatever the note's age, and return the month's reading. Where `sync` stays
+    quiet, this raises PublishError with the reason, which is what someone setting an account up needs."""
+    return _note_months(brain, dt.datetime.now() if now is None else now, http, account=account)
+
+
+def sync_accounts(brain: Brain, accounts, now: dt.datetime | None = None, http_for=None) -> list[str]:
+    """Note the minutes of every other account named, each with its own sign-in. Returns the names
+    whose note was written. `http_for(name)` stands in for GitHub in tests."""
+    noted = []
+    for account in dict.fromkeys(str(name).strip().lstrip("@") for name in accounts or ()):
+        if account and sync(brain, now, http_for(account) if http_for else None, account=account):
+            noted.append(account)
+    return noted
 
 
 def set_anchor(
@@ -364,6 +430,7 @@ def set_anchor(
     api: int | None = None,
     now: dt.datetime | None = None,
     http=None,
+    account: str = "",
 ) -> dict:
     """Count on from GitHub's own figure: `used` minutes at `at` (now when left out). `api` is what
     the billing rows summed to at that moment; left out, it is what they sum to right now, which is
@@ -377,13 +444,14 @@ def set_anchor(
         raise ValueError("That reading is in the future.")
     if _utc(at).strftime("%Y-%m") != _utc(now).strftime("%Y-%m"):
         raise ValueError("That reading is from another month; GitHub's month runs on UTC.")
-    return _note_months(brain, now, http, {"used": int(used), "at": at.replace(second=0, microsecond=0), "api": api})
+    return _note_months(brain, now, http, {"used": int(used), "at": at.replace(second=0, microsecond=0), "api": api}, account)
 
 
 def summary(reading: dict) -> str:
     """One line a terminal can print after a reading."""
     left = max(0, reading["limit"] - reading["used"])
-    line = f"GitHub Actions {reading['month']}: {reading['used']:,} of {reading['limit']:,} minutes ({reading['pct']}%), {left:,} left."
+    who = f" ({reading['account']})" if reading.get("account") else ""
+    line = f"GitHub Actions {reading['month']}{who}: {reading['used']:,} of {reading['limit']:,} minutes ({reading['pct']}%), {left:,} left."
     anchor = reading.get("anchor")
     if anchor:
         line += f" GitHub's count of {anchor['used']:,} at {anchor['at']:%Y-%m-%d %H:%M}, plus {reading['since']:,} since."

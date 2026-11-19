@@ -1,6 +1,6 @@
 // Checks for docs/progress.js; run by tests/test_progress.py (needs Node).
 import assert from "node:assert/strict";
-import { MACHINE_FRESH_MIN, agentGroup, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubFromNote, githubUsage, historyRemaining, machineFromNote, machineReading, reportedProgress } from "../docs/progress.js";
+import { MACHINE_FRESH_MIN, agentGroup, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubAccounts, githubBudget, githubFromNote, githubMoves, githubUsage, historyRemaining, machineFromNote, machineReading, movePending, reportedProgress } from "../docs/progress.js";
 
 const log = (...entries) => entries.map(([time, kind, text]) => ({ time, kind, text }));
 
@@ -126,6 +126,31 @@ assert.equal(githubFromNote({ meta: { gh_month: "2026-11", gh_used: "12" } }), n
 assert.equal(githubFromNote({ meta: { gh_month: "November", gh_used: "12", gh_limit: "2000" } }), null);
 assert.deepEqual(githubUsage([{ meta: {} }, { meta: { gh_month: "2026-10", gh_used: "68", gh_limit: "2000" } }, november]).map((month) => month.month), ["2026-11", "2026-10"]);
 assert.deepEqual([usage.anchor, usage.apiUsed, usage.since, usage.scale, usage.pace], [null, 1440, 0, 1, null]);
+
+// A second account keeps its months in github-usage/<name>/ and gets a meter of its own; the main account stays first.
+const mainNote = { ...november, path: "github-usage/2026-11.md" };
+const mainOctober = { path: "github-usage/2026-10.md", meta: { gh_account: "ada", gh_month: "2026-10", gh_used: "68", gh_limit: "2000" } };
+const graceNote = { path: "github-usage/grace/2026-11.md", meta: { gh_account: "Grace", gh_month: "2026-11", gh_used: "120", gh_limit: "2000" } };
+const graceOctober = { path: "github-usage/grace/2026-10.md", meta: { gh_month: "2026-10", gh_used: "9", gh_limit: "2000" } };
+const linusNote = { path: "github-usage/Linus/2026-11.md", meta: { gh_account: "Linus", gh_month: "2026-11", gh_used: "5", gh_limit: "3000" } };
+const moveNote = { path: "github-usage/moves/ada-vault.md", meta: { gh_move_repo: "vault", gh_move_from: "ada", gh_move_to: "Grace", gh_move_at: "2026-11-19T21:40" } };
+const shelves = [linusNote, graceOctober, mainOctober, moveNote, graceNote, mainNote, { path: "ideas/x.md", meta: {} }];
+assert.deepEqual([githubFromNote(mainNote).extra, githubFromNote(graceNote).extra, githubFromNote(graceOctober).account], [false, true, "grace"]);
+assert.deepEqual(githubUsage(shelves).map((month) => [month.account, month.month]), [["ada", "2026-11"], ["ada", "2026-10"]], "the main account's months only");
+assert.deepEqual(
+  githubAccounts(shelves).map((entry) => [entry.account, entry.extra, entry.months.map((month) => month.month)]),
+  [["ada", false, ["2026-11", "2026-10"]], ["Grace", true, ["2026-11", "2026-10"]], ["Linus", true, ["2026-11"]]],
+);
+assert.deepEqual(githubAccounts([graceNote]).map((entry) => [entry.account, entry.extra]), [["Grace", true]], "a brain may hold only a named account");
+assert.deepEqual(githubAccounts([mainNote, { ...graceNote, meta: { ...graceNote.meta, gh_account: "ADA" } }]).map((entry) => entry.account), ["ada"], "one account, one meter");
+assert.deepEqual(githubAccounts([{ meta: {} }]), []);
+
+// A move Cairn asked for is a note in github-usage/moves/; it can be waiting for a day.
+assert.deepEqual(githubMoves(shelves), [{ repo: "vault", from: "ada", to: "Grace", at: "2026-11-19T21:40" }]);
+const askedAt = Date.parse("2026-11-19T21:40");
+assert.equal(movePending(githubMoves(shelves)[0], askedAt + 23 * 3600 * 1000), true);
+assert.equal(movePending(githubMoves(shelves)[0], askedAt + 25 * 3600 * 1000), false);
+assert.equal(movePending({ at: "" }), false);
 
 // A month counted on from GitHub's own figure: the note carries that figure, when it was read and what has come since.
 const counted = githubFromNote({

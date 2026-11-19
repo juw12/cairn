@@ -644,6 +644,16 @@ class VibeWatchTests(unittest.TestCase):
         desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db)
         self.github_sync.assert_called_once()
 
+    def test_a_setting_names_the_other_github_accounts(self):
+        self.assertEqual(desktop.vibe_watch_options(self.config, self.brain.root)["github_accounts"], ())
+        self.config.set("vibeWatchGithubAccounts", ["grace", " linus "])
+        self.assertEqual(desktop.vibe_watch_options(self.config, self.brain.root)["github_accounts"], ("grace", "linus"))
+        self.config.set("vibeWatchGithubAccounts", "grace, linus")
+        self.assertEqual(desktop.vibe_watch_options(self.config, self.brain.root)["github_accounts"], ("grace", "linus"))
+        self.config.set("vibeWatchGithub", False)
+        desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db)
+        self.assertEqual([call.kwargs.get("account") for call in self.github_sync.call_args_list], ["grace", "linus"])
+
     def test_a_pass_runs_only_when_switched_on_and_unclaimed(self):
         self.assertEqual(desktop.vibe_watch_pass(self.brain, self.config, "app:1", db_path=self.no_db), [])
         from cairn import watch

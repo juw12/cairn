@@ -2267,6 +2267,10 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .gh-days-foot { margin: 0 0 8px; }
 .gh-month { grid-template-columns: 112px minmax(0, 1fr) auto; margin-top: 4px; }
 .gh-note { margin: 8px 0 0; }
+/* a repo's minutes count for the account that owns it: the row that offers to hand one to another account */
+.gh-move { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 10px 0 0; }
+.gh-move > .muted { flex: 1 1 100%; }
+.gh-moving { font-size: 12.5px; color: var(--muted); }
 /* what is left, when it starts again, and the daily pace that stays under the limit */
 .gh-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 24px; margin: 10px 0 0; }
 .gh-stats > div { min-width: 0; }
@@ -2354,6 +2358,8 @@ details.rc-section > summary .muted { margin-left: 4px; }
 /* The block's own heading repeats the panel title, and its rule repeats the panel's. */
 .vp-body > :is(.vibe-recap, .vibe-overview, .column-block) > header > h2 { display: none; }
 .vp-body > :is(.vibe-recap, .vibe-overview, .vibe-machine, .vibe-github, .figures, .vibe-hook) { margin: 0; border-bottom: 0; }
+/* a second account's meter under the first */
+.vibe-github + .vibe-github, .vp-body > .vibe-github + .vibe-github { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .vp-body > .column-block { padding-top: 0; }
 .vp-body > .vibe-hook { margin-top: 0; }
 .vibe-layout-note { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }

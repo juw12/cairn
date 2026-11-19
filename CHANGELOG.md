@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 74 (2026-11-19): GitHub minutes of a second account
+
+- Vibe: a meter of GitHub Actions minutes for every account you are signed in to, not only the main one. Name the others with cairn vibe watch --github-account NAME ([#53](https://github.com/juw12/cairn/pull/53))
+- Vibe: hand a private repo to another of your accounts from the meter, so its minutes count there. GitHub mails the new owner to confirm, and the old owner keeps push access ([#53](https://github.com/juw12/cairn/pull/53))
+
 ## Build 73 (2026-11-19): Dashboard buttons from the phone
 
 - Dashboards on phone: a dashboard's buttons can run on your PC. Each press runs once, is refused when it is older than 5 minutes, and is taken back when the PC does not pick it up ([#51](https://github.com/juw12/cairn/pull/51))

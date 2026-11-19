@@ -136,6 +136,8 @@ class SyncTests(unittest.TestCase):
         self.usage = {11: [row("2026-11-14", "vault", 300), row("2026-11-14", "site", 50)], 10: [row("2026-10-12", "vault", 68)]}
         github_usage._retry_after = 0.0
         self.addCleanup(setattr, github_usage, "_retry_after", 0.0)
+        github_usage._retry_accounts.clear()
+        self.addCleanup(github_usage._retry_accounts.clear)
 
     def http(self, method: str, path: str):
         self.calls.append(path)
@@ -207,6 +209,64 @@ class SyncTests(unittest.TestCase):
         self.assertFalse((self.brain.dir / "github-usage").exists())
         self.assertFalse(github_usage.sync(self.brain, self.NOW, self.http), "waits before asking again")
         self.assertEqual(self.calls, ["/user"])
+
+    # ---- a second account: its own sign-in, its own folder, its own wait
+
+    def other(self, method: str, path: str):
+        self.calls.append(path)
+        if path == "/user":
+            return 200, {"login": "Grace"}  # a sign-in without the scope that shows the plan
+        if path.startswith("/user/repos"):
+            return 200, [{"name": "diary", "private": True}]
+        month = int(path.rsplit("month=", 1)[1])
+        return 200, {"usageItems": [row("2026-11-14", "diary", 120)] if month == 11 else []}
+
+    def test_another_account_keeps_its_months_in_its_own_folder(self):
+        self.assertTrue(github_usage.sync(self.brain, self.NOW, self.http))
+        self.assertTrue(github_usage.sync(self.brain, self.NOW, self.other, account="grace"))
+        mine = self.meta("2026-11")
+        hers = self.meta("grace/2026-11")
+        self.assertEqual((mine["gh_account"], mine["gh_used"]), ("ada", "300"), "the main account's note is left alone")
+        self.assertEqual((hers["gh_account"], hers["gh_used"], hers["gh_limit"], hers["title"]), ("Grace", "120", "2000", "GitHub Actions 2026-11 (grace)"))
+        self.assertEqual(self.meta("grace/2026-10")["gh_final"], "yes")
+        self.assertIn("/users/Grace/settings/billing/usage?year=2026&month=11", self.calls)
+        self.assertIn("cairn vibe github <minutes> --account grace", self.brain.read("github-usage/grace/2026-11.md")["text"])
+
+    def test_several_accounts_are_noted_in_one_go_and_each_waits_alone(self):
+        def refused(method: str, path: str):
+            return 403, {"message": "Resource not accessible"}
+
+        noted = github_usage.sync_accounts(self.brain, ["grace", "@grace", "", "linus"], self.NOW, {"grace": self.other, "linus": refused}.get)
+        self.assertEqual(noted, ["grace"], "a name is asked once, and a refusal is not a note")
+        self.assertFalse((self.brain.dir / "github-usage" / "linus").exists())
+        self.assertTrue(github_usage.sync(self.brain, self.NOW, self.http), "another account's refusal does not hold the main one back")
+        self.assertEqual(github_usage.sync_accounts(self.brain, ["grace"], self.NOW + dt.timedelta(minutes=5), {"grace": self.other}.get), [], "fresh for an hour")
+
+    def test_a_sign_in_of_someone_else_is_not_written_under_the_name_asked_for(self):
+        self.assertFalse(github_usage.sync(self.brain, self.NOW, self.http, account="grace"))
+        self.assertFalse((self.brain.dir / "github-usage").exists())
+
+    def test_githubs_figure_can_be_set_for_another_account(self):
+        reading = github_usage.set_anchor(self.brain, 150, now=self.NOW, http=self.other, account="grace")
+        self.assertEqual((reading["used"], reading["anchor"]["api"]), (150, 120))
+        self.assertIn("GitHub Actions 2026-11 (Grace): 150 of 2,000 minutes", github_usage.summary(reading))
+        self.assertEqual(self.meta("grace/2026-11")["gh_anchor_used"], "150")
+        self.assertFalse(self.brain.resolve("github-usage/2026-11.md").exists())
+
+    def test_a_sign_in_that_may_not_see_billing_says_what_it_needs(self):
+        def hidden(method: str, path: str):
+            return (404, {"message": "Not Found"}) if "billing" in path else self.other(method, path)
+
+        with self.assertRaises(github_usage.publish.PublishError) as raised:
+            github_usage.read_now(self.brain, "grace", self.NOW, hidden)
+        self.assertIn("gh auth refresh -h github.com -s user", str(raised.exception))
+
+    def test_an_account_name_cannot_point_outside_its_folder(self):
+        for name in ("../secrets", "a/b", "", "-dash", "x" * 40):
+            with self.assertRaises(ValueError):
+                github_usage.account_name(name)
+        self.assertEqual(github_usage.note_path("2026-11", "Grace-1"), "github-usage/Grace-1/2026-11.md")
+        self.assertFalse(github_usage.sync(self.brain, self.NOW, self.other, account="../secrets"))
 
 
 if __name__ == "__main__":

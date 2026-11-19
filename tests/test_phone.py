@@ -110,6 +110,17 @@ class PhoneTests(unittest.TestCase):
         response, _ = self.call("GET", "/api/desktop", cookie=token)
         self.assertEqual(response.status, 404)
 
+    def test_a_phone_cannot_hand_a_repo_to_another_github_account(self):
+        from cairn import github_move
+
+        token, _ = self.pair()
+        with mock.patch.object(github_move, "move") as move:
+            response, _ = self.call("POST", "/api/github/move", {"repo": "vault", "from": "ada", "to": "grace"}, cookie=token)
+        self.assertEqual(response.status, 404)
+        move.assert_not_called()
+        _, info = self.call("GET", "/api/info", cookie=token)
+        self.assertIs(json.loads(info)["githubMove"], False, "so the page does not offer the button there")
+
     def test_expired_code_is_refused(self):
         with mock.patch.object(phone, "CODE_SECONDS", -1):
             pairing = self.phone.new_pairing()

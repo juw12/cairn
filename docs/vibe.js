@@ -8,7 +8,7 @@ import { escapeHtml as esc } from "./md.js";
 import { $, $$, ask, icon, pageHead, plural, statusPill, toast, today } from "./ui.js";
 import { createNote, fileByPath, noteByPath, readOnly, saveNote, state, upsertFile } from "./state.js";
 import { renderNav, renderView } from "./app.js";
-import { agentGroup, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubBudget, githubUsage, machineReading } from "./progress.js";
+import { agentGroup, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubAccounts, githubBudget, githubMoves, machineReading, movePending } from "./progress.js";
 import { QUIET_MIN, compact, minutesText, recap, sessionState } from "./recap.js";
 import { chatReady } from "./chat.js";
 import { openShare } from "./share.js";
@@ -516,6 +516,34 @@ export async function loadSampleSessions() {
   renderView();
 }
 
+// Hand a private repo to another of your GitHub accounts, so its Actions minutes count there. Nothing changes
+// hands on the press: GitHub mails the new owner, and the repo moves when that link is opened.
+export async function moveRepo(repo, from, to) {
+  if (!repo || !from || !to || typeof state.store?.githubMove !== "function") return;
+  const sure = await ask({
+    title: `Move ${repo} to ${to}?`,
+    text: `GitHub Actions minutes of ${repo} then count against ${to}'s free minutes instead of ${from}'s.`,
+    list: [
+      `GitHub mails ${to} a link. Nothing moves until it is opened, within a day.`,
+      `${from} stays on the repo as a collaborator and can still push.`,
+      "Issues, secrets and history go along, and the old address redirects.",
+      `To take it back, ${to} moves it again from the repo's Settings on GitHub.`,
+    ],
+    confirm: "Ask GitHub to move it",
+    noInput: true,
+    danger: true,
+  });
+  if (!sure) return;
+  try {
+    const result = await state.store.githubMove(repo, from, to);
+    if (result.file) upsertFile(result.file.path, result.file.text, result.file.mtime);
+    toast(result.message);
+    renderView();
+  } catch (error) {
+    toast(error.message, { error: true });
+  }
+}
+
 export function copyAgentHook() {
   navigator.clipboard?.writeText(AGENT_HOOK).then(
     () => toast("Copied. Paste it into AGENTS.md, CLAUDE.md or your assistant's instructions."),
@@ -744,11 +772,45 @@ function githubStats(current, budget) {
     .join("")}</dl>`;
 }
 
-// How much of the month's free GitHub Actions minutes are gone, from the notes the watcher leaves in github-usage/.
+const sameAccount = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+
+// Minutes count for the account that owns a repo, whoever pushes, so the way to take load off a full account is
+// to hand a repo to another of yours. Offered only where Cairn runs on this computer (the move goes through the
+// GitHub CLI's sign-ins there) and only towards an account whose meter shows more room this month.
+function githubMoveRow(current, accounts) {
+  if (!state.info?.canMoveRepos || readOnly() || current.final || !current.account) return "";
+  const repos = current.repos.filter((repo) => /^[A-Za-z0-9._-]+$/.test(repo.name)).slice(0, 4);
+  const left = (reading) => Math.max(0, reading.limit - reading.used);
+  const target = accounts
+    .map((entry) => entry.months[0])
+    .filter((reading) => reading.account && reading.month === current.month && !sameAccount(reading.account, current.account))
+    .sort((a, b) => left(b) - left(a))[0];
+  if (!target || !repos.length || left(target) <= left(current)) return "";
+  const asked = githubMoves(state.notes).filter((move) => sameAccount(move.from, current.account) && movePending(move));
+  const items = repos.map((repo) => {
+    const waiting = asked.find((move) => move.repo === repo.name);
+    if (waiting) {
+      return `<span class="gh-moving" title="${esc(`Asked ${stampLabel(waiting.at) || waiting.at}. GitHub keeps the link for a day.`)}">${esc(repo.name)} → ${esc(waiting.to)}: waiting for ${esc(waiting.to)} to open GitHub's mail</span>`;
+    }
+    return `<button type="button" class="btn sm" data-action="vibe-gh-move" data-repo="${esc(repo.name)}" data-from="${esc(current.account)}" data-to="${esc(target.account)}" title="${esc(`Hand the private repo ${repo.name} (${thousands(repo.minutes)} min this month) to ${target.account}`)}">${esc(repo.name)} → ${esc(target.account)}</button>`;
+  });
+  return `<div class="gh-move">
+      <span class="muted small">Minutes count for the account that owns a repo, whoever pushes. Move one to ${esc(target.account)} (${thousands(left(target))} min left):</span>
+      ${items.join("")}
+    </div>`;
+}
+
+// How much of the month's free GitHub Actions minutes are gone, from the notes the watcher leaves in github-usage/:
+// one meter for the main account and one for every other account that has notes of its own.
 function githubStrip() {
-  const [current, ...earlier] = githubUsage(state.notes);
-  if (!current) return "";
+  const accounts = githubAccounts(state.notes);
+  return accounts.map((entry) => githubSection(entry, accounts)).join("");
+}
+
+function githubSection({ months, extra }, accounts) {
+  const [current, ...earlier] = months;
   const budget = githubBudget(current);
+  const command = `cairn vibe github <minutes>${extra && current.account ? ` --account ${current.account}` : ""}`;
   const anchor = current.anchor;
   const repos = current.repos.slice(0, 4).map((repo) => `${repo.name} ${thousands(repo.minutes)}`).join(" · ");
   let foot;
@@ -770,9 +832,9 @@ function githubStrip() {
   const read = stampLabel(current.at);
   const when = read ? `${anchor ? "checked" : "as of"} ${read}` : "";
   const note = anchor
-    ? "Counts on from the number GitHub gave. When GitHub shows or mails a new one, run: cairn vibe github <minutes>"
-    : "Summed from GitHub's billing rows, which can read lower than GitHub's own meter. To count on from the number GitHub shows or mails, run: cairn vibe github <minutes>";
-  return `<section class="vibe-github" aria-label="GitHub Actions minutes">
+    ? `Counts on from the number GitHub gave. When GitHub shows or mails a new one, run: ${command}`
+    : `Summed from GitHub's billing rows, which can read lower than GitHub's own meter. To count on from the number GitHub shows or mails, run: ${command}`;
+  return `<section class="vibe-github" aria-label="${esc(`GitHub Actions minutes${current.account ? ` of ${current.account}` : ""}`)}">
     <header>
       <h2>GitHub Actions${current.account ? ` · ${esc(current.account)}` : ""}</h2>
       <span class="vm-spec">${thousands(current.used)} of ${thousands(current.limit)} free minutes · private repos · ${esc(monthName(current.month))}</span>
@@ -785,6 +847,7 @@ function githubStrip() {
     </div>
     ${githubStats(current, budget)}
     <p class="vm-foot muted small">${esc(githubWhy(current))} ${esc(foot.join(" · "))}${foot.length && when ? " · " : ""}<span class="vm-when">${esc(when)}</span></p>
+    ${githubMoveRow(current, accounts)}
     ${githubHistory(current, earlier)}
     <p class="muted small gh-note">${esc(note)}</p>
   </section>`;
@@ -1804,7 +1867,11 @@ export function vibeView() {
   const live = shownLive();
   const running = recap(vibeNotes(), stamp());
   const reading = machine();
-  const [minutes] = githubUsage(state.notes);
+  const meters = githubAccounts(state.notes).map((entry) => entry.months[0]);
+  const [minutes] = meters;
+  const minutesSummary = meters.length > 1
+    ? meters.map((meter) => `${meter.account || "main"} ${meter.pct}%`).join(" · ")
+    : minutes ? `${thousands(minutes.used)} of ${thousands(minutes.limit)} free minutes · ${minutes.pct}%` : "";
   const blocks = {
     recap: {
       html: recapBand(),
@@ -1816,7 +1883,7 @@ export function vibeView() {
       // Another computer picked in the device bar is not "This computer".
       label: shownDevice() !== null && shownDevice() !== (state.vibeHere || "") ? "Computer" : "",
     },
-    github: { html: githubStrip(), summary: minutes ? `${thousands(minutes.used)} of ${thousands(minutes.limit)} free minutes · ${minutes.pct}%` : "" },
+    github: { html: githubStrip(), summary: minutesSummary },
     overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
     figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },
     activity: { html: activity(stats, sessions), summary: "sessions per day" },

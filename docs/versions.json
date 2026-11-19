@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 74,
+      "date": "2026-11-19",
+      "title": "GitHub minutes of a second account",
+      "changes": [
+        "Vibe: a meter of GitHub Actions minutes for every account you are signed in to, not only the main one. Name the others with cairn vibe watch --github-account NAME (#53)",
+        "Vibe: hand a private repo to another of your accounts from the meter, so its minutes count there. GitHub mails the new owner to confirm, and the old owner keeps push access (#53)"
+      ]
+    },
+    {
       "build": 73,
       "date": "2026-11-19",
       "title": "Dashboard buttons from the phone",

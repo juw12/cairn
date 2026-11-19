@@ -966,7 +966,7 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
                days: int = DAYS, idle_minutes: int = IDLE_MINUTES, now_ms: int | None = None,
                vector_names=VECTOR_PROCESSES, db_path: Path | None = None, running: bool | None = None,
                git: str | None = None, last_reply: bool = False, laptop: bool = False,
-               github: bool = False) -> list[str]:
+               github: bool = False, github_accounts=()) -> list[str]:
     """One pass over every source. Returns human-readable lines describing what changed."""
     now_ms = _now_ms() if now_ms is None else now_ms
     messages = []
@@ -1009,6 +1009,9 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
         messages.append("Laptop: load noted in machines/")
     if github and github_usage.sync(brain):
         messages.append(f"GitHub: Actions minutes noted in {github_usage.FOLDER}/")
+    # Other accounts are asked for by name, so they are noted even where the main one is left to another computer.
+    for account in github_usage.sync_accounts(brain, github_accounts):
+        messages.append(f"GitHub: Actions minutes of {account} noted in {github_usage.FOLDER}/{account}/")
     return messages
 
 
