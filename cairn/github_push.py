@@ -76,7 +76,7 @@ def _list_accounts(run) -> list[str]:
     for name in names:
         if github_usage.LOGIN_RE.fullmatch(name) and name.lower() not in (known.lower() for known in seen):
             seen.append(name)
-    return seen
+    return sorted(seen, key=str.lower)  # the CLI lists the active one first; a chip must not move when pressed
 
 
 def _git_sign_in(run) -> tuple[str, str]:

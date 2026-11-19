@@ -31,7 +31,7 @@ class Computer:
     it uses, the helper git asks for github.com, and a sign-in git saved by itself before."""
 
     def __init__(self):
-        self.tokens = {"ada": "cli-secret-ada", "Grace": "cli-secret-grace"}
+        self.tokens = {"Grace": "cli-secret-grace", "ada": "cli-secret-ada"}  # listed as the CLI pleases; shown by name
         self.active = "ada"
         self.helper = "osxkeychain"
         self.saved = ("Grace", "saved-secret-grace")
