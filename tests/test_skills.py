@@ -3,7 +3,7 @@ import re
 import unittest
 from pathlib import Path
 
-from cairn import core, mcp
+from cairn import cli, core, mcp
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
@@ -105,6 +105,16 @@ class SkillsMatchTheCodeTest(unittest.TestCase):
         for result in core.FINISHED:
             with self.subTest(result=result):
                 self.assertIn(f"`{result}`", text)
+
+    def test_vibe_skill_shows_every_vibe_command(self):
+        text = read_skill("cairn-vibe")
+        subcommands = next(
+            action for action in cli.build_parser()._actions if getattr(action, "choices", None) and "vibe" in action.choices
+        ).choices
+        vibe_actions = next(action for action in subcommands["vibe"]._actions if action.dest == "action").choices
+        for action in vibe_actions:
+            with self.subTest(action=action):
+                self.assertIn(f"cairn vibe {action}", text)
 
     def test_databases_skill_lists_every_view_and_key_the_app_reads(self):
         text = read_skill("cairn-databases")

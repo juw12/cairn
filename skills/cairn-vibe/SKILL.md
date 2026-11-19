@@ -30,6 +30,7 @@ cairn vibe end --result shipped "toggle works"          # closes it and records 
 ```bash
 cairn vibe skill /refine "6.5 -> 8.7"     # record a skill run; any log text starting with a slash command counts as one
 cairn vibe status                         # the same numbers as the Vibe page, in the terminal
+cairn vibe github                         # this month's GitHub Actions minutes as the brain has them (a number sets GitHub's own figure)
 cairn feedback "toggle is hard to find on mobile" --rating 3 --from @alice   # feedback on the latest session, rating 1-5
 ```
 
@@ -47,7 +48,20 @@ cairn vibe watch                 # keep watching every 60 s (--every 30 to chang
 cairn vibe watch --everywhere    # OpenCode sessions from any folder, not only this project
 ```
 
-The watcher reads only session metadata and message times from OpenCode's local database, never message text. If a watcher is running, do not also `start` a session for the same work: the page would show it twice.
+The watcher reads only session metadata and message times from OpenCode's local database, never message text. If a watcher is running, do not also `start` a session for the same work: the page would show it twice. The first pass on a computer takes every session its OpenCode still has; later passes look back 14 days (`--days 0` for everything again).
+
+## Several computers in one brain
+
+Every session note names the computer it ran on in `machine:`, so two computers can write sessions into one brain and the Vibe page can show them together or one at a time.
+
+```bash
+cairn vibe device            # the name this computer puts on its sessions
+cairn vibe device --adopt    # once, on the computer that made them: name older sessions that name no computer
+```
+
+- The name is the computer's model. Set `CAIRN_DEVICE="Work laptop"` to give it another, for example when two computers are the same model.
+- A watcher only opens and closes the sessions of its own computer. Leave sessions with another `machine:` alone, and never change that field by hand.
+- Another computer is only as current as its last sync into the brain, so say "as of its last sync" when you report its numbers.
 
 ## What a session file looks like
 
@@ -59,6 +73,7 @@ status: live
 tags: []
 created: 2026-11-05
 started: 2026-11-05T14:02
+machine: ASUS EXPERTBOOK P5405CSA
 agent: opencode
 ---
 ## Goal
