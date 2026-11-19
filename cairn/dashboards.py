@@ -11,6 +11,19 @@ phone talks to GitHub, never to this PC, so it works on mobile data and behind t
     cairn dashboards schedule       publish every 5 minutes with Windows Task Scheduler
     cairn dashboards link           print the phone link and its QR code
 
+A page's buttons can also work from the phone. Give the page a command and run the worker:
+
+    cairn dashboards add reachpilot <file> --actions "python E:/.../phone_action.py"
+    cairn dashboards actions        run the worker in this terminal
+    cairn dashboards schedule       also keeps the worker running in the background
+
+The phone writes dashboards/<id>/requests/<request>.json ({"id", "page", "name", "at"}) on the main
+branch of the relay repo. The worker takes each request once (it deletes the file before it runs
+anything), runs the page's command with the button's name as its single argument, and answers in
+dashboards/<id>/results/<request>.json ({"state": running|done, "ok", "message"}): the command's
+last line of output is what the phone shows. Then it rebuilds that page and publishes. Cairn never
+decides what a name may do: the command must refuse every name it does not know.
+
 The list lives in ~/.cairn/dashboards.json. Every publish replaces the branch with one fresh commit
 (no history), so the repo doesn't grow by a full dashboard every few minutes. The repo must stay
 private: the pages can hold personal data.
@@ -23,9 +36,11 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -40,6 +55,18 @@ STALE_SECONDS = 30 * 60  # a built page older than this gets a warning on the ph
 MAX_BYTES = 20 * 1024 * 1024
 WEB_PAGE = "https://juw12.github.io/cairn/dash.html"
 TASK_NAME = "Cairn dashboards to phone"
+ACTIONS_TASK_NAME = "Cairn dashboard actions"
+ACTIONS_FOLDER = "dashboards"  # on the relay repo's main branch: dashboards/<id>/requests/ and results/
+ACTIONS_POLL_S = 5
+ACTION_MAX_AGE_S = 5 * 60  # an older request is refused: nothing runs by surprise after the PC was off
+ACTION_CLOCK_SLACK_S = 2 * 60  # a phone's clock may run a little ahead of this PC's
+ACTION_TIMEOUT_S = 10 * 60
+ACTION_NAME_MAX = 600
+ACTION_MESSAGE_MAX = 500
+ACTIONS_AT_ONCE = 4
+RESULT_KEEP_S = 24 * 3600
+SWEEP_EVERY_S = 3600
+BUILD_WAIT_S = 5 * 60
 
 
 def config_path() -> Path:
@@ -71,7 +98,7 @@ def save_pages(pages: list[dict]) -> None:
     _write_json(config_path(), {"pages": pages})
 
 
-def add_page(page_id: str, file: str, title: str = "", build: str = "", cwd: str = "") -> dict:
+def add_page(page_id: str, file: str, title: str = "", build: str = "", cwd: str = "", actions: str = "") -> dict:
     page_id = "".join(ch for ch in page_id.lower() if ch.isalnum() or ch in "-_")
     if not page_id:
         raise ValueError("Give the dashboard a short id, like `millennium`.")
@@ -80,6 +107,8 @@ def add_page(page_id: str, file: str, title: str = "", build: str = "", cwd: str
         page["build"] = build_args(build)
     if cwd:
         page["cwd"] = str(Path(cwd))
+    if actions:
+        page["actions"] = build_args(actions)
     pages = [existing for existing in load_pages() if existing["id"] != page_id] + [page]
     save_pages(pages)
     return page
@@ -174,15 +203,17 @@ def build_problem(page: dict, now: float, page_mtime: float | None) -> str:
     return f"page not rebuilt for a while; last build said: {last}"
 
 
-def collect(pages: list[dict], spawn=subprocess.Popen, clock=time.time) -> tuple[list[dict], dict[str, bytes]]:
+def collect(pages: list[dict], spawn=subprocess.Popen, clock=time.time, build: bool = True) -> tuple[list[dict], dict[str, bytes]]:
     """Kick off builds and read every page as it is now. The newest good copy is always used; the
-    phone is told when a page is getting old and why."""
+    phone is told when a page is getting old and why. build=False only reads (the pages were just built)."""
     entries: list[dict] = []
     files: dict[str, bytes] = {}
     for page in pages:
-        error = start_build(page, spawn) if page.get("build") else ""
+        error = start_build(page, spawn) if page.get("build") and build else ""
         path = Path(page["file"])
         entry = {"id": page["id"], "title": page.get("title") or page["id"], "file": f"{page['id']}.html"}
+        if page.get("actions"):
+            entry["actions"] = True  # the phone page lets this dashboard's buttons ask the PC
         mtime = None
         try:
             data = path.read_bytes()
@@ -268,16 +299,240 @@ class Publisher:
         return "published"
 
 
-def publish(force: bool = False, spawn=subprocess.Popen) -> tuple[str, list[dict]]:
+def publish(force: bool = False, spawn=subprocess.Popen, build: bool = True) -> tuple[str, list[dict]]:
     pages = load_pages()
     if not pages:
         raise ValueError("No dashboards yet. Add one with `cairn dashboards add <id> <file>`.")
     config = relay.load_config()
     if not config:
         raise relay.RelayError("Set up the private relay repo first: `cairn relay setup`.")
-    entries, files = collect(pages, spawn)
+    entries, files = collect(pages, spawn, build=build)
     result = Publisher(relay.connect(config), relay.device_of(config)).publish(entries, files, force)
     return result, entries
+
+
+# ============================================================ buttons pressed on the phone
+
+ACTION_ID_RE = re.compile(r"^\d{13}-[a-f0-9]{4,16}$")  # made by the phone page: <milliseconds>-<random>
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _code_stamp() -> float:
+    """Changes when Cairn updates itself, so the long-running worker can make room for the new version."""
+    return max((_mtime(path) for path in Path(__file__).resolve().parent.glob("*.py")), default=0.0)
+
+
+def refresh_page(page: dict, run=subprocess.run) -> None:
+    """Rebuild one page now (waiting for it) and publish, so the phone sees what an action changed."""
+    if page.get("build"):
+        try:
+            run(build_args(page["build"]), cwd=page.get("cwd") or None, stdin=subprocess.DEVNULL,
+                capture_output=True, timeout=BUILD_WAIT_S, creationflags=NO_WINDOW)
+        except (OSError, subprocess.SubprocessError):
+            pass  # the regular publish builds it again within minutes
+    try:
+        publish(build=False)
+    except (relay.RelayError, ValueError, OSError):
+        pass
+
+
+class ActionWorker:
+    """Takes the requests a phone leaves in the relay repo and runs each one once with its page's command."""
+
+    def __init__(self, github: relay.GitHub, pages: list[dict], clock=time.time, run=subprocess.run,
+                 refresh=refresh_page, threaded: bool = True) -> None:
+        self.gh = github
+        self.clock = clock
+        self.run = run
+        self.refresh = refresh
+        self.threaded = threaded
+        self.pages: dict[str, dict] = {}
+        self.set_pages(pages)
+        self.etags: dict[str, str] = {}
+        self.recheck: dict[str, float] = {}  # page id -> when to list its requests again after a failed claim
+        self.handled: set[str] = set()
+        self.running: list[threading.Thread] = []
+        self.swept = 0.0
+        self.github_lock = threading.RLock()  # relay.GitHub remembers file shas: one caller at a time
+        self.refresh_lock = threading.Lock()
+
+    def set_pages(self, pages: list[dict]) -> None:
+        self.pages = {page["id"]: page for page in pages if page.get("actions")}
+
+    def poll(self) -> int:
+        taken = 0
+        for page_id in list(self.pages):
+            folder = f"{ACTIONS_FOLDER}/{page_id}/requests"
+            with self.github_lock:
+                status, items, etag = self.gh.list_dir(folder, self.etags.get(page_id, ""))
+                if status == 404:  # with the folder there, an unchanged listing is a free 304
+                    self.gh.write(f"{folder}/.keep", "", f"cairn dashboards: {page_id} requests folder")
+            if status != 200:
+                continue
+            self.etags[page_id] = etag
+            names = sorted(item["name"] for item in items if item["type"] == "file" and item["name"].endswith(".json"))
+            for name in names:
+                if not self.take(page_id, f"{folder}/{name}"):
+                    self.recheck[page_id] = self.clock() + 60
+                taken += 1
+        return taken
+
+    def take(self, page_id: str, path: str) -> bool:
+        """Claim one request by deleting its file, then start it. Only a request this worker deleted
+        itself is ever run, so nothing runs twice: not after a restart, not with two workers, and not
+        after the phone took the request back. False = couldn't claim it now; look again later."""
+        request_id = path.rsplit("/", 1)[-1][:-5]
+        with self.github_lock:
+            try:
+                text = self.gh.read(path)
+            except (relay.RelayError, OSError):
+                return False
+            if text is None:
+                return True  # the phone took it back
+            try:
+                status, _, _ = self.gh.call("DELETE", self.gh._contents(path), {
+                    "message": f"cairn dashboards: took {request_id}", "sha": self.gh.shas.get(path, "")})
+            except OSError:
+                return False
+            self.gh.shas.pop(path, None)
+        if status == 404:
+            return True
+        if status != 200:
+            return False
+        if request_id in self.handled or not ACTION_ID_RE.match(request_id):
+            return True
+        self.handled.add(request_id)
+        try:
+            request = json.loads(text)
+        except ValueError:
+            request = None
+        problem = self.problem(request)
+        if problem:
+            self.answer(page_id, request_id, "done", False, problem)
+            return True
+        self.answer(page_id, request_id, "running")
+        page, name = self.pages[page_id], request["name"]
+        if self.threaded:
+            thread = threading.Thread(target=self.work, args=(page, request_id, name), name=f"action-{request_id}")
+            thread.start()
+            self.running.append(thread)
+        else:
+            self.work(page, request_id, name)
+        return True
+
+    def problem(self, request) -> str:
+        """Why this request is not run, or "". What the name may do is the page's own command's call."""
+        if not isinstance(request, dict) or not isinstance(request.get("name"), str):
+            return "Your PC couldn't read that request."
+        name = request["name"]
+        if not name or len(name) > ACTION_NAME_MAX or any(ord(letter) < 32 for letter in name):
+            return "Your PC doesn't accept that button's name."
+        try:
+            sent = float(request.get("at") or 0)
+        except (TypeError, ValueError):
+            sent = 0.0
+        if sent > 1e11:
+            sent /= 1000  # the phone sends milliseconds
+        age = self.clock() - sent
+        if age > ACTION_MAX_AGE_S or age < -ACTION_CLOCK_SLACK_S:
+            return "That request was too old when your PC saw it, so it was not run. Press the button again."
+        if sum(thread.is_alive() for thread in self.running) >= ACTIONS_AT_ONCE:
+            return "Your PC is busy with earlier requests. Try again in a minute."
+        return ""
+
+    def work(self, page: dict, request_id: str, name: str) -> None:
+        try:
+            done = self.run(build_args(page["actions"]) + [name], cwd=page.get("cwd") or None, stdin=subprocess.DEVNULL,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace",
+                            timeout=ACTION_TIMEOUT_S, creationflags=NO_WINDOW)
+            ok = done.returncode == 0
+            output = (done.stdout if ok else done.stderr or done.stdout) or ""
+            lines = [line.strip() for line in output.splitlines() if line.strip()]
+            message = lines[-1] if lines else ("Done." if ok else "That didn't work.")
+        except subprocess.TimeoutExpired:
+            ok, message = False, f"Still running after {ACTION_TIMEOUT_S // 60} minutes. Look at the dashboard in a while."
+        except (OSError, ValueError) as error:
+            ok, message = False, f"Your PC couldn't start it: {error}"
+        self.answer(page["id"], request_id, "done", ok, message)
+        with self.refresh_lock:
+            self.refresh(page)
+
+    def answer(self, page_id: str, request_id: str, state: str, ok: bool | None = None, message: str = "") -> None:
+        body = {"id": request_id, "state": state, "at": int(self.clock() * 1000)}
+        if state == "done":
+            body.update(ok=bool(ok), message=message[:ACTION_MESSAGE_MAX])
+        path = f"{ACTIONS_FOLDER}/{page_id}/results/{request_id}.json"
+        for attempt in range(3 if state == "done" else 1):  # the final answer is worth a second try
+            try:
+                with self.github_lock:
+                    self.gh.write(path, json.dumps(body), f"cairn dashboards: {page_id} {state}")
+                return
+            except (relay.RelayError, OSError):
+                if attempt < 2 and state == "done":
+                    time.sleep(2)
+
+    def sweep(self) -> int:
+        """Answers older than a day are deleted, so the folder doesn't grow."""
+        removed = 0
+        for page_id in list(self.pages):
+            with self.github_lock:
+                status, items, _ = self.gh.list_dir(f"{ACTIONS_FOLDER}/{page_id}/results")
+            for item in items if status == 200 else []:
+                stamp = item["name"].split("-", 1)[0]
+                if item["type"] == "file" and stamp.isdigit() and self.clock() - int(stamp) / 1000 > RESULT_KEEP_S:
+                    with self.github_lock:
+                        self.gh.delete(item["path"], "cairn dashboards: old answer")
+                    removed += 1
+        return removed
+
+    def step(self) -> None:
+        now = self.clock()
+        for page_id, when in list(self.recheck.items()):
+            if now >= when:
+                self.etags.pop(page_id, None)
+                del self.recheck[page_id]
+        self.running = [thread for thread in self.running if thread.is_alive()]
+        self.poll()
+        if now - self.swept > SWEEP_EVERY_S:
+            self.swept = now
+            self.sweep()
+
+
+def run_actions(stop: threading.Event | None = None, log=print) -> None:
+    """The worker loop. It ends when Cairn's own code changes; the scheduled task starts the new version."""
+    config = relay.load_config()
+    if not config:
+        raise relay.RelayError("Set up the private relay repo first: `cairn relay setup`.")
+    worker = ActionWorker(relay.connect(config), load_pages())
+    if not worker.pages:
+        raise ValueError('No dashboard takes actions yet. Add one with `cairn dashboards add <id> <file> --actions "command"`.')
+    stop = stop or threading.Event()
+    code, listed = _code_stamp(), _mtime(config_path())
+    log(f"Waiting for buttons pressed on the phone: {', '.join(worker.pages)} (repo {config['repo']}). Ctrl+C stops.")
+    while not stop.is_set():
+        wait = ACTIONS_POLL_S
+        try:
+            worker.step()
+        except (relay.RelayError, OSError) as error:
+            log(f"dashboards actions: {error}")
+            wait = 30
+            try:
+                worker.gh = relay.connect(config)  # a new sign-in or another route may be what it needs
+            except (relay.RelayError, OSError):
+                pass
+        if _code_stamp() != code:
+            log("Cairn was updated: stopping so the new version takes over.")
+            break
+        if _mtime(config_path()) != listed:
+            listed = _mtime(config_path())
+            worker.set_pages(load_pages())
+        stop.wait(wait)
 
 
 def phone_link() -> tuple[str, str]:
@@ -292,11 +547,10 @@ def phone_link() -> tuple[str, str]:
     return f"{WEB_PAGE}?repo={config['repo']}#signin={token}&repo={config['repo']}", config["repo"]
 
 
-def schedule(minutes: int = 5) -> str:
-    """Publish every few minutes with Windows Task Scheduler, for good: it repeats with no end date, also
-    starts at every Windows sign-in (so a reboot never stops it), catches up after sleep and runs on
-    battery. Runs pythonw straight from the app folder (no cmd.exe), so no console window flashes up;
-    a run still going makes the next one wait."""
+def _register_task(name: str, argument: str, minutes: int, time_limit: str) -> str:
+    """A Windows task that runs pythonw straight from the app folder (no cmd.exe, so no console window
+    flashes up), repeats with no end date, also starts at every Windows sign-in (so a reboot never
+    stops it), catches up after sleep and runs on battery; a run still going makes the next one wait."""
     if sys.platform != "win32":
         raise OSError("Scheduling is Windows-only; use cron with `cairn dashboards publish` elsewhere.")
     python = Path(sys.executable)
@@ -308,14 +562,14 @@ def schedule(minutes: int = 5) -> str:
         return "'" + str(text).replace("'", "''") + "'"
 
     script = (
-        f"$action = New-ScheduledTaskAction -Execute {quote(exe)} -Argument '-m cairn dashboards publish' "
+        f"$action = New-ScheduledTaskAction -Execute {quote(exe)} -Argument {quote(argument)} "
         f"-WorkingDirectory {quote(app)}; "
         f"$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes {int(minutes)}); "
         "$logon = New-ScheduledTaskTrigger -AtLogOn -User \"$env:USERDOMAIN\\$env:USERNAME\"; "
         "$logon.Repetition = $trigger.Repetition; "
         "$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable "
-        "-ExecutionTimeLimit (New-TimeSpan -Minutes 15) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; "
-        f"Register-ScheduledTask -TaskName {quote(TASK_NAME)} -Action $action -Trigger @($trigger, $logon) -Settings $settings -Force | Out-Null"
+        f"-ExecutionTimeLimit {time_limit} -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; "
+        f"Register-ScheduledTask -TaskName {quote(name)} -Action $action -Trigger @($trigger, $logon) -Settings $settings -Force | Out-Null"
     )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -323,4 +577,15 @@ def schedule(minutes: int = 5) -> str:
     )
     if result.returncode != 0:
         raise OSError((result.stderr or result.stdout).strip() or "Register-ScheduledTask failed")
-    return TASK_NAME
+    return name
+
+
+def schedule(minutes: int = 5) -> str:
+    """Publish every few minutes with Windows Task Scheduler, for good."""
+    return _register_task(TASK_NAME, "-m cairn dashboards publish", minutes, "(New-TimeSpan -Minutes 15)")
+
+
+def schedule_actions() -> str:
+    """Keep the action worker running: it never ends on its own (no time limit), and Task Scheduler
+    looks every minute whether it still runs, so it is back within a minute of a crash or an update."""
+    return _register_task(ACTIONS_TASK_NAME, "-m cairn dashboards actions", 1, "([TimeSpan]::Zero)")

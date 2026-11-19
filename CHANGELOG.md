@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 73 (2026-11-19): Dashboard buttons from the phone
+
+- Dashboards on phone: a dashboard's buttons can run on your PC. Each press runs once, is refused when it is older than 5 minutes, and is taken back when the PC does not pick it up ([#51](https://github.com/juw12/cairn/pull/51))
+- Dashboards on phone: the open tab and folded blocks of a dashboard stay as they were when a newer copy arrives ([#51](https://github.com/juw12/cairn/pull/51))
+
 ## Build 72 (2026-11-19): Version history
 
 - Version history inside the app: every build with its date and what changed. Open it at the bottom of the sidebar, from Settings or from the command palette ([#50](https://github.com/juw12/cairn/pull/50))

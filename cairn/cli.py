@@ -579,10 +579,14 @@ def cmd_dashboards(brain: Brain, args) -> int:
     try:
         if action == "add":
             if not args.page_id or not args.file:
-                print("Usage: cairn dashboards add <id> <file> [--title T] [--build \"command\"]", file=sys.stderr)
+                print("Usage: cairn dashboards add <id> <file> [--title T] [--build \"command\"] [--actions \"command\"]",
+                      file=sys.stderr)
                 return 2
-            page = dashboards.add_page(args.page_id, args.file, args.title or "", args.build or "", args.cwd or "")
+            page = dashboards.add_page(args.page_id, args.file, args.title or "", args.build or "", args.cwd or "",
+                                       args.actions or "")
             print(f"Added {page['title']} ({page['id']}): {page['file']}")
+            if page.get("actions"):
+                print("Its buttons work from the phone once the worker runs: `cairn dashboards schedule` (or `cairn dashboards actions`).")
             return 0
         if action == "remove":
             print("Removed." if dashboards.remove_page(args.page_id or "") else "No dashboard with that id.")
@@ -597,6 +601,14 @@ def cmd_dashboards(brain: Brain, args) -> int:
         if action == "schedule":
             name = dashboards.schedule(args.minutes)
             print(f"Task \"{name}\" publishes every {args.minutes} minutes.")
+            if any(page.get("actions") for page in dashboards.load_pages()):
+                print(f"Task \"{dashboards.schedule_actions()}\" runs the buttons pressed on the phone.")
+            return 0
+        if action == "actions":
+            try:
+                dashboards.run_actions()
+            except KeyboardInterrupt:
+                pass
             return 0
         if action == "link":
             url, repo = dashboards.phone_link()
@@ -614,7 +626,8 @@ def cmd_dashboards(brain: Brain, args) -> int:
             print("No dashboards yet. Add one with `cairn dashboards add <id> <file>`.")
         for page in pages:
             build = f"  build: {' '.join(page['build'])}" if page.get("build") else ""
-            print(f"{page['id']}: {page['title']} <- {page['file']}{build}")
+            actions = f"  actions: {' '.join(page['actions'])}" if page.get("actions") else ""
+            print(f"{page['id']}: {page['title']} <- {page['file']}{build}{actions}")
         return 0
     except (relay.RelayError, ValueError, OSError) as error:
         print(str(error), file=sys.stderr)
@@ -649,15 +662,18 @@ def build_parser() -> argparse.ArgumentParser:
     dash_parser = sub.add_parser(
         "dashboards",
         help="see local dashboards (HTML pages on this PC) live on your phone, from any network",
-        description="list | add <id> <file> | remove <id> | publish | schedule | link (QR for the phone)",
+        description="list | add <id> <file> | remove <id> | publish | schedule | link (QR for the phone) | "
+                    "actions (run what buttons on the phone ask for)",
     )
     dash_parser.add_argument("dashboards_action", nargs="?", default="list",
-                             choices=["list", "add", "remove", "publish", "schedule", "link"])
+                             choices=["list", "add", "remove", "publish", "schedule", "link", "actions"])
     dash_parser.add_argument("page_id", nargs="?")
     dash_parser.add_argument("file", nargs="?")
     dash_parser.add_argument("--title", help="name on the phone tab (default: from the id)")
     dash_parser.add_argument("--build", help='command that rebuilds the page first, e.g. "python make_page.py"')
     dash_parser.add_argument("--cwd", help="folder the build command runs in")
+    dash_parser.add_argument("--actions", help='command that runs a button pressed on the phone; it gets the button\'s '
+                                               'name as its one argument and must refuse names it does not know')
     dash_parser.add_argument("--force", action="store_true", help="publish even if nothing changed")
     dash_parser.add_argument("--minutes", type=int, default=5, help="schedule: how often to publish (default 5)")
     widget_parser = sub.add_parser(

@@ -7,10 +7,15 @@
 // auth.js mirrors (copied by iOS when you add the icon) or, failing that, a pasted sign-in link.
 //
 // Each dashboard runs in its own sandboxed frame without same-origin rights, so its scripts can
-// never read the sign-in. A tiny script added to each page reports its scroll position, so a live
-// update lands where you were reading.
+// never read the sign-in. A tiny script added to each page keeps its scroll position and what it
+// remembers (open tab, folded blocks), so a live update lands where you were reading.
+//
+// A dashboard whose PC half takes actions (status.json: "actions": true) can also press its buttons
+// from here: its frame asks this page, this page writes the request to the relay repo, and
+// `cairn dashboards actions` on the PC runs it and answers (see "buttons that run on the PC" below).
 
 import { AuthError, authFetch, session, signInWithToken } from "./auth.js";
+import { encodeBase64 } from "./github.js";
 
 const API = "https://api.github.com";
 const BRANCH = "dashboards";
@@ -134,27 +139,36 @@ async function readPage(page) {
 
 // ------------------------------------------------------------ frames
 
-// Added to every page: links open in a new tab, the scroll position survives updates, and pages that
-// remember settings in localStorage get an in-memory stand-in (the sandbox has no storage of its own).
+// Added to every page: links open in a new tab, and the scroll position and what the page remembers in
+// localStorage/sessionStorage survive updates. The sandbox has no storage of its own, so the page gets a
+// stand-in kept in window.name, which stays with the frame when a newer copy of the page is loaded into it.
 const HELPER = `<base target="_blank"><script>(() => {
-  const memory = () => {
-    const data = new Map();
+  let kept = {};
+  try { kept = JSON.parse(window.name || "{}"); } catch { kept = {}; }
+  if (!kept || typeof kept !== "object") kept = {};
+  let timer = 0;
+  const keep = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { try { window.name = JSON.stringify(kept); } catch { /* too big: start over next time */ } }, 120);
+  };
+  const memory = (name) => {
+    const data = new Map(Object.entries(kept[name] && typeof kept[name] === "object" ? kept[name] : {}));
+    const save = () => { kept[name] = Object.fromEntries(data); keep(); };
     return {
       getItem: (k) => (data.has(String(k)) ? data.get(String(k)) : null),
-      setItem: (k, v) => { data.set(String(k), String(v)); },
-      removeItem: (k) => { data.delete(String(k)); },
-      clear: () => data.clear(),
+      setItem: (k, v) => { data.set(String(k), String(v)); save(); },
+      removeItem: (k) => { data.delete(String(k)); save(); },
+      clear: () => { data.clear(); save(); },
       key: (i) => [...data.keys()][i] ?? null,
       get length() { return data.size; },
     };
   };
   for (const name of ["localStorage", "sessionStorage"]) {
-    try { window[name].length; } catch { Object.defineProperty(window, name, { value: memory(), configurable: true }); }
+    try { window[name].length; } catch { Object.defineProperty(window, name, { value: memory(name), configurable: true }); }
   }
-  const restore = () => { const m = /^dashY:(\\d+)$/.exec(window.name || ""); if (m) window.scrollTo(0, +m[1]); };
+  const restore = () => { if (kept.y > 0) window.scrollTo(0, kept.y); };
   addEventListener("load", () => { restore(); setTimeout(restore, 300); });
-  let timer = 0;
-  addEventListener("scroll", () => { clearTimeout(timer); timer = setTimeout(() => { window.name = "dashY:" + Math.round(scrollY); }, 120); }, { passive: true });
+  addEventListener("scroll", () => { kept.y = Math.round(scrollY); keep(); }, { passive: true });
 })();<\/script>`;
 
 function withHelper(html) {
@@ -188,6 +202,112 @@ async function render(page) {
   if (frame.sha && page.id !== current) frame.unseen = true;
   frame.sha = page.sha;
 }
+
+// ------------------------------------------------------------ buttons that run on the PC
+
+// A frame asks with postMessage({ cairnDash: "action", id, name }); it hears back
+// { cairnDash: "reply", id, state: "sending" | "sent" | "running" | "done", ok, message }. Which dashboard asked is
+// decided here from the frame the message came from, never from what the message says, and only this
+// page (which holds the sign-in) talks to GitHub:
+//   dashboards/<id>/requests/<request>.json   written here; the PC deletes it when it takes it
+//   dashboards/<id>/results/<request>.json    written by the PC: { state: "running" | "done", ok, message }
+// What a name may do is decided on the PC by that dashboard's own command.
+const ACTION_POLL_MS = 3000;
+const ACTION_PICKUP_MS = 90_000; // not taken by then: take it back, so it can't run later by surprise
+const ACTION_ANSWER_MS = 12 * 60_000;
+const ACTION_NAME_MAX = 600;
+const ACTIONS_AT_ONCE = 3;
+let actionsOpen = 0;
+let actionNote = "";
+let actionNoteTimer = 0;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const randomHex = (bytes) =>
+  Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+function noteAction(text, clearAfter = 0) {
+  clearTimeout(actionNoteTimer);
+  actionNote = text;
+  if (clearAfter) actionNoteTimer = setTimeout(() => noteAction(""), clearAfter);
+  drawStatus();
+}
+
+async function runAction(page, name, tell) {
+  const id = `${Date.now()}-${randomHex(4)}`;
+  const folder = `${API}/repos/${repo}/contents/dashboards/${encodeURIComponent(page.id)}`;
+  const request = { id, page: page.id, name, at: Date.now() };
+  const put = await authFetch(`${folder}/requests/${id}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ message: `dashboard ${page.id}: a button on the phone`, content: encodeBase64(JSON.stringify(request)) }),
+  });
+  if (!put.ok) {
+    throw new Error(put.status === 403 || put.status === 404
+      ? "This sign-in can't write to the relay repo. Scan the QR code on your PC again."
+      : `GitHub answered ${put.status}. Nothing was sent.`);
+  }
+  const sha = (await put.json().catch(() => null))?.content?.sha || "";
+  tell("sent", "Sent to your PC\u2026");
+  const started = Date.now();
+  let taken = false;
+  while (Date.now() - started < ACTION_ANSWER_MS) {
+    await sleep(taken && Date.now() - started > 60_000 ? ACTION_POLL_MS * 2 : ACTION_POLL_MS);
+    let answer = null;
+    try {
+      const response = await authFetch(`${folder}/results/${id}.json`,
+        { headers: { Accept: "application/vnd.github.raw+json" }, cache: "no-store" });
+      if (response.ok) answer = JSON.parse(await response.text());
+    } catch { /* offline for a moment, or half-written: ask again */ }
+    if (answer?.state === "done") {
+      return { ok: Boolean(answer.ok), message: String(answer.message || (answer.ok ? "Done." : "That didn't work.")) };
+    }
+    if (answer?.state === "running" && !taken) {
+      taken = true;
+      tell("running", "Your PC is working on it\u2026");
+    }
+    if (!taken && Date.now() - started > ACTION_PICKUP_MS) {
+      let back = null;
+      try {
+        back = await authFetch(`${folder}/requests/${id}.json`, {
+          method: "DELETE",
+          body: JSON.stringify({ message: `dashboard ${page.id}: taken back`, sha }),
+        });
+      } catch { /* can't tell: keep waiting for an answer */ }
+      if (back?.ok) return { ok: false, message: "Your PC didn't pick this up, so nothing was run. Is it on?" };
+      taken = true; // the request is gone (the PC has it) or GitHub can't be reached: wait for the answer
+    }
+  }
+  return { ok: false, message: "No answer from your PC yet. Look again in a few minutes." };
+}
+
+addEventListener("message", async (event) => {
+  const asked = event.data;
+  if (!asked || asked.cairnDash !== "action") return;
+  const from = [...frames].find(([, frame]) => frame.iframe.contentWindow === event.source);
+  if (!from) return; // not one of the dashboards shown here
+  const page = status?.pages.find((p) => p.id === from[0]);
+  const title = page?.title || from[0];
+  const tell = (state, message, ok) => {
+    try {
+      event.source.postMessage({ cairnDash: "reply", id: asked.id, state, ok, message }, "*");
+    } catch { /* the frame is gone; the status line still tells */ }
+    noteAction(`${title}: ${message}`, state === "done" ? 20_000 : 0);
+  };
+  const name = typeof asked.name === "string" ? asked.name : "";
+  if (!page?.actions) return tell("done", "This dashboard's buttons only work on your PC.", false);
+  if (!name || name.length > ACTION_NAME_MAX) return tell("done", "That button can't be sent from the phone.", false);
+  if (actionsOpen >= ACTIONS_AT_ONCE) return tell("done", "Wait for the earlier buttons to finish first.", false);
+  tell("sending", "Sending to your PC\u2026"); // heard: the frame stops waiting for a page that can't send
+  actionsOpen += 1;
+  try {
+    const result = await runAction(page, name, tell);
+    tell("done", result.message, result.ok);
+    for (const ms of [6000, 15_000, 30_000, 60_000]) setTimeout(() => check(), ms); // the PC publishes a fresh page next
+  } catch (error) {
+    tell("done", error.message || "Nothing was sent.", false);
+  } finally {
+    actionsOpen -= 1;
+  }
+});
 
 // ------------------------------------------------------------ UI
 
@@ -224,6 +344,7 @@ function drawStatus() {
   if (pcQuiet) parts.push(`<span class="warn">PC last checked in ${ago(status.published)}${status.pc ? ` (${esc(status.pc)})` : ""}</span>`);
   if (page?.error && page.sha) parts.push(`<span class="warn">${esc(page.error)}</span>`);
   if (lastError) parts.push(`<span class="warn">${esc(lastError)}</span>`);
+  if (actionNote) parts.unshift(`<strong>${esc(actionNote)}</strong>`);
   statusEl.className = `status${lastError ? " error" : pcQuiet ? " stale" : ""}`;
   statusEl.innerHTML = `<span class="pulse" aria-hidden="true"></span><span>${parts.join(" &middot; ") || "Live"}</span>`;
   statusEl.hidden = false;

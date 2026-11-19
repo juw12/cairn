@@ -10,6 +10,11 @@ from unittest import mock
 
 from cairn import dashboards, relay
 
+try:
+    from test_relay import FakeGitHub as FakeContents  # the Contents API half (unittest discover -s tests)
+except ImportError:
+    from tests.test_relay import FakeGitHub as FakeContents
+
 
 class FakeGitHub:
     """Just enough of the Git Data API: blobs, trees, commits and one branch ref."""
@@ -193,6 +198,264 @@ class DashboardsTests(unittest.TestCase):
                 dashboards.phone_link()
 
 
+class ActionTests(unittest.TestCase):
+    """Buttons pressed on the phone: each request runs once, with the page's own command, or not at all."""
+
+    def setUp(self):
+        self.now = 1_800_000_000.0
+        self.gh = FakeContents()
+        self.ran: list[list[str]] = []
+        self.refreshed: list[str] = []
+        self.result = subprocess.CompletedProcess([], 0, "working\nSent 3 e-mails.\n", "")
+        self.page = {"id": "reach", "file": "x.html", "cwd": "E:/reach", "actions": ["python", "E:/reach/phone_action.py"]}
+        self.worker = self.make([self.page, {"id": "plain", "file": "y.html"}])
+
+    def make(self, pages):
+        def run(args, **options):
+            self.ran.append(args)
+            self.options = options
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+        return dashboards.ActionWorker(self.gh, pages, clock=lambda: self.now, run=run,
+                                       refresh=lambda page: self.refreshed.append(page["id"]), threaded=False)
+
+    def press(self, name="promote:retryall", page="reach", age=0.0, request_id="", **extra):
+        sent = int((self.now - age) * 1000)
+        request_id = request_id or f"{sent:013d}-{len(self.gh.files):04x}"
+        request = {"id": request_id, "page": page, "name": name, "at": sent, **extra}
+        self.gh.put_file(f"dashboards/{page}/requests/{request_id}.json", json.dumps(request))
+        return request_id
+
+    def answer(self, request_id, page="reach"):
+        text = self.gh.text(f"dashboards/{page}/results/{request_id}.json")
+        return json.loads(text) if text else None
+
+    def test_a_request_runs_once_with_the_pages_command_and_is_answered(self):
+        request_id = self.press()
+        self.worker.step()
+        self.assertEqual(self.ran, [["python", "E:/reach/phone_action.py", "promote:retryall"]])
+        self.assertEqual(self.options["cwd"], "E:/reach")
+        self.assertIs(self.options["stdin"], subprocess.DEVNULL)
+        self.assertNotIn("shell", self.options)  # the name is one argument, never a command line
+        answer = self.answer(request_id)
+        self.assertEqual((answer["state"], answer["ok"], answer["message"]), ("done", True, "Sent 3 e-mails."))
+        self.assertIsNone(self.gh.text(f"dashboards/reach/requests/{request_id}.json"))  # taken
+        self.assertEqual(self.refreshed, ["reach"])  # the phone gets a fresh page afterwards
+        for _ in range(3):
+            self.worker.step()
+        self.assertEqual(len(self.ran), 1)
+
+    def test_a_failed_command_tells_its_last_error_line(self):
+        self.result = subprocess.CompletedProcess([], 2, "ignored\n", "Traceback\nThat button only works on your PC.\n")
+        request_id = self.press("open_folder")
+        self.worker.step()
+        answer = self.answer(request_id)
+        self.assertEqual((answer["ok"], answer["message"]), (False, "That button only works on your PC."))
+
+    def test_a_command_that_never_ends_or_never_starts_is_answered(self):
+        self.result = subprocess.TimeoutExpired("x", 600)
+        first = self.press()
+        self.worker.step()
+        self.assertFalse(self.answer(first)["ok"])
+        self.assertIn("Still running", self.answer(first)["message"])
+        self.result = FileNotFoundError("no python here")
+        second = self.press(request_id=f"{int(self.now * 1000):013d}-beef")
+        self.worker.step()
+        self.assertIn("couldn't start", self.answer(second)["message"])
+
+    def test_old_and_future_requests_are_refused_not_run(self):
+        old = self.press(age=dashboards.ACTION_MAX_AGE_S + 5)
+        future = self.press(age=-(dashboards.ACTION_CLOCK_SLACK_S + 5))
+        fine = self.press(age=-30)  # a phone clock half a minute ahead is normal
+        self.worker.step()
+        self.assertEqual(len(self.ran), 1)
+        for request_id in (old, future):
+            answer = self.answer(request_id)
+            self.assertFalse(answer["ok"])
+            self.assertIn("too old", answer["message"])
+            self.assertIsNone(self.gh.text(f"dashboards/reach/requests/{request_id}.json"))
+        self.assertTrue(self.answer(fine)["ok"])
+
+    def test_only_a_request_this_worker_deleted_is_run(self):
+        request_id = self.press()
+        real_call = self.gh.call
+
+        def gone(method, path, body=None, etag=""):  # the phone took it back between our read and delete
+            if method == "DELETE":
+                self.gh.files.pop(f"dashboards/reach/requests/{request_id}.json", None)
+                return 404, {"message": "Not Found"}, {}
+            return real_call(method, path, body, etag)
+
+        self.gh.call = gone
+        self.worker.step()
+        self.assertEqual(self.ran, [])
+        self.assertIsNone(self.answer(request_id))
+
+    def test_a_claim_github_refused_is_tried_again_later_and_still_runs_once(self):
+        request_id = self.press()
+        real_call = self.gh.call
+        failing = [True]
+
+        def flaky(method, path, body=None, etag=""):
+            if method == "DELETE" and failing[0]:
+                return 500, None, {}
+            return real_call(method, path, body, etag)
+
+        self.gh.call = flaky
+        self.worker.step()
+        self.assertEqual(self.ran, [])
+        failing[0] = False
+        self.worker.step()  # the listing did not change: nothing to see yet
+        self.assertEqual(self.ran, [])
+        self.now += 61
+        self.worker.step()
+        self.assertEqual(len(self.ran), 1)
+        self.assertTrue(self.answer(request_id)["ok"])
+
+    def test_two_workers_never_run_the_same_request(self):
+        other = self.make([self.page])
+        request_id = self.press()
+        text = self.gh.read(f"dashboards/reach/requests/{request_id}.json")
+        self.assertTrue(text)
+        other.gh = FakeContents()  # a second PC with its own view of the same files
+        other.gh.files = self.gh.files
+        self.worker.step()
+        other.step()
+        self.assertEqual(len(self.ran), 1)
+
+    def test_unreadable_requests_are_refused(self):
+        stamp = int(self.now * 1000)
+        self.gh.put_file(f"dashboards/reach/requests/{stamp:013d}-aaaa.json", "{not json")
+        no_name = self.press(name="", request_id=f"{stamp:013d}-bbbb")
+        long_name = self.press(name="x" * (dashboards.ACTION_NAME_MAX + 1), request_id=f"{stamp:013d}-cccc")
+        control = self.press(name="send\nnow", request_id=f"{stamp:013d}-dddd")
+        self.gh.put_file("dashboards/reach/requests/notes.json", json.dumps({"name": "promote:retryall", "at": stamp}))
+        self.worker.step()
+        self.assertEqual(self.ran, [])
+        self.assertIn("couldn't read", self.answer(f"{stamp:013d}-aaaa")["message"])
+        for request_id in (no_name, long_name, control):
+            self.assertFalse(self.answer(request_id)["ok"])
+        self.assertIsNone(self.answer("notes"))  # not an id the phone page makes: removed, never answered
+        self.assertEqual([p for p in self.gh.files if "/requests/" in p and p.endswith(".json")], [])
+
+    def test_the_request_cannot_choose_another_page_or_command(self):
+        request_id = self.press(page="reach", command="format c:", actions=["evil"])
+        json_path = f"dashboards/reach/requests/{request_id}.json"
+        request = json.loads(self.gh.text(json_path))
+        request["page"] = "plain"
+        self.gh.put_file(json_path, json.dumps(request))
+        self.worker.step()
+        self.assertEqual(self.ran, [["python", "E:/reach/phone_action.py", "promote:retryall"]])
+
+    def test_pages_without_a_command_are_never_listened_to(self):
+        self.press(page="plain")
+        self.worker.step()
+        self.assertEqual(self.ran, [])
+        self.assertFalse(any("/plain/" in path for _, path in self.gh.calls))
+        self.assertIsNotNone(self.gh.text([p for p in self.gh.files if "/plain/requests/" in p][0]))
+
+    def test_an_idle_worker_costs_one_unchanged_listing(self):
+        self.worker.step()  # no folder yet: it is made, so later listings can answer "unchanged"
+        self.assertEqual(self.gh.text("dashboards/reach/requests/.keep"), "")
+        self.worker.step()
+        self.gh.calls.clear()
+        self.worker.step()
+        self.assertEqual(self.gh.calls, [("GET", "/repos/me/cairn-relay/contents/dashboards/reach/requests")])
+
+    def test_busy_worker_refuses_more_than_a_few_at_once(self):
+        busy = mock.Mock()
+        busy.is_alive.return_value = True
+        self.worker.running = [busy] * dashboards.ACTIONS_AT_ONCE
+        request_id = self.press()
+        self.worker.poll()
+        self.assertEqual(self.ran, [])
+        self.assertIn("busy", self.answer(request_id)["message"])
+
+    def test_old_answers_are_swept(self):
+        old = f"{int((self.now - dashboards.RESULT_KEEP_S - 60) * 1000):013d}-aaaa"
+        fresh = f"{int(self.now * 1000):013d}-bbbb"
+        for request_id in (old, fresh):
+            self.gh.put_file(f"dashboards/reach/results/{request_id}.json", "{}")
+        self.assertEqual(self.worker.sweep(), 1)
+        self.assertIsNone(self.answer(old))
+        self.assertEqual(self.answer(fresh), {})
+
+    def test_threaded_work_is_answered_too(self):
+        self.worker.threaded = True
+        request_id = self.press()
+        self.worker.step()
+        for thread in self.worker.running:
+            thread.join(10)
+        self.assertTrue(self.answer(request_id)["ok"])
+        self.assertEqual(self.refreshed, ["reach"])
+
+
+class ActionSetupTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        patch = mock.patch.object(dashboards, "config_path", return_value=self.tmp / "dashboards.json")
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.page = self.tmp / "a.html"
+        self.page.write_text("<p>A</p>", encoding="utf-8")
+
+    def test_add_stores_the_command_and_the_phone_is_told_the_page_takes_actions(self):
+        dashboards.add_page("reach", str(self.page), build="python build.py", actions='python "E:/x y/phone_action.py"')
+        dashboards.add_page("plain", str(self.page))
+        pages = dashboards.load_pages()
+        self.assertEqual(pages[0]["actions"], ["python", "E:/x y/phone_action.py"])
+        self.assertNotIn("actions", pages[1])
+        spawn = mock.Mock()
+        entries, _ = dashboards.collect(pages, spawn=spawn, build=False)
+        spawn.assert_not_called()  # build=False: the page was just rebuilt by the worker
+        self.assertIs(entries[0]["actions"], True)
+        self.assertNotIn("actions", entries[1])
+        self.assertNotIn("phone_action", json.dumps(entries))  # the command itself never leaves the PC
+
+    def test_refresh_builds_the_page_then_publishes_without_building_again(self):
+        ran = []
+        with mock.patch.object(dashboards, "publish") as publish:
+            dashboards.refresh_page({"id": "reach", "build": ["python", "build.py"], "cwd": "E:/reach"},
+                                    run=lambda args, **options: ran.append((args, options["cwd"])))
+        self.assertEqual(ran, [(["python", "build.py"], "E:/reach")])
+        publish.assert_called_once_with(build=False)
+
+    def test_worker_task_is_looked_after_every_minute_and_has_no_time_limit(self):
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(dashboards.sys, "platform", "win32"), \
+                mock.patch.object(dashboards.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(dashboards.schedule_actions(), dashboards.ACTIONS_TASK_NAME)
+        script = run.call_args.args[0][-1]
+        self.assertIn("'-m cairn dashboards actions'", script)
+        self.assertIn("-RepetitionInterval (New-TimeSpan -Minutes 1)", script)
+        self.assertIn("-ExecutionTimeLimit ([TimeSpan]::Zero)", script)
+        self.assertIn("-MultipleInstances IgnoreNew", script)  # one worker at a time
+        self.assertIn("-AtLogOn", script)
+
+    def test_the_worker_makes_room_when_cairn_updates_itself(self):
+        dashboards.add_page("reach", str(self.page), actions="python phone_action.py")
+        stamps = iter([1.0, 1.0, 2.0])
+        steps = []
+        said = []
+        with mock.patch.object(relay, "load_config", return_value={"repo": "me/cairn-relay"}), \
+                mock.patch.object(relay, "connect", return_value=FakeContents()), \
+                mock.patch.object(dashboards, "_code_stamp", side_effect=lambda: next(stamps)), \
+                mock.patch.object(dashboards, "ACTIONS_POLL_S", 0), \
+                mock.patch.object(dashboards.ActionWorker, "step", lambda worker: steps.append(1)):
+            dashboards.run_actions(log=said.append)
+        self.assertEqual(len(steps), 2)
+        self.assertIn("updated", said[-1])
+
+    def test_the_worker_needs_a_page_with_a_command(self):
+        dashboards.add_page("plain", str(self.page))
+        with mock.patch.object(relay, "load_config", return_value={"repo": "me/cairn-relay"}), \
+                mock.patch.object(relay, "connect", return_value=FakeContents()):
+            with self.assertRaises(ValueError):
+                dashboards.run_actions(log=lambda line: None)
+
+
 class DashPageTests(unittest.TestCase):
     """The phone page: frames are sandboxed without same-origin, and the page uses Cairn's sign-in."""
 
@@ -204,6 +467,18 @@ class DashPageTests(unittest.TestCase):
         self.assertNotIn("allow-same-origin", sandbox[0])
         self.assertIn('from "./auth.js"', script)
         self.assertIn("history.replaceState", script)  # the token leaves the address bar
+
+    def test_buttons_are_sent_for_the_frame_that_asked_and_only_when_the_pc_takes_them(self):
+        script = (Path(__file__).resolve().parent.parent / "docs" / "dash.js").read_text(encoding="utf-8")
+        self.assertIn("frame.iframe.contentWindow === event.source", script)  # which page: never from the message
+        self.assertIn("if (!page?.actions)", script)
+        self.assertIn("/contents/dashboards/${encodeURIComponent(page.id)}", script)
+        self.assertIn("/requests/${id}.json", script)
+        self.assertIn("/results/${id}.json", script)
+        self.assertIn('method: "DELETE"', script)  # a request the PC didn't take is taken back
+        helper = script.split("const HELPER = `", 1)[1].split("`;", 1)[0]
+        self.assertNotIn("authFetch", helper)  # the frame's own script never talks to GitHub
+        self.assertIn("window.name", helper)  # what the page remembers survives a live update
 
     def test_page_installs_as_its_own_home_screen_app(self):
         docs = Path(__file__).resolve().parent.parent / "docs"
