@@ -612,6 +612,8 @@ class TestEveryComputer(CopyCase):
         self.assertEqual((code, err), (0, ""))
         self.assertTrue(github_copy.everywhere(self.brain))
         self.assertIn("Every other computer whose Cairn watcher reads this brain now keeps its own copy", out)
+        self.assertIn("Your other computers are asked for one", out)  # not told to ask again
+        self.assertNotIn("asks your other computers", out)
         self.assertIn("1 repos (0 private) have a full copy in", out)
         self.assertEqual(self.hub.asked, [])  # asking is a note in the brain: GitHub is not called
         code, out, err = run_cli("everywhere", "off")

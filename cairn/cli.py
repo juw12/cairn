@@ -416,7 +416,7 @@ def _vibe_github_copy(brain: Brain, args, account: str) -> int:
             return 1
         if named.lower() == "everywhere":
             print(f"Every other computer whose Cairn watcher reads this brain now keeps its own copy, in {github_copy.HOME_NAME} in its home folder.")
-            print(github_copy.summary(Path(chosen["folder"]), github_copy.load_state(Path(chosen["folder"])), github_copy.other_copies(brain)))
+            print(github_copy.summary(Path(chosen["folder"]), github_copy.load_state(Path(chosen["folder"])), github_copy.other_copies(brain), asked=True))
         else:
             print("No other computer is asked for a copy now. The ones that already keep one go on keeping it.")
         return 0
@@ -439,7 +439,7 @@ def _vibe_github_copy(brain: Brain, args, account: str) -> int:
         others = github_copy.other_copies(brain)
     except (ConflictError, OSError):
         pass  # the copy is made; its note is written again by the next run
-    print(github_copy.summary(folder, state, others))
+    print(github_copy.summary(folder, state, others, asked=others is not None and github_copy.everywhere(brain)))
     return 1 if state["problems"] or github_copy.counts(state)["failed"] or github_copy.extras_counts(state)["failed"] else 0
 
 
