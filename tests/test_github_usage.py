@@ -192,6 +192,23 @@ class SyncTests(unittest.TestCase):
         self.assertEqual((reading["used"], reading["since"]), (1804, 3))
         self.assertEqual(self.meta("2026-11")["gh_anchor_api"], "1440")
 
+    def test_githubs_figure_is_not_carried_to_the_account_switched_to(self):
+        self.usage[11] = [row("2026-11-14", "vault", 1440)]
+        github_usage.set_anchor(self.brain, 1801, now=self.NOW, http=self.http)
+        # gh auth switch: the main note is now read with Grace's sign-in
+        self.assertTrue(github_usage.sync(self.brain, self.NOW + dt.timedelta(minutes=61), self.other))
+        meta = self.meta("2026-11")
+        self.assertEqual((meta["gh_account"], meta["gh_used"], meta["gh_pct"]), ("Grace", "120", "6"), "her own minutes, not Ada's 1,801")
+        self.assertNotIn("gh_anchor_used", meta)
+
+    def test_githubs_figure_stays_with_the_same_account_however_its_name_is_cased(self):
+        kept = {"gh_account": "Ada", "gh_anchor_used": "1801", "gh_anchor_at": "2026-11-15T12:00", "gh_anchor_api": "1440"}
+        self.assertEqual(github_usage.kept_anchor(kept, "2026-11", "ada")["used"], 1801)
+        self.assertIsNone(github_usage.kept_anchor(kept, "2026-11", "grace"))
+        nameless = {key: value for key, value in kept.items() if key != "gh_account"}
+        self.assertEqual(github_usage.kept_anchor(nameless, "2026-11", "grace")["used"], 1801, "a note from before accounts were noted")
+        self.assertIsNone(github_usage.kept_anchor(None, "2026-11", "ada"))
+
     def test_a_figure_from_another_month_or_the_future_is_refused(self):
         for at in (dt.datetime(2026, 10, 20, 9, 0), self.NOW + dt.timedelta(hours=2)):
             with self.assertRaises(ValueError):
@@ -252,6 +269,21 @@ class SyncTests(unittest.TestCase):
         self.assertIn("GitHub Actions 2026-11 (Grace): 150 of 2,000 minutes", github_usage.summary(reading))
         self.assertEqual(self.meta("grace/2026-11")["gh_anchor_used"], "150")
         self.assertFalse(self.brain.resolve("github-usage/2026-11.md").exists())
+
+    def test_githubs_figure_follows_an_account_between_the_main_note_and_its_own_folder(self):
+        github_usage.set_anchor(self.brain, 150, now=self.NOW, http=self.other, account="grace")
+        # gh auth switch to Grace: she is the main account now, and her figure comes along
+        self.assertTrue(github_usage.sync(self.brain, self.NOW, self.other))
+        main = self.meta("2026-11")
+        self.assertEqual((main["gh_account"], main["gh_used"], main["gh_anchor_used"]), ("Grace", "150", "150"))
+        # the other way round: Ada's figure was set while she was the main account
+        self.brain.resolve("github-usage/2026-11.md").unlink()
+        self.usage[11] = [row("2026-11-14", "vault", 1440)]
+        github_usage.set_anchor(self.brain, 1801, now=self.NOW, http=self.http)
+        self.usage[11].append(row("2026-11-15", "vault", 4))
+        self.assertTrue(github_usage.sync(self.brain, self.NOW + dt.timedelta(minutes=5), self.http, account="ada"))
+        hers = self.meta("ada/2026-11")
+        self.assertEqual((hers["gh_used"], hers["gh_anchor_used"], hers["gh_since"]), ("1806", "1801", "5"))
 
     def test_a_sign_in_that_may_not_see_billing_says_what_it_needs(self):
         def hidden(method: str, path: str):

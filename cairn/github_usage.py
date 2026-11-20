@@ -133,6 +133,16 @@ def anchor_of(meta: dict | None, month: str) -> dict | None:
     return anchor
 
 
+def kept_anchor(meta: dict | None, month: str, login: str) -> dict | None:
+    """GitHub's own figure kept in a note, when it was read for `login`. The main note follows whoever
+    the GitHub CLI is signed in as, so after `gh auth switch` it becomes another account's month:
+    counting on from the old figure there would show minutes that account never used."""
+    noted = str((meta or {}).get("gh_account", "")).strip().lower()
+    if noted and noted != login.strip().lower():
+        return None
+    return anchor_of(meta, month)
+
+
 def calibrate(reading: dict, anchor: dict, now: dt.datetime, final: bool = False) -> dict:
     """The month's reading counted from GitHub's own figure: that figure, plus what the billing rows
     added since, scaled by how far the rows were behind when it was read. The month-end figure paces
@@ -280,6 +290,26 @@ def _write(brain: Brain, reading: dict, account: str = "") -> None:
         brain.write(path, text)
 
 
+def _anchor_for(brain: Brain, month: str, account: str, login: str) -> dict | None:
+    """GitHub's own figure for `login` this month. It is looked for in the note being written and in
+    the other place the same account may be noted: an account is the main one while the GitHub CLI is
+    signed in as it and a named one (`--account NAME`) otherwise, and its figure has to follow it."""
+    found = [kept_anchor(_note_meta(brain, month, account), month, login)]
+    elsewhere = None
+    if account:
+        elsewhere = _note_meta(brain, month)
+    else:
+        # The folder keeps the name as it was asked for, which need not be cased as GitHub has it.
+        shelves = brain.dir / FOLDER
+        names = [entry.name for entry in shelves.iterdir() if entry.is_dir()] if shelves.is_dir() else []
+        for name in names:
+            if name.lower() == login.strip().lower() and LOGIN_RE.fullmatch(name):
+                elsewhere = _note_meta(brain, month, name)
+    if str((elsewhere or {}).get("gh_account", "")).strip().lower() == login.strip().lower():
+        found.append(anchor_of(elsewhere, month))
+    return max((anchor for anchor in found if anchor), key=lambda anchor: _utc(anchor["at"]), default=None)
+
+
 # ------------------------------------------------------------ asking GitHub
 
 
@@ -366,7 +396,7 @@ def _note_months(brain: Brain, now: dt.datetime, http, new_anchor: dict | None =
     public = fetch_public_repos(http)
     stamp = now.strftime("%Y-%m-%dT%H:%M")
     reading = quota(fetch_usage(http, login, today.year, today.month), public, today.year, today.month, today.day, limit)
-    anchor = anchor_of(_note_meta(brain, month, account), month) if new_anchor is None else new_anchor
+    anchor = _anchor_for(brain, month, account, login) if new_anchor is None else new_anchor
     if anchor is not None:
         if anchor.get("api") is None:
             anchor = {**anchor, "api": reading["used"]}  # read just now, so the rows' sum of this moment
@@ -379,7 +409,7 @@ def _note_months(brain: Brain, now: dt.datetime, http, new_anchor: dict | None =
         if (meta or {}).get("gh_final") == "yes":
             continue
         closed = quota(fetch_usage(http, login, year, past), public, year, past, 31, limit)
-        kept = anchor_of(meta, name)  # a month that was counted from GitHub's figure closes on it too
+        kept = kept_anchor(meta, name, login)  # a month that was counted from GitHub's figure closes on it too
         closed = calibrate(closed, kept, now, final=True) if kept else closed
         _write(brain, {**closed, "account": login, "at": stamp, "final": True}, account)
     return reading
