@@ -109,8 +109,9 @@ Field types: `toggle`, `text`, `textarea`, `number` (`min`, `max`, `step`) and `
 
 ## Examples
 
-The four built-in plugins are short and readable:
+The five built-in plugins are short and readable:
 [note queries](docs/plugins/note-queries.js) (a code-block renderer, like Dataview),
 [calendar](docs/plugins/calendar.js) (a view),
-[writing stats](docs/plugins/writing-stats.js) (a view and a command) and
-[recent files](docs/plugins/recent-files.js) (events and settings).
+[writing stats](docs/plugins/writing-stats.js) (a view and a command),
+[recent files](docs/plugins/recent-files.js) (events and settings) and
+[pocket meter](docs/plugins/pocket-meter.js) (a view drawn from one note's properties and table).

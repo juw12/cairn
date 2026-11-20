@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 82 (2026-11-20): Pocket meter plugin
+
+- Plugins: a new built-in plugin, Pocket meter. It draws a bar from zero to your ceiling from one note in your brain: the filled part is money that has arrived, a marker shows what is expected, a band shows the likely range, and a list shows which sources contribute.
+- The plugin holds no figures. They live in a note you mark with pocket-meter: true, so they stay as private as that note. With no such note, the page shows the properties to add.
+
 ## Build 81 (2026-11-20): Private pictures open directly
 
 - Latest updates uses the vault’s known paths to load a private picture without asking GitHub for a file that isn’t there. A picture beside the note still wins when both folders contain it.

@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover
     sync_playwright = None
 
 CANVAS = "canvases/v1 launch plan.canvas"
-BUNDLED = ["note-queries", "calendar", "writing-stats", "recent-files"]
+BUNDLED = ["note-queries", "calendar", "writing-stats", "recent-files", "pocket-meter"]
 
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
@@ -543,6 +543,42 @@ class WorkspaceTests(unittest.TestCase):
         page.click('[data-plugins-toggle="off"]')
         page.wait_for_selector('[data-plugins-toggle="on"]')
         self.assertEqual(page.locator('#nav [data-go^="plugin:"]').count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_pocket_meter_draws_from_one_note_and_holds_no_figures(self):
+        page = self.open()
+        go_to(page, "plugins")
+        page.click('[data-plugins-toggle="on"]')
+        page.click('[data-plugin-install="plugins/pocket-meter.js"]')
+        page.wait_for_selector('.plugin-row[data-plugin="pocket-meter"]')
+        page.click('#nav [data-go="plugin:pocket-meter:meter"]')
+        # No meter note in the brain: the page explains the note to write, and shows no figures.
+        page.wait_for_selector(".pm-example")
+        self.assertIn("No meter note in this brain yet", page.inner_text("#view"))
+        self.assertEqual(page.locator(".pm-bar").count(), 0)
+        # The note arrives (another device, or a script that writes it): the open page redraws on its own.
+        page.evaluate("""async () => {
+            const { saveNote } = await import('./state.js');
+            await saveNote('notes/architecture.md', {
+                properties: { 'pocket-meter': 'true', currency: 'Rp', balance: '50000', ceiling: '400000', expected: '100000',
+                    low: '0', high: '200000', chance: '0.455', days: '30', settlements: '2', since: '2026-11-01' },
+                body: '| Source | Expected | Ceiling | Detail |\\n| --- | --- | --- | --- |\\n| Shop | 60000 | 300000 | 12 tries |\\n| <b>Tips</b> | 40000 | 100000 | |\\n',
+            });
+        }""")
+        page.wait_for_selector(".pm-bar")
+        style = lambda selector: page.get_attribute(selector, "style").replace(" ", "")  # noqa: E731
+        self.assertEqual(style(".pm-fill"), "width:12.50%")
+        self.assertEqual(style(".pm-mark"), "left:25.00%")
+        self.assertIn("left:0.00%;width:calc(50.00%-0.00%)", style(".pm-band"))
+        text = page.inner_text("#view")
+        for expected in ["Rp50,000", "Rp400,000", "12.5% of the ceiling", "45.5%", "2\nsettlements recorded since 2026-11-01"]:
+            self.assertIn(expected, text)
+        self.assertEqual(page.locator(".pm-sources li").count(), 2)
+        self.assertIn("<b>Tips</b>", page.inner_text(".pm-sources"), "a source name is text, never markup")
+        self.assertEqual(page.locator(".pm-sources b").count(), 0)
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(150)
+        self.assertLessEqual(page.evaluate("() => document.documentElement.scrollWidth"), 390, "fits a phone")
         self.assertEqual(self.errors, [])
 
     def test_plugin_settings_problems_and_the_brains_plugin_list(self):

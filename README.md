@@ -569,7 +569,7 @@ The editor speaks Obsidian-flavoured Markdown, so a vault reads the same in both
 - **Split view:** Ctrl+Alt+\\ (or the columns button) opens a second note beside the first; Alt+click any note,
   link or tab to open it there. Read or edit it, click its title to swap sides, × to close.
 - **Community plugins:** turn them on under **Plugins**, then install from the built-in list (Note queries,
-  Calendar, Writing stats, Recent files), from any GitHub repo (`owner/repo`) or from a link. A plugin is one
+  Calendar, Writing stats, Recent files, Pocket meter), from any GitHub repo (`owner/repo`) or from a link. A plugin is one
   JavaScript file that can add commands, sidebar pages, ```` ```lang ```` block renderers and event hooks; see
   [PLUGINS.md](PLUGINS.md). Plugins live on your device, never in a shared brain. Obsidian's own plugins don't run
   here (they need Obsidian's API), but Cairn's API mirrors theirs, so porting is usually quick.

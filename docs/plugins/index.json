@@ -33,6 +33,14 @@
       "main": "plugins/recent-files.js"
     },
     {
+      "id": "pocket-meter",
+      "name": "Pocket meter",
+      "author": "Cairn",
+      "version": "1.0.0",
+      "description": "A money meter from zero to your ceiling, drawn from one note in your brain: what has arrived, what is expected, the likely range and which sources contribute.",
+      "main": "plugins/pocket-meter.js"
+    },
+    {
       "id": "kilat",
       "name": "Kilat",
       "author": "Juwen Lie",

@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 82,
+      "date": "2026-11-20",
+      "title": "Pocket meter plugin",
+      "changes": [
+        "Plugins: a new built-in plugin, Pocket meter. It draws a bar from zero to your ceiling from one note in your brain: the filled part is money that has arrived, a marker shows what is expected, a band shows the likely range, and a list shows which sources contribute.",
+        "The plugin holds no figures. They live in a note you mark with pocket-meter: true, so they stay as private as that note. With no such note, the page shows the properties to add."
+      ]
+    },
+    {
       "build": 81,
       "date": "2026-11-20",
       "title": "Private pictures open directly",
