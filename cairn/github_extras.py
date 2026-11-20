@@ -25,8 +25,10 @@ import datetime as dt
 import json
 import os
 import shutil
+import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import publish
@@ -35,6 +37,11 @@ FULL_DAYS = 7  # a repo's extras are fetched again at least this often
 PAGES = 200  # the most pages of one list that are read (100 rows each)
 QUIET_SECONDS = 900  # how long a download may say nothing: an office proxy reads a big file whole before passing it on
 CHUNK = 1 << 20
+FILES_AT_ONCE = 4  # release files of one repo fetched together
+SLOW_SECONDS = 30  # a connection that brings less than SLOW_BYTES in this long is left for a new one
+SLOW_BYTES = 6 << 20
+RECONNECTS = 5  # how often one file may change connection
+BREATH_SECONDS = 3  # the wait before a new connection, after one that broke or never opened
 ABOUT = ("description", "homepage", "topics", "private", "visibility", "default_branch", "archived", "fork", "has_issues", "has_wiki", "has_pages", "created_at")
 
 STAMPS = """
@@ -170,19 +177,57 @@ def safe_name(text: str) -> str:
 
 def download(url: str, path: Path, token: str) -> None:
     """One release file. The sign-in goes to GitHub only: it is not passed on to the file store GitHub
-    sends the request to."""
-    request = urllib.request.Request(url, headers={"Accept": "application/octet-stream", "User-Agent": "cairn"})
-    request.add_unredirected_header("Authorization", f"Bearer {token}")
+    sends the request to. A connection that crawls is left for a new one, which carries on from the
+    same byte: through an office proxy some ran at a tenth of the speed of the rest, for as long as
+    they were kept. So is one that breaks or never opens (the proxy answered 504 for one file in 545),
+    unless the answer was a no (400 to 499), which asking again does not change."""
     part = path.with_name(path.name + ".part")  # a download that stops half way is never taken for the file
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with urllib.request.urlopen(request, timeout=QUIET_SECONDS, context=publish.ssl_context()) as response, open(part, "wb") as out:
-            shutil.copyfileobj(response, out, CHUNK)
+        with open(part, "wb") as out:
+            for left in range(RECONNECTS, -1, -1):
+                try:
+                    if _receive(url, token, out, patient=not left):  # the last connection is kept however slow
+                        break
+                except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
+                    if not left or 400 <= (getattr(error, "code", None) or 0) < 500:
+                        raise
+                    time.sleep(BREATH_SECONDS)
     except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
         part.unlink(missing_ok=True)
         reason = getattr(error, "reason", "") or getattr(error, "code", "") or type(error).__name__
         raise ExtrasError(f"could not download {path.name} ({reason})") from None
     os.replace(part, path)
+
+
+def _receive(url: str, token: str, out, patient: bool) -> bool:
+    """Write what one connection brings after what `out` holds already. False when it was left for
+    being slow or stopped before the end, with what it did bring kept."""
+    have = out.tell()
+    request = urllib.request.Request(url, headers={"Accept": "application/octet-stream", "User-Agent": "cairn"})
+    request.add_unredirected_header("Authorization", f"Bearer {token}")
+    if have:
+        request.add_header("Range", f"bytes={have}-")
+    try:
+        response = urllib.request.urlopen(request, timeout=QUIET_SECONDS, context=publish.ssl_context())
+    except urllib.error.HTTPError as error:
+        if have and error.code == 416:  # nothing after what is held: it was whole already
+            return True
+        raise
+    with response:
+        if have and response.status != 206:  # the whole file again, not the rest of it
+            out.seek(0)
+            out.truncate()
+        promised = int(response.headers.get("Content-Length") or 0)
+        since, got, start = time.monotonic(), 0, out.tell()
+        while block := response.read1(CHUNK):
+            out.write(block)
+            got += len(block)
+            if not patient and time.monotonic() - since >= SLOW_SECONDS:
+                if got < SLOW_BYTES:
+                    return False
+                since, got = time.monotonic(), 0
+        return out.tell() - start >= promised  # a line that dropped ends like a file that is whole
 
 
 def copy_talk(target: Path, repo: dict, http) -> int:
@@ -198,30 +243,37 @@ def copy_talk(target: Path, repo: dict, http) -> int:
 
 
 def copy_releases(target: Path, key: str, http, token: str, fetch=None) -> tuple[int, int, int, list[str]]:
-    """Releases and their files. (releases, files held, bytes held, files that would not come)."""
+    """Releases and their files, a few files at a time: one connection brings a big file slowly, and a
+    repo can hold hundreds. (releases, files held, bytes held, files that would not come)."""
     fetch = download if fetch is None else fetch
     releases = _pages(http, f"/repos/{key}/releases")
     _write_json(target / "releases.json", releases)
-    files = size = 0
-    missing: list[str] = []
+    wanted: dict[Path, tuple[str, int]] = {}  # by where it goes, so two never write one file
     for release in releases:
         where = target / "releases" / safe_name(release.get("tag_name") or release.get("id"))
         for asset in release.get("assets") or []:
-            path = where / safe_name(asset["name"])
-            wanted = int(asset.get("size") or 0)
-            if not (path.is_file() and path.stat().st_size == wanted):
-                try:
-                    fetch(asset["url"], path, token)
-                except ExtrasError as error:
-                    missing.append(str(error))
-                    continue
-                if path.stat().st_size != wanted:
-                    path.unlink(missing_ok=True)
-                    missing.append(f"{path.name} came back the wrong size")
-                    continue
-            files += 1
-            size += wanted
-    return len(releases), files, size, missing
+            wanted[where / safe_name(asset["name"])] = (asset["url"], int(asset.get("size") or 0))
+
+    def one(path: Path) -> str:
+        """Nothing when the file is held whole, else why it is not."""
+        url, size = wanted[path]
+        if path.is_file() and path.stat().st_size == size:
+            return ""
+        try:
+            fetch(url, path, token)
+            if path.stat().st_size != size:  # cut short on the way: a second try mostly brings it whole
+                fetch(url, path, token)
+        except ExtrasError as error:
+            return str(error)
+        if path.stat().st_size != size:
+            path.unlink(missing_ok=True)
+            return f"{path.name} came back the wrong size"
+        return ""
+
+    with ThreadPoolExecutor(FILES_AT_ONCE) as pool:
+        results = list(pool.map(one, wanted))
+    held = [wanted[path][1] for path, why in zip(wanted, results) if not why]
+    return len(releases), len(held), sum(held), [why for why in results if why]
 
 
 def copy_actions(target: Path, key: str, http) -> int:

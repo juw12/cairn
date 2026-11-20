@@ -416,6 +416,45 @@ class TestExtras(CopyCase):
         state = self.copy()
         self.assertIn("wrong size", state["repos"]["ada/engine"]["extras"]["error"])
         self.assertFalse((github_extras.extras_folder(self.folder, "ada/engine") / "releases" / "v1.0" / "engine.exe").exists())
+        self.assertEqual(len(self.hub.fetched), 2)  # asked for once more before giving up
+
+    def test_a_file_cut_short_once_is_asked_for_again_in_the_same_run(self):
+        self.hub.add("ada", "engine")
+        self.hub.release("ada/engine", "v1.0", engine_exe=b"0123456789")
+        url, whole = "asset://ada/engine/v1.0/engine_exe", b"0123456789"
+        self.hub.files[url] = b"01234"
+        real = self.hub.fetch
+
+        def cut_short_once(asked, path, token):
+            real(asked, path, token)
+            self.hub.files[url] = whole
+
+        self.hub.fetch = cut_short_once
+        state = self.copy()
+        self.assertNotIn("error", state["repos"]["ada/engine"]["extras"])
+        self.assertEqual(self.hub.fetched, [url, url])
+        self.assertEqual((github_extras.extras_folder(self.folder, "ada/engine") / "releases" / "v1.0" / "engine.exe").read_bytes(), whole)
+
+    def test_the_files_of_a_repo_come_a_few_at_a_time(self):
+        self.hub.add("ada", "engine")
+        self.hub.release("ada/engine", "v1.0", a_bin=b"1", b_bin=b"22", c_bin=b"333", d_bin=b"4444", e_bin=b"55555")
+        real, lock, now, most = self.hub.fetch, threading.Lock(), [0], [0]
+
+        def slow(url, path, token):
+            with lock:
+                now[0] += 1
+                most[0] = max(most[0], now[0])
+            time.sleep(0.2)
+            real(url, path, token)
+            with lock:
+                now[0] -= 1
+
+        self.hub.fetch = slow
+        held = self.copy()["repos"]["ada/engine"]["extras"]
+        self.assertEqual((held["files"], held["bytes"]), (5, 15))
+        self.assertNotIn("error", held)
+        self.assertGreater(most[0], 1)
+        self.assertLessEqual(most[0], github_extras.FILES_AT_ONCE)
 
     def test_a_tag_or_file_name_cannot_leave_its_folder(self):
         self.assertEqual(github_extras.safe_name("release/v1:0"), "release_v1_0")
@@ -508,13 +547,105 @@ class TestExtras(CopyCase):
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         target = Path(self.tmp.name) / "down" / "engine.exe"
-        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}):
+        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}), \
+                mock.patch.object(github_extras, "BREATH_SECONDS", 0):
             github_extras.download(f"http://127.0.0.1:{server.server_port}/asset", target, TOKEN)
             self.assertEqual(target.read_bytes(), b"0123456789")
             self.assertEqual(seen, {"/asset": f"Bearer {TOKEN}", "/store": None})
             with self.assertRaises(github_extras.ExtrasError):
                 github_extras.download(f"http://127.0.0.1:{server.server_port + 1}/asset", target.with_name("other.exe"), TOKEN)
         self.assertEqual([path.name for path in target.parent.iterdir()], ["engine.exe"])  # nothing half made is left
+
+    def test_a_connection_that_crawls_is_left_and_a_new_one_carries_on_from_the_same_byte(self):
+        whole = bytes(range(40))
+        asked: list[tuple[str, str | None]] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                first = self.path not in [path for path, _ in asked]
+                wanted = self.headers.get("Range")
+                asked.append((self.path, wanted))
+                rest = whole[int(wanted[6:-1]):] if wanted and self.path == "/resumes" else whole
+                self.send_response(206 if len(rest) < len(whole) else 200)
+                self.send_header("Content-Length", str(len(rest)))
+                self.end_headers()
+                try:
+                    for byte in rest:
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        if first:
+                            time.sleep(0.05)  # the first connection for a file crawls
+                except OSError:
+                    pass  # the reader left
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        folder = Path(self.tmp.name) / "down"
+        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}), \
+                mock.patch.object(github_extras, "SLOW_SECONDS", 0.3), mock.patch.object(github_extras, "SLOW_BYTES", 30):
+            for name in ("resumes", "starts-over"):  # a store that gives the rest, and one that only gives the whole
+                github_extras.download(f"http://127.0.0.1:{server.server_port}/{name}", folder / name, TOKEN)
+                self.assertEqual((folder / name).read_bytes(), whole)
+        (first, none), (second, rest) = [item for item in asked if item[0] == "/resumes"]
+        self.assertIsNone(none)
+        self.assertRegex(rest, r"^bytes=[1-9]\d?-$")  # asked for the rest only
+        self.assertEqual(len([item for item in asked if item[0] == "/starts-over"]), 2)
+        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}), \
+                mock.patch.object(github_extras, "SLOW_SECONDS", 0.3), mock.patch.object(github_extras, "SLOW_BYTES", 30), \
+                mock.patch.object(github_extras, "RECONNECTS", 0):
+            asked.clear()
+            github_extras.download(f"http://127.0.0.1:{server.server_port}/patient", folder / "patient", TOKEN)
+        self.assertEqual(((folder / "patient").read_bytes(), len(asked)), (whole, 1))  # the last connection is kept, however slow
+
+    def test_a_connection_that_breaks_or_never_opens_is_tried_again_but_a_no_is_not(self):
+        whole = bytes(range(40))
+        asked: list[tuple[str, str | None]] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                earlier = len([path for path, _ in asked if path == self.path])
+                wanted = self.headers.get("Range")
+                asked.append((self.path, wanted))
+                if self.path == "/gone":
+                    self.send_error(404)
+                elif self.path == "/proxy-gave-up" and not earlier:
+                    self.send_error(504)
+                elif self.path == "/breaks" and not earlier:
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(whole)))
+                    self.end_headers()
+                    self.wfile.write(whole[:15])  # and then the line drops
+                else:
+                    rest = whole[int(wanted[6:-1]):] if wanted else whole
+                    self.send_response(206 if wanted else 200)
+                    self.send_header("Content-Length", str(len(rest)))
+                    self.end_headers()
+                    self.wfile.write(rest)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        folder = Path(self.tmp.name) / "down"
+        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}), \
+                mock.patch.object(github_extras, "BREATH_SECONDS", 0):
+            for name in ("proxy-gave-up", "breaks"):
+                github_extras.download(f"http://127.0.0.1:{server.server_port}/{name}", folder / name, TOKEN)
+                self.assertEqual((folder / name).read_bytes(), whole)
+            with self.assertRaises(github_extras.ExtrasError):
+                github_extras.download(f"http://127.0.0.1:{server.server_port}/gone", folder / "gone", TOKEN)
+        self.assertEqual([wanted for path, wanted in asked if path == "/proxy-gave-up"], [None, None])
+        self.assertEqual([wanted for path, wanted in asked if path == "/breaks"], [None, "bytes=15-"])  # the rest only
+        self.assertEqual(len([path for path, _ in asked if path == "/gone"]), 1)  # GitHub said no: not asked again
+        self.assertEqual(sorted(path.name for path in folder.iterdir()), ["breaks", "proxy-gave-up"])
 
 
 class TestEveryComputer(CopyCase):
