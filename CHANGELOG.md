@@ -3,6 +3,16 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 79 (2026-11-20): A Home that shows what matters
+
+- Home leads with what waits for you: sessions that stopped on an error, GitHub minutes running low, the newest tasks marked needs-me and decisions that wait for a yes or no ([#62](https://github.com/juw12/cairn/pull/62))
+- Home: Working now lists the running sessions with their computer, assistant, last step and tokens. The numbers are today's: working now, shipped, sessions, tokens, waiting for you, open tasks ([#62](https://github.com/juw12/cairn/pull/62))
+- Home: an activity chart you can tap or drag across. Sessions, shipped, tokens or journal lines per day over 14, 30 or 90 days, and under it what happened on the day you picked ([#62](https://github.com/juw12/cairn/pull/62))
+- Home: Latest updates shows your dated notes with a first line and a picture, from the note itself or from the project it names. A run of automatic notes folds into one row ([#62](https://github.com/juw12/cairn/pull/62))
+- Home: Computers shows every computer that writes into the brain, what runs there and when it was last heard ([#62](https://github.com/juw12/cairn/pull/62))
+- Phone: recap rows no longer run into each other on Home, Board, Ideas, Decisions and Notes. Long task titles and the Autopilot tiles no longer push the page sideways on a small phone ([#62](https://github.com/juw12/cairn/pull/62))
+- Pictures in a private brain on GitHub now load on the phone when you are signed in ([#62](https://github.com/juw12/cairn/pull/62))
+
 ## Build 78 (2026-11-20): Dashboards has its own icon
 
 - Dashboards on phone: the page has its own icon (four tiles on paper) on the Home Screen, in the tab and in its bar, so it no longer looks like Cairn. The mark in the bar is no longer a link to Cairn's home. Dashboards are still set up and signed in from Cairn as before ([#60](https://github.com/juw12/cairn/pull/60))

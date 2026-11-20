@@ -30,6 +30,7 @@ import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
 import { movePanel, openPanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
+import { pickChartDay, setChartMetric, setChartRange, showNeeds, wireHome } from "./home.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
 import { initDatabases } from "./database.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
@@ -240,6 +241,7 @@ function afterRender() {
   if (state.view === "canvas") wireCanvas();
   if (state.view === "plugins") wirePlugins();
   if (state.view === "journal") wireJournal();
+  if (state.view === "home") wireHome();
   syncLogFab();
   wirePanels();
   const pluginView = $("[data-plugin-view]");
@@ -384,6 +386,13 @@ function wireGlobal() {
       "vibe-gh-move": () => moveRepo(actionEl.dataset.repo, actionEl.dataset.from, actionEl.dataset.to),
       "vibe-gh-push": () => switchPusher(actionEl.dataset.account),
       "vibe-to-list": jumpToList,
+      "home-chart-day": () => pickChartDay(actionEl.dataset.day),
+      "home-chart-range": () => setChartRange(actionEl.dataset.range) && renderView(),
+      "home-chart-metric": () => setChartMetric(actionEl.dataset.metric) && renderView(),
+      "home-needs-all": () => {
+        showNeeds();
+        setView("notes");
+      },
       "vibe-panel-fold": () => togglePanel(actionEl.dataset.panel, actionEl.dataset.page || "vibe"),
       "vibe-panel-move": () => movePanel(actionEl.dataset.panel, actionEl.dataset.step, actionEl.dataset.page || "vibe"),
       "vibe-layout-reset": () => resetLayout(actionEl.dataset.page || "vibe"),

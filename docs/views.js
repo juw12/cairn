@@ -11,25 +11,26 @@ import { bookmarks, countNotes, folderTree, searchNotes } from "./vault.js";
 import { render } from "./app.js";
 import { homeLogStrip, homeLogSummary } from "./voicelog.js";
 import { boardHtml, dashboardHtml, noteRecap } from "./vibelayout.js";
+import { homeBlocks, homeData, homeLede } from "./home.js";
+
+// Past this many notes a brain is not new any more, and a Home column shows this many rows.
+const ESTABLISHED_NOTES = 50;
+const FOCUS_ROWS = 5;
 
 // ============================================================ views
 
 export function home() {
-  const tasks = state.notes.filter((n) => n.type === "task");
-  const doing = tasks.filter((n) => n.status === "doing").sort(byRecent);
-  const done = tasks.filter((n) => n.status === "done");
-  const ideasInPlay = state.notes.filter((n) => n.type === "idea" && ["raw", "exploring", "ready"].includes(n.status));
-  const fresh = state.notes.filter((n) => n.type === "idea" && n.status === "raw").sort(byRecent).slice(0, 5);
-  const proposed = state.notes.filter((n) => n.type === "decision" && n.status === "proposed");
-  const recent = [...state.notes].sort(byRecent).slice(0, 6);
+  const data = homeData();
   const hour = new Date().getHours();
   const greeting = readOnly()
     ? `What @${esc(state.info.owner)} is working on`
     : hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
   const dateLabel = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
+  // The three first moves are for a brain that is just starting, not for one with a history.
   const g = guide();
-  const showGuide = !readOnly() && !g.dismissed && !(g.captured && g.moved && g.promoted);
+  const established = state.notes.length > ESTABLISHED_NOTES;
+  const showGuide = !readOnly() && !established && !g.dismissed && !(g.captured && g.moved && g.promoted);
   const step = (isDone, n, title, text) =>
     `<li class="guide-step ${isDone ? "done" : ""}"><span class="num">${isDone ? icon("check", "sm") : n}</span><div><strong>${title}</strong><span>${text}</span></div></li>`;
   const guideHtml = showGuide
@@ -44,39 +45,26 @@ export function home() {
       </section>`
     : "";
 
-  const todoCount = state.todos === null ? "–" : state.todos.length;
-  const figure = (view, value, label) => `<button class="figure" data-go="${view}"><span class="value">${value}</span><span class="label">${label}</span></button>`;
   const emptyBrain = state.notes.length === 0;
-  const sampleButton = emptyBrain && state.info.canLoadSample ? `<button class="btn primary" data-action="load-sample">${icon("play")} Load the sample project</button>` : "";
+  const sampleButton = emptyBrain && state.info?.canLoadSample ? `<button class="btn primary" data-action="load-sample">${icon("play")} Load the sample project</button>` : "";
   const intro = emptyBrain
     ? "An empty brain. Write the first thing on your mind in the bar above."
     : readOnly()
       ? `A read-only look at <strong>${esc(state.info.owner)}/${esc(state.info.repoName)}</strong>.`
-      : `Here's where <strong>${esc(state.info.project)}</strong> stands.`;
+      : homeLede() || `Here's where <strong>${esc(state.info.project)}</strong> stands.`;
 
+  // A column shows its first rows; the rest are one tap away on the column's own page.
   const column = (title, view, linkLabel, rows, empty) => `
     <section class="column-block">
       <header><h2>${title}</h2><button class="text-link" data-go="${view}">${linkLabel} ${icon("arrow", "sm")}</button></header>
-      ${rows.length ? `<div class="rows">${rows.join("")}</div>` : `<p class="empty">${empty}</p>`}
+      ${rows.length ? `<div class="rows">${rows.slice(0, FOCUS_ROWS).join("")}</div>` : `<p class="empty">${empty}</p>`}
+      ${rows.length > FOCUS_ROWS ? `<p class="recap-more"><button class="text-link" data-go="${view}">${rows.length - FOCUS_ROWS} more ${icon("arrow", "sm")}</button></p>` : ""}
     </section>`;
 
+  const { doing, fresh, proposed, done } = data;
   const logStrip = homeLogStrip();
-  const label = (n) => `${TYPE_META[n.type].label}${n.status ? ` · ${STATUS_LABEL[n.status] || n.status}` : ""}`;
   const blocks = {
-    dashboard: {
-      html: `<div class="figures">
-        ${figure("board", doing.length, "in progress")}
-        ${figure("ideas", ideasInPlay.length, "ideas in play")}
-        ${figure("decisions", proposed.length, "open decisions")}
-        ${figure("code", todoCount, "code TODOs")}
-      </div>`,
-      summary: `${doing.length} in progress · ${plural(ideasInPlay.length, "idea")} in play · ${plural(proposed.length, "open decision")}`,
-    },
-    recap: {
-      html: `${noteRecap(state.notes, label, "Nothing yet. Capture a thought in the bar above.")}
-        ${recent.length ? `<p class="recap-more"><button class="text-link" data-go="notes">All notes ${icon("arrow", "sm")}</button></p>` : ""}`,
-      summary: recent.length ? `last touched: ${recent[0].title}, ${relativeTime(recent[0].mtime)}` : "nothing yet",
-    },
+    ...homeBlocks(),
     log: logStrip ? { html: logStrip, summary: homeLogSummary() } : null,
     focus: {
       html: `<div class="columns-3">
@@ -100,8 +88,8 @@ export function home() {
         </div>
       </div>
       <figure class="cairn">
-        ${cairnSvg(done.length)}
-        <figcaption><strong>${done.length}</strong> ${done.length === 1 ? "stone" : "stones"}<span>one for every task finished</span></figcaption>
+        ${cairnSvg(done)}
+        <figcaption><strong>${done}</strong> ${done === 1 ? "stone" : "stones"}<span>one for every task finished</span></figcaption>
       </figure>
     </header>
     ${guideHtml}

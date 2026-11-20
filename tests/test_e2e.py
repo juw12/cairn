@@ -113,6 +113,40 @@ DEVICES_SEED = """() => {
   window.cairn.rerender();
 }"""
 
+# A brain an agent works in: five tasks that wait for the owner, a dated update with a picture, a run of three
+# automatic notes, and one note whose title is long enough to wrap on a phone.
+HOME_SEED = """() => {
+  const s = window.cairn.state;
+  const pad = (n) => String(n).padStart(2, "0");
+  const d = new Date();
+  const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const add = (path, text) => s.files.push({ path, text, mtime: Date.now() });
+  for (const n of [1, 2, 3, 4, 5]) {
+    add(`tasks/needs-${n}.md`, `---\\ntitle: Sign in to store account ${n} once so the upload can run\\ntype: task\\nstatus: todo\\ntags: [needs-me]\\ncreated: ${day}\\n---\\n\\nOnly you have the password.\\n`);
+  }
+  add(`Update Log/${day} 0905 home page shows what matters.md`, "Asked: a Home that leads with what waits for me.\\n\\n![[shots/home.png]]\\n");
+  for (const n of [1, 2, 3]) add(`Update Log/${day} 080${n} lab_writer_run_${n}.md`, `Run ${n} of the nightly writer.\\n`);
+  add("notes/long.md", "---\\ntitle: A note whose title is long enough to take three lines on a phone, the way the titles of real work notes usually are, with a path like E:/Projects/somewhere/deep\\ntype: note\\n---\\n\\nBody.\\n");
+  s.notes = s.files.map((f) => window.cairn.core.noteFromFile(f.path, f.text, f.mtime));
+  window.cairn.rerender();
+}"""
+
+# Recap rows that run into each other or out of their own row: [] when the page is laid out right.
+RECAP_COLLISIONS = """() => {
+  const bad = [];
+  const rows = [...document.querySelectorAll("#view .page-recap li")];
+  rows.forEach((row, index) => {
+    const box = row.getBoundingClientRect();
+    for (const el of row.querySelectorAll("*")) {
+      const r = el.getBoundingClientRect();
+      if (r.height && (r.bottom > box.bottom + 1 || r.top < box.top - 1 || r.right > box.right + 1)) bad.push(`${el.className || el.tagName} leaves its row: ${el.textContent.trim().slice(0, 40)}`);
+    }
+    const next = rows[index + 1];
+    if (next && next.parentElement === row.parentElement && next.getBoundingClientRect().top < box.bottom - 1) bad.push(`row runs into the next: ${row.textContent.trim().slice(0, 40)}`);
+  });
+  return bad;
+}"""
+
 # A PC to chat with: remembers what was sent instead of running a model.
 CHAT_STUB = """() => {
   const s = window.cairn.state;
@@ -2001,7 +2035,7 @@ class EndToEndTests(unittest.TestCase):
         panels = lambda name: page.eval_on_selector_all(f'.vibe-board[data-page="{name}"] .vibe-panel', "els => els.map((e) => e.dataset.panel)")
         folded = lambda name: page.eval_on_selector_all(f'.vibe-board[data-page="{name}"] .vibe-panel.folded', "els => els.map((e) => e.dataset.panel)")
         pages = {
-            "home": ["dashboard", "recap", "log", "focus"],
+            "home": ["needs", "dashboard", "chart", "recap", "log", "focus"],
             "board": ["dashboard", "recap", "cards"],
             "ideas": ["dashboard", "recap", "cards"],
             "decisions": ["dashboard", "recap", "log"],
@@ -2038,6 +2072,70 @@ class EndToEndTests(unittest.TestCase):
         page.click('[data-page="home"][data-panel="recap"] .page-recap [data-open]')
         page.wait_for_selector(".drawer")
         self.assertEqual(self.errors, [])
+
+    def test_home_leads_with_what_needs_you_and_what_runs(self):
+        page = self.open()
+        home = '.vibe-board[data-page="home"]'
+        # No agent has worked here yet: no "Working now", no "Computers", and the chart only knows the journal.
+        page.wait_for_selector(f"{home} .hc-bar")
+        self.assertEqual(page.eval_on_selector_all(".hc-opt[data-metric]", "els => els.map((e) => e.dataset.metric)"), ["entries"])
+        page.evaluate(DEVICES_SEED)
+        page.evaluate(HOME_SEED)
+        page.wait_for_selector(f'{home} [data-panel="now"]')
+        panels = page.eval_on_selector_all(f"{home} .vibe-panel", "els => els.map((e) => e.dataset.panel)")
+        self.assertEqual(panels, ["needs", "now", "dashboard", "chart", "recap", "devices", "log", "focus"])
+        lede = page.inner_text(".today .lede")
+        self.assertIn("2 sessions working on 2 computers", lede)
+        self.assertIn("5 things waiting for you", lede)
+
+        needs = f'{home} [data-panel="needs"]'
+        self.assertEqual(page.locator(f"{needs} .hr-dot.task").count(), 4, "the newest four, the rest behind one link")
+        self.assertIn("Decide", page.inner_text(needs))
+        self.assertEqual(page.locator(f'{home} [data-panel="now"] .home-row').count(), 2)
+        self.assertIn("MacBook Pro", page.inner_text(f'{home} [data-panel="now"]'))
+        self.assertEqual(page.locator(f'{home} [data-panel="dashboard"] .figure').count(), 6)
+        self.assertEqual(page.locator(f'{home} [data-panel="devices"] .home-device').count(), 2)
+
+        # Latest updates: the dated notes, the automatic run folded into one row, a picture where the note has one.
+        updates = f'{home} [data-panel="recap"]'
+        self.assertEqual(page.inner_text(f"{updates} .vp-title"), "Latest updates")
+        self.assertEqual(page.locator(f"{updates} .home-updates > li").count(), 2)
+        self.assertIn("2 more like it", page.inner_text(updates))
+        self.assertEqual(page.locator(f"{updates} li.has-thumb .recap-thumb").count(), 1)
+        # The demo brain holds no such file, so the frame steps aside instead of showing a broken picture.
+        page.wait_for_function("() => getComputedStyle(document.querySelector('.recap-thumb')).display === 'none'")
+
+        # The chart: how far back, what to count, and a day you tap.
+        self.assertEqual(page.locator(".hc-bar").count(), 30)
+        page.click('.hc-opt[data-range="14"]')
+        page.wait_for_function("() => document.querySelectorAll('.hc-bar').length === 14")
+        self.assertIn("today", page.inner_text("#home-day .hd-head"))
+        self.assertEqual(page.locator("#home-day .hd-list > li").count(), 2, "the day's updates sit under the chart")
+        page.locator(".hc-bar").nth(10).click()
+        self.assertNotIn("today", page.inner_text("#home-day .hd-head"))
+        self.assertEqual(page.locator('.hc-bar[aria-pressed="true"]').count(), 1)
+        page.click('.hc-opt[data-metric="tokens"]')
+        page.wait_for_selector('.hc-opt[data-metric="tokens"][aria-pressed="true"]')
+        self.assertIn("tokens", page.inner_text(".hc-total"))
+        self.assertEqual(page.evaluate("JSON.parse(localStorage.getItem('cairn.homeChart'))"), {"range": 14, "metric": "tokens"})
+
+        page.click('[data-action="home-needs-all"]')
+        page.wait_for_function("() => window.cairn.state.view === 'notes'")
+        self.assertEqual(page.evaluate("window.cairn.state.notesQuery"), "tag:needs-me type:task -status:done")
+        self.assertEqual(self.errors, [])
+
+    def test_recap_rows_keep_to_themselves_on_a_phone(self):
+        for width in (320, 390):
+            page = self.open(viewport=(width, 844))
+            page.evaluate(DEVICES_SEED)
+            page.evaluate(HOME_SEED)
+            for name in ("home", "board", "ideas", "decisions", "notes"):
+                with self.subTest(width=width, page=name):
+                    page.evaluate("(v) => { location.hash = `#/${v}`; }", name)  # the sidebar is a drawer at this width
+                    page.wait_for_selector(f'.vibe-board[data-page="{name}"] .page-recap li')
+                    self.assertEqual(page.evaluate(RECAP_COLLISIONS), [])
+                    self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"), 0)
+            self.assertEqual(self.errors, [])
 
     def test_block_layout_is_kept_per_page_and_tools_still_work(self):
         page = self.open()

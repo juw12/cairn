@@ -2,6 +2,20 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 79,
+      "date": "2026-11-20",
+      "title": "A Home that shows what matters",
+      "changes": [
+        "Home leads with what waits for you: sessions that stopped on an error, GitHub minutes running low, the newest tasks marked needs-me and decisions that wait for a yes or no (#62)",
+        "Home: Working now lists the running sessions with their computer, assistant, last step and tokens. The numbers are today's: working now, shipped, sessions, tokens, waiting for you, open tasks (#62)",
+        "Home: an activity chart you can tap or drag across. Sessions, shipped, tokens or journal lines per day over 14, 30 or 90 days, and under it what happened on the day you picked (#62)",
+        "Home: Latest updates shows your dated notes with a first line and a picture, from the note itself or from the project it names. A run of automatic notes folds into one row (#62)",
+        "Home: Computers shows every computer that writes into the brain, what runs there and when it was last heard (#62)",
+        "Phone: recap rows no longer run into each other on Home, Board, Ideas, Decisions and Notes. Long task titles and the Autopilot tiles no longer push the page sideways on a small phone (#62)",
+        "Pictures in a private brain on GitHub now load on the phone when you are signed in (#62)"
+      ]
+    },
+    {
       "build": 78,
       "date": "2026-11-20",
       "title": "Dashboards has its own icon",

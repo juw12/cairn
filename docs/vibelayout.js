@@ -67,8 +67,12 @@ const PAGES = {
   home: {
     label: "Today",
     panels: [
+      { id: "needs", label: "Needs you" },
+      { id: "now", label: "Working now" },
       { id: "dashboard", label: "Dashboard" },
+      { id: "chart", label: "Activity" },
       { id: "recap", label: "Recap" },
+      { id: "devices", label: "Computers" },
       { id: "log", label: "Today's log" },
       { id: "focus", label: "In focus" },
     ],
