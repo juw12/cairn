@@ -1,5 +1,5 @@
 // Network-first service worker: always fresh when online, still opens offline.
-const CACHE = "cairn-v84";
+const CACHE = "cairn-v85";
 // Offline voice models live in their own "cairn-voice-*" cache and survive app updates.
 const KEEP = (key) => key === CACHE || key.startsWith("cairn-voice");
 const SHELL = [
@@ -29,6 +29,7 @@ const SHELL = [
   "autopilot.js",
   "vibelayout.js",
   "projects.js",
+  "repo.js",
   "database.js",
   "slash.js",
   "drawer.js",

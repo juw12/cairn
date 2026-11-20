@@ -3,6 +3,17 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 85 (2026-11-20): Look inside a repo without opening GitHub
+
+- Projects: a repo’s name now opens the repo inside Cairn instead of on github.com. The Look tab shows every picture and video in it, the most telling first (banners, screenshots and demos before app icons), its folders as cards with a cover picture, and its README as GitHub draws it
+- Any folder opens the same way, so a repo that holds many projects (one folder each) can be walked project by project, each with its own pictures, videos and README
+- A picture or video opens full screen. Arrow keys, the two buttons or a swipe step through the rest, and the name under it opens the file
+- Pushes tab: the latest 30 commits that touched the repo or the folder. A commit opens to its full message, the pictures and videos it brought as they were in that commit, the files it changed and the changed lines
+- Files tab: the folder’s listing. A file opens as a picture, a video, sound, rendered Markdown or plain text, with a Download button
+- Private repos work when you are signed in as someone who can read them: their files are fetched with your sign-in and never asked of GitHub’s public file host. Videos are fetched the same way for every repo, because that host sends them as a download and a phone would not play them
+- The place is in the address (#/projects/owner/repo/tab/folder), so Back goes up one step, a reload stays put and a link can be kept. Typing owner/repo in the Projects box opens that repo. One look costs three GitHub requests, and the file list is only asked again after a new push
+- Nothing in a README can run or restyle Cairn: only known tags and attributes are kept, and its links to the web open in a new tab. Each card keeps a GitHub link for the day you do want github.com
+
 ## Build 84 (2026-11-20): Recap reads right on a phone
 
 - Recap on Board, Ideas, Decisions, Notes, Map and Autopilot: on a brain read from GitHub (the phone) every row was squeezed into the narrow time column, one word a line. A row now uses its whole width, shows the note’s own day (today, yesterday, Nov 12) and the list is in that order, newest first

@@ -32,6 +32,7 @@ import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queu
 import { movePanel, openPanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
 import { pickChartDay, setChartMetric, setChartRange, showNeeds, wireHome } from "./home.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
+import { wireRepo } from "./repo.js";
 import { initDatabases } from "./database.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
 
@@ -181,6 +182,10 @@ export function renderSidebarFoot() {
   $("#sidebar-foot").innerHTML = parts.join("");
 }
 
+// The page an address names: "#/projects/juw12/cairn/files/docs" is the Projects page; what follows the first
+// part is the page's own (there, a repo and a folder in it, see repo.js).
+const viewOfHash = () => location.hash.replace(/^#\/?/, "").split("/")[0] || "home";
+
 export function setView(view, { push = true } = {}) {
   if (!VIEWS.some((v) => v.id === view) && !isPluginView(view)) view = "home";
   if (state.view === "canvas" && view !== "canvas") flushCanvas();
@@ -242,6 +247,7 @@ function afterRender() {
   if (state.view === "plugins") wirePlugins();
   if (state.view === "journal") wireJournal();
   if (state.view === "home") wireHome();
+  if (state.view === "projects") wireRepo();
   syncLogFab();
   wirePanels();
   const pluginView = $("[data-plugin-view]");
@@ -639,7 +645,7 @@ function wireGlobal() {
     }
   });
 
-  window.addEventListener("popstate", () => setView(location.hash.replace("#/", "") || "home", { push: false }));
+  window.addEventListener("popstate", () => setView(viewOfHash(), { push: false }));
   window.addEventListener("beforeunload", () => {
     flushPending();
     flushCanvas();
@@ -694,7 +700,7 @@ export async function start(store) {
   $("#welcome").hidden = true;
   $("#app").hidden = false;
   applyInfo();
-  setView(location.hash.replace("#/", "") || "home", { push: false });
+  setView(viewOfHash(), { push: false });
   refreshTodos();
   refreshGit();
   initObsidian();

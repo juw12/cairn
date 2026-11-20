@@ -131,6 +131,13 @@ export function apiGet(path) {
   return getJson(`${API}${path}`);
 }
 
+// A read that is asked for again every time and never kept in sessionStorage: a repo's whole file list,
+// a rendered README, a commit. Returns the response, so the caller picks JSON, text or a blob.
+// `accept` picks GitHub's form of the answer, e.g. "application/vnd.github.html" or "application/vnd.github.raw".
+export function apiFresh(path, { accept = "" } = {}) {
+  return request(`${API}${path}`, { cache: "no-store", headers: accept ? { Accept: accept } : {} });
+}
+
 // One public file's text, or null if it doesn't exist (used for vouch files in other people's repos).
 export async function rawText(owner, repo, branch, path) {
   const response = await fetch(`${RAW}/${owner}/${repo}/${encodeURIComponent(branch)}/${encodePath(path)}`);
