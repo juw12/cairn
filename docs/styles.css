@@ -1491,7 +1491,10 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
   .home-log { grid-template-columns: 1fr; }
   .home-log-actions { justify-content: flex-start; }
 }
-.memory-card .tags .tag { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-card .tags .tag { max-width: 100%; min-width: 0; overflow: hidden; white-space: nowrap; }
+/* The chip is a flex row, so the dots belong on the name inside it; the count keeps its place. */
+.memory-card .tags .tag-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.memory-card .tags .tag > .muted { flex: none; }
 
 /* vibe: live sessions, stats and feedback */
 .small { font-size: 12.5px; }
@@ -1772,6 +1775,10 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .ap-q { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
 .ap-q-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; text-decoration: none; }
 .ap-q-title:hover { text-decoration: underline; }
+@media (max-width: 700px) {
+  .ap-q { align-items: flex-start; }
+  .ap-q-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+}
 .ap-q.needs-me .ap-q-title { color: var(--muted); }
 .ap-q-flags { display: flex; gap: 6px; align-items: center; flex: none; }
 .ap-q-flags .chip { height: 22px; font-size: 12px; }
@@ -2383,6 +2390,8 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .page-recap li { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: start; padding: 5px 0; font-size: 13.5px; line-height: 1.45; }
 .page-recap .t { font-family: var(--mono); font-size: 11.5px; line-height: 19.6px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .page-recap .txt { display: block; min-width: 0; overflow-wrap: anywhere; color: var(--ink-2); }
+/* A row with no time has no first column to fill: its text starts at the left edge, a picture stays in the last column. */
+.page-recap li > .txt:first-child { grid-column: 1 / span 2; }
 .page-recap .txt strong, .page-recap .txt .link-button { color: var(--ink); }
 .page-recap .txt .link-button { display: inline; max-width: 100%; font: inherit; font-weight: 600; line-height: inherit; white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 .page-recap-empty { margin: 0; }

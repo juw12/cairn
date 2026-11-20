@@ -197,8 +197,47 @@ export function pageHead(title, sub, actions = "", eyebrow = "") {
   return `<div class="page-head"><div>${eyebrow ? `<p class="eyebrow">${eyebrow}</p>` : ""}<h1>${title}</h1>${sub ? `<p>${sub}</p>` : ""}</div><div class="actions">${actions}</div></div>`;
 }
 
+// When a note last changed. A brain read from GitHub carries no file times, so the note's own dates
+// stand in: the newest of its front matter dates and the date its file name starts with.
+const STAMP_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]+(\d{2}):?(\d{2}))?/;
+const ownStamps = new WeakMap();
+
+function ownStamp(note) {
+  if (ownStamps.has(note)) return ownStamps.get(note);
+  const meta = note.meta || {};
+  const now = Date.now();
+  let best = { ms: 0, day: "" };
+  for (const raw of [meta.updated, meta.ended, meta.started, meta.created, meta.date, note.slug]) {
+    const m = STAMP_RE.exec(typeof raw === "string" ? raw.trim() : "");
+    if (!m) continue;
+    let ms = new Date(+m[1], m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)).getTime();
+    // A time still to come was written by another clock: keep the day. A day still to come is a plan, not a change.
+    if (ms > now) ms = new Date(+m[1], m[2] - 1, +m[3]).getTime();
+    if (ms > best.ms && ms <= now) best = { ms, day: `${m[1]}-${m[2]}-${m[3]}` };
+  }
+  ownStamps.set(note, best);
+  return best;
+}
+
+export function noteStamp(note) {
+  return note.mtime || ownStamp(note).ms;
+}
+
+// "3h ago" from the file time; without one the note's own day: "today", "yesterday", "Nov 12".
+export function noteWhen(note) {
+  if (note.mtime) return relativeTime(note.mtime);
+  const { day } = ownStamp(note);
+  if (!day) return "";
+  const now = new Date();
+  const [y, m, d] = day.split("-").map(Number);
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(y, m - 1, d)) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", y === now.getFullYear() ? { month: "short", day: "numeric" } : { month: "short", year: "numeric" });
+}
+
 export function byRecent(a, b) {
-  return (b.mtime || 0) - (a.mtime || 0);
+  return noteStamp(b) - noteStamp(a);
 }
 
 // ============================================================ modal, toast, palette

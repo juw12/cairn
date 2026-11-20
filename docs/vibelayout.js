@@ -5,7 +5,7 @@
 // copy in localStorage covers a read-only brain.
 
 import { escapeHtml as esc } from "./md.js";
-import { $, $$, icon, relativeTime } from "./ui.js";
+import { $, $$, icon, noteStamp, noteWhen } from "./ui.js";
 import { fileByPath, readOnly, state, upsertFile } from "./state.js";
 import { renderView } from "./app.js";
 
@@ -430,13 +430,16 @@ export function recapHtml(rows, empty) {
 }
 
 // Recap rows for notes, newest change first: `describe(note)` is the text after the note's name.
+const RECAP_TITLE = 110; // about three lines on a phone; some titles are a whole paragraph
 export function noteRecap(notes, describe, empty, limit = 6) {
   const rows = [...notes]
-    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+    .sort((a, b) => noteStamp(b) - noteStamp(a))
     .slice(0, limit)
     .map((note) => {
       const detail = describe ? describe(note) : "";
-      return { when: relativeTime(note.mtime), html: `<button class="link-button" data-open="${esc(note.path)}">${esc(note.title)}</button>${detail ? ` <span class="muted">· ${esc(detail)}</span>` : ""}` };
+      const long = note.title.length > RECAP_TITLE;
+      const title = long ? `${note.title.slice(0, RECAP_TITLE - 1).trimEnd()}…` : note.title;
+      return { when: noteWhen(note), html: `<button class="link-button" data-open="${esc(note.path)}"${long ? ` title="${esc(note.title)}"` : ""}>${esc(title)}</button>${detail ? ` <span class="muted">· ${esc(detail)}</span>` : ""}` };
     });
   return recapHtml(rows, empty);
 }

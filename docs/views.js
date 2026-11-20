@@ -323,10 +323,12 @@ export function sourceKey(item) {
 }
 
 export function codeView() {
-  const refresh = `<button class="btn" data-action="refresh-todos">${icon("refresh")} Rescan</button>`;
+  const canScan = Boolean(state.info?.canScan);
+  const refresh = canScan ? `<button class="btn" data-action="refresh-todos">${icon("refresh")} Rescan</button>` : "";
   const head = pageHead("Code inbox", "TODO, FIXME and HACK comments found in the code around your brain. Turn the ones that matter into tasks; each task remembers its file and line.", refresh);
   const todos = state.todos || [];
-  const fromCode = state.notes.filter((n) => typeof n.meta.source === "string" && n.meta.source);
+  // `source` is also where a synced note came from (github-sync, opencode); a task made here points at file:line.
+  const fromCode = state.notes.filter((n) => n.type === "task" && typeof n.meta.source === "string" && /:\d+$/.test(n.meta.source));
   const tracked = new Set(fromCode.map((n) => n.meta.source));
   const groups = new Map();
   for (const item of todos) {
@@ -334,7 +336,9 @@ export function codeView() {
     groups.get(item.path).push(item);
   }
   let inbox;
-  if (state.todos === null) inbox = `<div class="card">${emptyState("code", "Scanning your code…", "Looking for TODO, FIXME and HACK comments.")}</div>`;
+  // A brain read from GitHub holds notes, not the code around them, so there is nothing to wait for.
+  if (!canScan) inbox = `<div class="card">${emptyState("code", "No code to scan here", "This brain holds your notes only. Open Cairn in the project folder on your computer to see its TODO, FIXME and HACK comments.")}</div>`;
+  else if (state.todos === null) inbox = `<div class="card">${emptyState("code", "Scanning your code…", "Looking for TODO, FIXME and HACK comments.")}</div>`;
   else if (state.todosError) inbox = `<div class="card">${emptyState("code", "Couldn’t scan the code", esc(state.todosError))}</div>`;
   else if (!todos.length) inbox = `<div class="card">${emptyState("check", "Inbox zero", state.info.emptyScanHint || "No TODO, FIXME or HACK comments found. Nice and tidy.")}</div>`;
   else {
@@ -366,7 +370,7 @@ export function codeView() {
     { value: scanned ? todos.length - trackedCount : "–", label: "not tracked yet" },
   ];
   const blocks = {
-    dashboard: { html: dashboardHtml(tiles), summary: scanned ? `${plural(todos.length, "comment")} · ${trackedCount} tracked` : "scanning…" },
+    dashboard: { html: dashboardHtml(tiles), summary: scanned ? `${plural(todos.length, "comment")} · ${trackedCount} tracked` : canScan ? "scanning…" : "no code on this device" },
     recap: {
       html: noteRecap(fromCode, (n) => `${STATUS_LABEL[n.status] || n.status} · from ${n.meta.source}`, "No tasks made from code comments yet."),
       summary: fromCode.length ? `${plural(fromCode.length, "task")} made from code` : "no tasks from code yet",

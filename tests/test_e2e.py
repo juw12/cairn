@@ -149,6 +149,23 @@ RECAP_COLLISIONS = """() => {
   return bad;
 }"""
 
+# A brain read from GitHub: no file has a time, so only a note's own dates say when it changed.
+NO_FILE_TIMES_SEED = """() => {
+  const s = window.cairn.state;
+  const pad = (n) => String(n).padStart(2, "0");
+  const dayAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  s.files = [
+    { path: "tasks/aa-undated.md", text: "---\\ntitle: A task with no date anywhere, with a name long enough to need the whole row on a phone and then some\\ntype: task\\nstatus: todo\\n---\\n", mtime: 0 },
+    { path: "tasks/bb-yesterday.md", text: `---\\ntitle: Asked yesterday\\ntype: task\\nstatus: todo\\ncreated: ${dayAgo(1)}\\n---\\n`, mtime: 0 },
+    { path: `tasks/${dayAgo(0)} 0001 named for today.md`, text: "---\\ntype: task\\nstatus: todo\\n---\\nBody.\\n", mtime: 0 },
+    { path: "notes/repo.md", text: "---\\ntitle: A repository note\\ntype: note\\nsource: github-sync\\n---\\n", mtime: 0 },
+    { path: "tasks/from-code.md", text: `---\\ntitle: Handle the empty file\\ntype: task\\nstatus: todo\\nsource: src/app.py:12\\ncreated: ${dayAgo(3)}\\n---\\n`, mtime: 0 },
+    { path: `journal/${dayAgo(0)}.md`, text: "- 09:00 Read [[A note whose name is far longer than a phone is wide so the chip has to shorten it somewhere]] with @sam #beta\\n", mtime: 0 },
+  ];
+  s.notes = s.files.map((f) => window.cairn.core.noteFromFile(f.path, f.text, f.mtime));
+  window.cairn.rerender();
+}"""
+
 # A PC to chat with: remembers what was sent instead of running a model.
 CHAT_STUB = """() => {
   const s = window.cairn.state;
@@ -2213,6 +2230,77 @@ class EndToEndTests(unittest.TestCase):
                     self.assertEqual(page.evaluate(RECAP_COLLISIONS), [])
                     self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"), 0)
             self.assertEqual(self.errors, [])
+
+    def test_recap_without_file_times_uses_the_row_and_the_notes_own_date(self):
+        # Seen on the phone: every Recap row was folded into the 84px time column, one word a line,
+        # because a brain read from GitHub has no file times and the row had no time to show.
+        page = self.open(viewport=(390, 844))
+        page.evaluate(NO_FILE_TIMES_SEED)
+        page.evaluate("() => { location.hash = '#/board'; }")
+        page.wait_for_selector('.vibe-board[data-page="board"] .page-recap li')
+        rows = page.evaluate(
+            """() => [...document.querySelectorAll('.vibe-board[data-page="board"] .page-recap li')].map((li) => ({
+              when: li.querySelector(".t")?.textContent || "",
+              title: li.querySelector("[data-open]").textContent,
+              share: li.querySelector(".txt").getBoundingClientRect().width / li.getBoundingClientRect().width,
+            }))"""
+        )
+        self.assertEqual([row["when"] for row in rows], ["today", "yesterday", rows[2]["when"], ""])
+        self.assertIn("named for today", rows[0]["title"])
+        self.assertEqual(rows[1]["title"], "Asked yesterday")
+        self.assertEqual(rows[2]["title"], "Handle the empty file")
+        self.assertRegex(rows[2]["when"], r"^[A-Z][a-z]{2} \d{1,4}$")
+        self.assertGreater(rows[3]["share"], 0.95, "a row with no time takes the whole row")
+        self.assertEqual(page.evaluate(RECAP_COLLISIONS), [])
+
+        # Code inbox: a note that only says where it was synced from is not a task made from code.
+        page.evaluate("() => { location.hash = '#/code'; }")
+        page.wait_for_selector('.vibe-board[data-page="code"] .page-recap li')
+        self.assertEqual(page.locator('.vibe-board[data-page="code"] .page-recap li').count(), 1)
+        self.assertIn("Handle the empty file", page.inner_text('.vibe-board[data-page="code"] .page-recap'))
+        # A brain with no code beside it (read from GitHub) says so; it used to say "Scanning your code…" for ever.
+        page.evaluate("() => { const s = window.cairn.state; s.info.canScan = false; s.todos = null; window.cairn.rerender(); }")
+        self.assertIn("No code to scan here", page.inner_text("#view"))
+        self.assertNotIn("Scanning", page.inner_text("#view"))
+        self.assertEqual(page.locator('[data-action="refresh-todos"]').count(), 0)
+
+        # A file named by a clock that runs ahead still counts as today, a planned day is not a change,
+        # and a title that is a whole paragraph is shortened in the row.
+        found = page.evaluate(
+            """async () => {
+              const ui = await import("./ui.js");
+              const layout = await import("./vibelayout.js");
+              const note = (slug, meta = {}, mtime = 0) => ({ path: `notes/${slug}.md`, slug, title: slug, meta, mtime });
+              const ahead = note(`${ui.today()} 2359 named by a clock that runs ahead`);
+              const morning = note(`${ui.today()} 0000 written at midnight`, { updated: `${ui.today()} 00:00` });
+              const row = document.createElement("div");
+              row.innerHTML = layout.noteRecap([{ ...note("long"), title: "word ".repeat(60).trim() }], null, "");
+              return {
+                ahead: ui.noteWhen(ahead),
+                plan: ui.noteWhen(note("plan", { date: "2999-01-01" })),
+                aheadNotAfterNow: ui.noteStamp(ahead) <= Date.now(),
+                last: [note("old file time", {}, 5), ahead, morning].sort(ui.byRecent)[2].slug,
+                shown: row.querySelector("[data-open]").textContent.length,
+                full: row.querySelector("[data-open]").title.length,
+              };
+            }"""
+        )
+        self.assertEqual(found, {"ahead": "today", "plan": "", "aheadNotAfterNow": True, "last": "old file time", "shown": 110, "full": 299})
+
+        # Journal: a link chip wider than the card shortens its name with dots and keeps its count.
+        page.evaluate("() => { location.hash = '#/journal'; }")
+        page.wait_for_selector(".memory-card .tags .tag-label")
+        chip = page.evaluate(
+            """() => {
+              const label = [...document.querySelectorAll(".memory-card .tags .tag-label")].find((el) => el.textContent.startsWith("A note whose name"));
+              const box = label.parentElement.getBoundingClientRect();
+              const count = label.nextElementSibling.getBoundingClientRect();
+              const card = label.closest(".memory-card").getBoundingClientRect();
+              return { cut: label.scrollWidth > label.clientWidth, dots: getComputedStyle(label).textOverflow, inCard: box.right <= card.right + 1, countShown: count.width > 0 && count.right <= box.right + 1 };
+            }"""
+        )
+        self.assertEqual(chip, {"cut": True, "dots": "ellipsis", "inCard": True, "countShown": True})
+        self.assertEqual(self.errors, [])
 
     def test_block_layout_is_kept_per_page_and_tools_still_work(self):
         page = self.open()
