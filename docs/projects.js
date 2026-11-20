@@ -14,6 +14,7 @@ import { $, icon, pageHead, plural, relativeTime, toast } from "./ui.js";
 import { REPO_URL, createNote, readOnly, saveNote, state } from "./state.js";
 import { renderView } from "./app.js";
 import { boardHtml, dashboardHtml, recapHtml } from "./vibelayout.js";
+import { openRepo, parseRepoHash, repoHash, repoView } from "./repo.js";
 
 const DAY = 86400000;
 const STALE_MS = 15 * 60 * 1000;
@@ -470,6 +471,9 @@ function move(delta) {
     : `<span class="proj-move down" title="Down ${-delta} since yesterday">▼${-delta}</span>`;
 }
 
+// A repo's own page inside Cairn (repo.js): its pictures, videos, README, pushes and files.
+const repoPage = (repo) => repoHash({ owner: repo.owner?.login || repo.full_name.split("/")[0], name: repo.name });
+
 function card(project) {
   const { repo, score, rank, self } = project;
   const demo = String(repo.homepage || "").trim() || (repo.has_pages ? `https://${repo.owner?.login}.github.io/${repo.name}/` : "");
@@ -479,13 +483,14 @@ function card(project) {
     `<span>pushed ${esc(relativeTime(Date.parse(repo.pushed_at || "")))}</span>`,
     repo.private ? `<span>${icon("lock", "sm")} private</span>` : "",
     demo ? `<a href="${esc(demo)}" target="_blank" rel="noopener">${icon("external", "sm")} demo</a>` : "",
+    `<a href="${esc(repo.html_url)}" target="_blank" rel="noopener" title="Open on github.com">${icon("github", "sm")} GitHub</a>`,
   ].filter(Boolean).join("");
   return `
     <li class="proj-card${self ? " self" : ""}${rank <= 3 ? " podium" : ""}" data-project="${esc(repo.full_name)}">
       <div class="proj-rank"><span>${rank}</span>${move(view.moves[repo.full_name])}</div>
       <div class="proj-main">
         <div class="proj-title">
-          <a href="${esc(repo.html_url)}" target="_blank" rel="noopener">${esc(repo.name)}</a>
+          <a href="${esc(repoPage(repo))}" data-repo-go title="Look inside: pictures, videos, README, pushes and files">${esc(repo.name)}</a>
           <span class="pill proj-tier tier-${score.tier.toLowerCase()}" title="${esc(TIER_HINT[score.tier] || "")}">${score.tier}</span>
           ${self ? `<span class="pill proj-self">this app</span>` : ""}
         </div>
@@ -528,7 +533,7 @@ function projectsRecap(list) {
     .filter((p) => Date.now() - Date.parse(p.repo.pushed_at || "") < WEEK)
     .sort((a, b) => Date.parse(b.repo.pushed_at) - Date.parse(a.repo.pushed_at))
     .slice(0, 4)
-    .map((p) => ({ when: relativeTime(Date.parse(p.repo.pushed_at)), html: `pushed to <strong>${esc(p.repo.name)}</strong> (#${p.rank}, ${p.score.tier})` }));
+    .map((p) => ({ when: relativeTime(Date.parse(p.repo.pushed_at)), html: `pushed to <a href="${esc(repoPage(p.repo))}" data-repo-go><strong>${esc(p.repo.name)}</strong></a> (#${p.rank}, ${p.score.tier})` }));
   return `${lead}${recapHtml([...moved, ...pushed], list.length ? "No rank moves since yesterday and nothing pushed this week." : "Nothing ranked yet.")}`;
 }
 
@@ -548,6 +553,9 @@ function projectsDashboard(list) {
 }
 
 export function projectsView() {
+  // An address that names a repo (#/projects/juw12/cairn/…) shows that repo's page instead of the ranking.
+  const repo = parseRepoHash(location.hash);
+  if (repo) return repoView(repo);
   if (!view.owner) view.owner = defaultOwner();
   ensureFresh();
   const sort = local.get(SORT_KEY, "overall");
@@ -569,7 +577,7 @@ export function projectsView() {
   const toolbar = `
     <form class="proj-toolbar" id="projects-form" autocomplete="off">
       <label class="sr-only" for="projects-owner">GitHub user or organisation</label>
-      <input class="input" id="projects-owner" name="owner" value="${esc(view.owner)}" placeholder="GitHub user, e.g. juw12">
+      <input class="input" id="projects-owner" name="owner" value="${esc(view.owner)}" placeholder="GitHub user, e.g. juw12" title="A GitHub user ranks their repos. user/repo opens that one repo.">
       <button class="btn sm" type="submit">Rank</button>
       <div class="segmented" role="group" aria-label="Order by">${sortButton("overall", "Overall")}${sortButton("solid", "Most solid")}${sortButton("potential", "Most potential")}</div>
       <label class="proj-auto"><input type="checkbox" data-projects-auto ${autoNote ? "checked" : ""} ${readOnly() ? "disabled" : ""}> Keep a ranking note in the brain</label>
@@ -619,6 +627,8 @@ export async function projectsAction(action, target) {
 export function submitProjectsOwner(form) {
   const parsed = gh.parseGithubInput(form.owner.value);
   if (!parsed) return toast("Type a GitHub user or organisation, like juw12.");
+  // "juw12/cairn" (or a pasted github.com link to a repo) opens that repo's page.
+  if (parsed.repo) return openRepo(parsed.owner, parsed.repo);
   local.set(OWNER_KEY, parsed.owner);
   view.repos = null;
   view.moves = {};
