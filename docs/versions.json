@@ -2,6 +2,16 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 83,
+      "date": "2026-11-20",
+      "title": "Built-in plugins set themselves up on every device",
+      "changes": [
+        "Plugins: a plugin that comes with Cairn now installs itself on each of your devices when the brain's plugin list names it, so one list sets up your computer, laptop and phone. Before, every device had to be asked (#68)",
+        "This happens only in a brain you can edit, and never on a device where you turned plugins off. A plugin from outside Cairn still asks before it installs (#68)",
+        "The plugin list is found whether its folder is cairn or Cairn, as a vault kept on Windows or macOS may name it (#68)"
+      ]
+    },
+    {
       "build": 82,
       "date": "2026-11-20",
       "title": "Pocket meter plugin",

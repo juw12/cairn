@@ -42,16 +42,22 @@ through `cairn` is removed automatically when it is turned off, so most plugins 
 ## Safety model
 
 * Community plugins are **off** until you turn them on, and every install from outside the built-in
-  list asks for confirmation.
+  list asks for confirmation. One exception: a built-in plugin named in your own brain's plugin list
+  installs itself (see below).
 * A plugin runs with the same access as Cairn itself: your notes and, when you're signed in, your
   GitHub session. Only install plugins you trust.
 * Plugin **code** is stored **on the device** (in the browser or desktop app), never in the brain. A shared
   brain can't push code onto a teammate's machine.
 * The **list** of plugins can travel with the brain: *Save list to this brain* on the Plugins page writes
   `brain/cairn/plugins.md`, a note whose front matter names where each plugin comes from
-  (`plugins: [plugins/calendar.js, you/word-goal]`). Other devices show the list and offer to install it,
-  with the same confirmation as any install. Once the note exists, installing or removing a plugin keeps it
-  up to date.
+  (`plugins: [plugins/calendar.js, you/word-goal]`). Once the note exists, installing or removing a plugin
+  keeps it up to date.
+* **Built-in plugins on that list install themselves** on every device that opens the brain, so one list sets
+  up all your devices. They are Cairn's own code, already on the device, so the list brings nothing new onto
+  it. This happens only in a brain you can edit (never one you are only reading), and never on a device where
+  you turned plugins off. Anyone who can edit the brain can add a built-in plugin to the list this way.
+* Plugins on the list **from outside Cairn** (a GitHub repo or a link) are shown on the Plugins page with an
+  offer to install them, with the same confirmation as any install.
 * A plugin that throws while running (a command, view, code block, event or settings handler) is flagged on
   its row with the error and a **Restart** button; the rest of Cairn keeps working.
 

@@ -581,6 +581,52 @@ class WorkspaceTests(unittest.TestCase):
         self.assertLessEqual(page.evaluate("() => document.documentElement.scrollWidth"), 390, "fits a phone")
         self.assertEqual(self.errors, [])
 
+    def test_built_in_plugins_on_the_brains_list_install_themselves(self):
+        page = self.open()
+        self.assertEqual(page.locator('#nav [data-go^="plugin:"]').count(), 0)
+        # The brain's list, in a folder named the way a vault on Windows may hold it ("Cairn/"), names one
+        # plugin that comes with Cairn and one from outside.
+        page.evaluate("""async () => {
+            const { state, upsertFile } = await import('./state.js');
+            const text = '---\\ntitle: Cairn plugins\\ntype: note\\nplugins: [plugins/pocket-meter.js, https://example.com/outside.js]\\n---\\n';
+            const { mtime } = await state.store.write('Cairn/plugins.md', text, null);
+            upsertFile('Cairn/plugins.md', text, mtime);
+        }""")
+        # This device never touched plugins. Opening the brain again brings the built-in one, with no click.
+        page.reload()
+        page.wait_for_selector('#nav [data-go="plugin:pocket-meter:meter"]')
+        installed = "() => Object.keys(JSON.parse(localStorage.getItem('cairn.plugins.v1')).installed)"
+        self.assertEqual(page.evaluate(installed), ["pocket-meter"], "a plugin from outside Cairn never installs on its own")
+        go_to(page, "plugins")
+        self.assertIn("https://example.com/outside.js", page.inner_text(".plugin-brain-missing"))
+        self.assertIn("brain/Cairn/plugins.md", page.inner_text(".plugin-brain"))
+        # Updating the list writes that same note: no second "cairn/" folder beside "Cairn/".
+        page.click("[data-plugins-save-list]")
+        page.wait_for_function("() => window.cairn.state.notes.find((n) => n.path === 'Cairn/plugins.md').meta.plugins.length === 1")
+        lists = page.evaluate("() => window.cairn.state.files.filter((f) => f.path.toLowerCase() === 'cairn/plugins.md').map((f) => f.path)")
+        self.assertEqual(lists, ["Cairn/plugins.md"])
+        # Plugins turned off by hand on this device stay off: the brain's list does not turn them back on.
+        page.click('[data-plugins-toggle="off"]')
+        page.wait_for_selector('[data-plugins-toggle="on"]')
+        page.evaluate("() => localStorage.setItem('cairn.plugins.v1', JSON.stringify({ enabled: false, installed: {} }))")
+        page.reload()
+        page.wait_for_selector("#nav button")
+        page.wait_for_timeout(800)
+        self.assertEqual(page.locator('#nav [data-go^="plugin:"]').count(), 0)
+        self.assertEqual(page.evaluate(installed), [])
+        # A brain you are only reading installs nothing; the same brain, once it is yours to edit, does.
+        names = page.evaluate("""async () => {
+            const { state } = await import('./state.js');
+            const plugins = await import('./plugins.js');
+            localStorage.removeItem('cairn.plugins.v1');
+            state.info.readOnly = true;
+            const reading = await plugins.installBuiltInsFromBrain();
+            state.info.readOnly = false;
+            return [reading, await plugins.installBuiltInsFromBrain()];
+        }""")
+        self.assertEqual(names, [[], ["Pocket meter"]])
+        self.assertEqual(self.errors, [])
+
     def test_plugin_settings_problems_and_the_brains_plugin_list(self):
         page = self.open()
         go_to(page, "plugins")

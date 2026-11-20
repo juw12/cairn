@@ -10,6 +10,8 @@
 // The full API is documented in PLUGINS.md. Plugins are installed per device (in this browser or
 // desktop app), never through a shared brain, so nobody can put code on your machine by editing
 // notes. They are off until you turn community plugins on, like Obsidian's restricted mode.
+// One exception: the plugins that come with Cairn install themselves when your own brain's plugin
+// list names them (see installBuiltInsFromBrain). They are Cairn's code, already on the device.
 
 import * as core from "./core.js";
 import { escapeHtml as esc } from "./md.js";
@@ -347,6 +349,8 @@ function deactivate(id) {
 export async function initPlugins() {
   for (const id of [...active.keys()]) deactivate(id);
   startObserver();
+  // Not awaited: the app must open at once, also offline, when the plugin files can't be fetched.
+  installBuiltInsFromBrain().catch((error) => console.error("[plugins] couldn't install from the brain's list", error));
   const store = loadStore();
   if (!store.enabled) return;
   for (const entry of Object.values(store.installed)) {
@@ -522,12 +526,16 @@ export async function restartPlugin(id) {
 // ============================================================ the plugin list that travels with the brain
 // Brains hold only notes and canvases, so the list is a note: brain/cairn/plugins.md, with the source of
 // each plugin in its front matter. Other devices see it on the Plugins page and can install the list in
-// one step; nothing is installed or run without asking, because anyone who can edit the brain can edit it.
+// one step. Nothing from outside Cairn is installed or run without asking, because anyone who can edit the
+// brain can edit the list.
+
+// A vault kept on Windows or macOS may hold the folder as "Cairn/": it is the same list.
+const listNote = () => noteByPath(PLUGIN_LIST_PATH) || state.notes.find((n) => n.path.toLowerCase() === PLUGIN_LIST_PATH) || null;
 
 const specOf = (entry) => entry.spec || /\((plugins\/[\w-]+\.js)\)$/.exec(entry.source || "")?.[1] || entry.source;
 
 export function brainPluginList() {
-  const note = noteByPath(PLUGIN_LIST_PATH);
+  const note = listNote();
   const list = Array.isArray(note?.meta?.plugins) ? note.meta.plugins : [];
   return [...new Set(list.map((item) => String(item).trim()).filter((item) => pluginSource(item)))];
 }
@@ -539,11 +547,11 @@ function installedSpecs() {
 export async function saveBrainList({ quiet = false } = {}) {
   if (readOnly()) throw new Error("This brain is read-only.");
   const specs = installedSpecs();
-  const existing = noteByPath(PLUGIN_LIST_PATH);
+  const existing = listNote();
   if (existing) {
-    await saveNote(PLUGIN_LIST_PATH, { properties: { plugins: specs } });
+    await saveNote(existing.path, { properties: { plugins: specs } });
   } else {
-    const body = "The community plugins this brain uses. Cairn lists them on the Plugins page of every device that opens this brain and offers to install them; nothing is installed or run without asking.\n\nEdit the list on the Plugins page (Save list to this brain), or here.\n";
+    const body = "The plugins this brain uses. The ones that come with Cairn install themselves on every device of yours that opens this brain. Cairn offers to install the others; nothing from outside is installed or run without asking.\n\nEdit the list on the Plugins page (Save list to this brain), or here.\n";
     const text = core.serializeNote({ title: "Cairn plugins", type: "note", tags: [], plugins: specs }, body);
     const { mtime } = await state.store.write(PLUGIN_LIST_PATH, text, null);
     upsertFile(PLUGIN_LIST_PATH, text, mtime);
@@ -555,7 +563,7 @@ export async function saveBrainList({ quiet = false } = {}) {
 
 // Once a brain has a plugin list, installing or removing a plugin keeps it up to date.
 function syncBrainList() {
-  if (!noteByPath(PLUGIN_LIST_PATH) || readOnly()) return;
+  if (!listNote() || readOnly()) return;
   const saved = brainPluginList();
   const now = installedSpecs();
   if (saved.length === now.length && saved.every((s) => now.includes(s))) return;
@@ -565,6 +573,40 @@ function syncBrainList() {
 export function missingFromBrainList() {
   const have = new Set(installedSpecs());
   return brainPluginList().filter((spec) => !have.has(spec));
+}
+
+// The plugins that come with Cairn install themselves when the brain's list names them, so one list sets up
+// every device. They are Cairn's own code, so the list brings nothing new onto the device. Three limits:
+// only in a brain you can edit (never a brain you are only reading), never on a device where plugins were
+// turned off by hand, and a plugin from outside Cairn still waits for a yes.
+let installingFromBrain = false;
+const triedFromBrain = new Set(); // one try per plugin per session: offline must not mean a retry on every start
+
+export async function installBuiltInsFromBrain() {
+  if (installingFromBrain || readOnly()) return [];
+  const turnedOff = localStorage.getItem(STORE_KEY) !== null && !loadStore().enabled;
+  if (turnedOff) return [];
+  const wanted = missingFromBrainList().filter((spec) => spec.startsWith("plugins/") && !triedFromBrain.has(spec));
+  if (!wanted.length) return [];
+  installingFromBrain = true;
+  const names = [];
+  try {
+    for (const spec of wanted) {
+      triedFromBrain.add(spec);
+      try {
+        names.push((await installPlugin(spec, { quiet: true })).name);
+      } catch (error) {
+        console.error(`[plugins] couldn't install ${spec} from the brain's list`, error);
+      }
+    }
+  } finally {
+    installingFromBrain = false;
+  }
+  if (names.length) {
+    toast(`Installed from this brain's plugin list: ${names.join(", ")}.`);
+    if (state.view === "plugins") renderView();
+  }
+  return names;
 }
 
 async function installBrainList() {
@@ -670,8 +712,8 @@ export function pluginsView() {
     : emptyState("puzzle", "No plugins installed", "Pick one from the list below, or install one from GitHub.");
   const problems = pluginProblems().length;
   const missing = missingFromBrainList();
-  const listNote = noteByPath(PLUGIN_LIST_PATH);
-  const inSync = listNote && !missing.length && installed.every((entry) => listed.includes(specOf(entry)));
+  const brainNote = listNote();
+  const inSync = brainNote && !missing.length && installed.every((entry) => listed.includes(specOf(entry)));
   const brainSection = `
     <section class="plugin-section plugin-brain">
       <h2>Plugins in this brain</h2>
@@ -679,10 +721,10 @@ export function pluginsView() {
         ? `<div class="plugin-brain-missing"><p>${icon("note", "sm")} This brain uses ${missing.length} plugin${missing.length === 1 ? "" : "s"} that ${missing.length === 1 ? "isn't" : "aren't"} on this device: ${missing.map((s) => `<code>${esc(s)}</code>`).join(", ")}.</p>
             <button class="btn primary sm" data-plugins-install-list>Install ${missing.length === 1 ? "it" : "them"}</button></div>`
         : ""}
-      <p class="muted">${listNote
-        ? `The list is kept in <a href="#" data-open="${esc(PLUGIN_LIST_PATH)}">brain/${esc(PLUGIN_LIST_PATH)}</a>${inSync ? " and matches this device." : "."} It names where each plugin comes from, never its code, and other devices ask before installing.`
+      <p class="muted">${brainNote
+        ? `The list is kept in <a href="#" data-open="${esc(brainNote.path)}">brain/${esc(brainNote.path)}</a>${inSync ? " and matches this device." : "."} It names where each plugin comes from, never its code. Plugins that come with Cairn install themselves on your other devices; the others ask first.`
         : "Save the list of plugins you use into this brain, so your other devices (and anyone you share the brain with) can install the same ones. Only where each plugin comes from is saved, never its code."}</p>
-      ${readOnly() ? "" : `<button class="btn sm" data-plugins-save-list ${inSync ? "disabled" : ""}>${icon("save", "sm")} ${listNote ? "Update the list in this brain" : "Save list to this brain"}</button>`}
+      ${readOnly() ? "" : `<button class="btn sm" data-plugins-save-list ${inSync ? "disabled" : ""}>${icon("save", "sm")} ${brainNote ? "Update the list in this brain" : "Save list to this brain"}</button>`}
     </section>`;
   return `${head}${intro}
     <section class="plugin-section"><h2>Installed${problems ? ` <span class="plugin-problems">${problems} with a problem</span>` : ""}</h2>${rows}</section>
