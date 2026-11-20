@@ -263,7 +263,8 @@ def _vibe_watch(brain: Brain, args) -> int:
         "laptop": not args.no_laptop,
         "github": not args.no_github,
         "github_accounts": tuple(args.github_account or ()),
-        "repo_copy": not args.no_github and not args.once,
+        # Not tied to --no-github: every computer writes only its own note in github-usage/copy/.
+        "repo_copy": not args.no_copy and not args.once,
     }
     if args.vector_process:
         options["vector_names"] = tuple(args.vector_process)
@@ -274,6 +275,7 @@ def _vibe_watch(brain: Brain, args) -> int:
         extra += ["--no-vector"] if args.no_vector else []
         extra += ["--no-laptop"] if args.no_laptop else []
         extra += ["--no-github"] if args.no_github else []
+        extra += ["--no-copy"] if args.no_copy else []
         extra += [f"--github-account={name}" for name in args.github_account or []]
         extra += ["--last-reply"] if args.last_reply else []
         extra += [f"--vector-process={name}" for name in args.vector_process or []]
@@ -892,6 +894,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--no-vector", action="store_true", help="watch: skip Vector detection")
     vibe_parser.add_argument("--no-laptop", action="store_true", help="watch: do not note this computer's load in machines/")
     vibe_parser.add_argument("--no-github", action="store_true", help="watch: do not note the month's GitHub Actions minutes in github-usage/")
+    vibe_parser.add_argument("--no-copy", action="store_true", help="watch: do not keep this computer's copy of your repos up to date (see github copy)")
     vibe_parser.add_argument("--github-account", action="append", metavar="NAME", help="watch: also note the Actions minutes of this other account the GitHub CLI is signed in to, in github-usage/NAME/ (repeat for more)")
     vibe_parser.add_argument("--account", metavar="NAME", help="github: the figure of another account you are signed in to; with move, the account that owns the repo")
     vibe_parser.add_argument("--to", metavar="NAME", help="github move REPO: the account of yours that takes the private repo, so its minutes count there")

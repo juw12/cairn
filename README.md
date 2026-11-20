@@ -290,7 +290,9 @@ stand by and take over within five minutes of it stopping.
   to GitHub for one request at a time and is never written into the copy.
   One disk is one accident away from none. `cairn vibe github copy everywhere` asks every other computer whose
   watcher reads the same brain to keep its own copy, in `github-copy` in its home folder, once it has the room
-  and the GitHub CLI is signed in there (`everywhere off` stops asking). A note per computer in
+  and the GitHub CLI is signed in there (`everywhere off` stops asking). That holds on a computer whose watcher
+  runs with `--no-github` too, since each computer writes only its own note; `cairn vibe watch --no-copy`
+  keeps one computer out. A note per computer in
   `github-usage/copy/` says how many repos it holds, how big and how fresh, and the command says whether this
   computer's copy is the only one. Cairn does not replace GitHub as the place others find your work or your
   devices sync through; it makes losing it survivable.

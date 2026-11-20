@@ -546,6 +546,13 @@ class TestEveryComputer(CopyCase):
                 time.sleep(0.05)
         return lines
 
+    def test_a_watcher_that_leaves_the_minutes_to_another_computer_still_keeps_its_copy(self):
+        seen = []
+        with mock.patch.object(watch, "watch", lambda brain, **options: seen.append(options)):
+            for flags in (["--no-github"], ["--no-github", "--no-copy"]):
+                self.assertEqual(main(["--root", str(self.brain.root), "vibe", "watch", "--no-vector", *flags]), 0)
+        self.assertEqual([(options["github"], options["repo_copy"]) for options in seen], [(False, True), (False, False)])
+
     def test_a_summary_says_whether_this_is_the_only_copy(self):
         self.hub.add("ada", "engine")
         state = self.copy()
