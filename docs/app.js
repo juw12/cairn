@@ -12,7 +12,7 @@ import { board, codeView, contextView, decisions, home, ideas, mcpSnippet, moveN
 import { mapView, resetMap, wireMap } from "./map.js";
 import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync, unlinkObsidian } from "./obsidian.js";
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
-import { addFriend, loadLeaderboard, publishStats, removeFriend, setLeaderboardStat, unpublishStats } from "./leaderboard.js";
+import { addFriend, loadLeaderboard, publishStats, removeFriend, setLeaderboardStat, toggleLeaderboardDevice, unpublishStats } from "./leaderboard.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, showAllClaims, vouchFor } from "./proofview.js";
 import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeDevice, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, moveRepo, switchPusher, toggleRow, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
@@ -419,6 +419,7 @@ function wireGlobal() {
       "map-reset": () => resetMap(),
       "open-brain": () => openBrain(actionEl.dataset.repo),
       "lb-stat": () => setLeaderboardStat(actionEl.dataset.stat),
+      "lb-device": () => toggleLeaderboardDevice(actionEl.dataset.device),
       "lb-refresh": () => {
         loadLeaderboard(true);
         renderView();

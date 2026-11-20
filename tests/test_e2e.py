@@ -985,6 +985,60 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector(".modal.share", state="detached")
         self.assertEqual(self.errors, [])
 
+    def test_people_leaderboard_counts_every_computer_or_the_ones_picked(self):
+        """Sessions from two computers sync into one brain: "You" is both together unless you pick."""
+        seed = """() => {
+          const s = window.cairn.state;
+          const session = (slug, machine, tokens) => s.files.push({
+            path: `sessions/${slug}.md`,
+            text: `---\\ntitle: ${slug}\\ntype: session\\nstatus: shipped\\nstarted: 2026-11-18T09:00\\nended: 2026-11-18T10:00\\n${machine ? `machine: ${machine}\\n` : ""}tokens: ${tokens}\\n---\\n`,
+            mtime: Date.now(),
+          });
+          session("on-the-desk", "Desk PC", 4000000);
+          session("on-the-desk-too", "Desk PC", 1000000);
+          session("on-the-road", "Road Mac", 250000);
+          s.notes = s.files.map((f) => window.cairn.core.noteFromFile(f.path, f.text, f.mtime));
+          window.cairn.rerender();
+        }"""
+        page = self.open()
+        self.go(page, "people")
+        page.evaluate(seed)
+        page.wait_for_selector(".lb-devices")
+        chips = "nodes => nodes.map((n) => [n.innerText.replace(/\\s+/g, ' ').trim(), n.getAttribute('aria-pressed')])"
+        devices = '.lb-devices [data-action="lb-device"]'
+        self.assertEqual(
+            page.eval_on_selector_all(devices, chips),
+            [["All devices 5.3M", "true"], ["Desk PC 5M", "false"], ["Road Mac 250k", "false"]],
+        )
+        self.assertEqual(page.inner_text(".lb-row.me .lb-value"), "5.3M")
+        self.assertIn("all 2 devices · not published", page.inner_text(".lb-row.me"))
+
+        page.click(f'{devices}[data-device="Road Mac"]')
+        page.wait_for_function("() => document.querySelector('.lb-row.me .lb-value').innerText === '250k'")
+        self.assertIn("Road Mac only", page.inner_text(".lb-row.me"))
+        self.assertEqual(page.evaluate("localStorage.getItem('cairn.lbDevices')"), '["Road Mac"]')
+
+        # What is published follows the choice, and the computers' names stay out of the note.
+        page.click('[data-action="stats-publish"]')
+        page.wait_for_selector(".modal")
+        self.assertIn("Counted: Road Mac only.", page.inner_text(".modal"))
+        page.click(".modal button[type=submit]")
+        page.wait_for_selector('[data-action="stats-unpublish"]')
+        note = self.note_text(page, "vibe-stats.md")
+        self.assertIn("vibe_tokens: 250000", note)
+        self.assertNotIn("Road Mac", note)
+
+        # The other computer too is every computer again; "All devices" does the same in one press.
+        page.click(f'{devices}[data-device="Desk PC"]')
+        page.wait_for_function("() => document.querySelector('.lb-row.me .lb-value').innerText === '5.3M'")
+        self.assertIsNone(page.evaluate("localStorage.getItem('cairn.lbDevices')"))
+        page.click(f'{devices}[data-device="Desk PC"]')
+        page.wait_for_function("() => document.querySelector('.lb-row.me .lb-value').innerText === '5M'")
+        page.click(f"{devices}:not([data-device])")
+        page.wait_for_function("() => document.querySelector('.lb-row.me .lb-value').innerText === '5.3M'")
+        self.assertEqual(page.eval_on_selector_all(devices, chips)[0], ["All devices 5.3M", "true"])
+        self.assertEqual(self.errors, [])
+
     def test_people_leaderboard_ranks_friends_by_their_published_totals(self):
         def stats_note(tokens, minutes, sessions):
             lines = ["title: Vibe stats", "type: note", "publish: true", "updated: 2026-11-10", f"vibe_tokens: {tokens}", f"vibe_minutes: {minutes}",
@@ -1016,7 +1070,8 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(page.eval_on_selector_all(".lb-row", order), ["alice", "me", "bob"])
         self.assertEqual(page.inner_text('.lb-row[data-login="alice"] .lb-place'), "1")
         self.assertEqual(page.inner_text('.lb-row[data-login="alice"] .lb-value'), "5B")
-        self.assertIn("only on this device", page.inner_text(".lb-row.me"))
+        self.assertIn("not published", page.inner_text(".lb-row.me"))
+        self.assertEqual(page.locator(".lb-devices").count(), 0, "one computer: nothing to choose")
         self.assertIn("hasn't published totals yet", page.inner_text('.lb-waiting [data-login="carol"]'))
         self.assertEqual(page.locator("#leaderboard img[src=x]").count(), 0)
 
@@ -1038,7 +1093,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertRegex(note, r"vibe_tokens: \d+")
         for private in ("Pega-", "Recap band", "E:/Projects"):
             self.assertNotIn(private, note)
-        self.assertIn("published", page.inner_text(".lb-row.me"))
+        self.assertRegex(page.inner_text(".lb-row.me"), r"(?<!not )published \d{4}-\d{2}-\d{2}")
         page.click('[data-action="stats-unpublish"]')
         page.wait_for_selector('[data-action="stats-unpublish"]', state="detached")
         self.assertIsNone(self.note_text(page, "vibe-stats.md"))

@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 77 (2026-11-20): Your totals across computers
+
+- People: your row on the leaderboard counts every computer that syncs into the brain, says so, and lets you pick which computers count. What you publish follows the same choice ([#58](https://github.com/juw12/cairn/pull/58))
+- People: an unpublished row now reads "not published" instead of "only on this device", which sounded as if only one computer was counted ([#58](https://github.com/juw12/cairn/pull/58))
+
 ## Build 76 (2026-11-20): Who pushes, on the folded GitHub block
 
 - Vibe: folded, the GitHub minutes block still says which account this computer pushes as, next to the percent used ([#56](https://github.com/juw12/cairn/pull/56))

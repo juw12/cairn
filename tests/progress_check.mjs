@@ -1,6 +1,6 @@
 // Checks for docs/progress.js; run by tests/test_progress.py (needs Node).
 import assert from "node:assert/strict";
-import { MACHINE_FRESH_MIN, agentGroup, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubAccounts, githubBudget, githubFromNote, githubMoves, githubUsage, historyRemaining, machineFromNote, machineReading, movePending, reportedProgress } from "../docs/progress.js";
+import { MACHINE_FRESH_MIN, agentGroup, deviceChoice, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubAccounts, githubBudget, githubFromNote, githubMoves, githubUsage, historyRemaining, machineFromNote, machineReading, notesOfDevices, movePending, reportedProgress } from "../docs/progress.js";
 
 const log = (...entries) => entries.map(([time, kind, text]) => ({ time, kind, text }));
 
@@ -223,5 +223,24 @@ assert.equal(machineReading(null, asus).name, "ASUS");
 assert.deepEqual(deviceNotes(brainNotes, "MacBook Pro").map((note) => note.type), ["session", "task"]);
 assert.equal(machineReading(null, deviceNotes(brainNotes, "MacBook Pro")), null); // never another computer's reading
 assert.deepEqual(deviceNotes(brainNotes, "").map((note) => note.type), ["session", "task"]);
+
+
+// Your totals count every computer, or the ones you pick: sessions of the others are left out, every other note stays.
+const laptop = { type: "session", meta: { machine: "Laptop", tokens: "900" } };
+const desktop = { type: "session", meta: { machine: "Desktop", tokens: "100" } };
+const unnamed = { type: "session", meta: { tokens: "7" } };
+const idea = { type: "idea", meta: {} };
+const everything = [laptop, desktop, unnamed, idea];
+assert.deepEqual(notesOfDevices(everything, null), everything);
+assert.deepEqual(notesOfDevices(everything, []), everything);
+assert.deepEqual(notesOfDevices(everything, ["Laptop"]), [laptop, idea]);
+assert.deepEqual(notesOfDevices(everything, ["Desktop", ""]), [desktop, unnamed, idea]);
+const computers = [{ name: "Laptop" }, { name: "Desktop" }, { name: "" }];
+assert.deepEqual(deviceChoice(computers, ["Desktop", "Gone", 5]), ["Desktop"], "a computer the brain no longer holds is dropped");
+assert.deepEqual(deviceChoice(computers, ["", "Laptop"]), ["Laptop", ""], "kept in the list's order");
+assert.equal(deviceChoice(computers, ["Laptop", "Desktop", ""]), null, "every computer is the same as no choice");
+assert.equal(deviceChoice(computers, []), null);
+assert.equal(deviceChoice(computers, "Laptop"), null, "a broken kept value is no choice");
+assert.equal(deviceChoice(computers, ["Gone"]), null);
 
 console.log("progress checks passed");
