@@ -841,8 +841,19 @@ export function openRepo(owner, name) {
 
 let viewer = null;
 
+// A video that is only taken off the page keeps its player; Safari gives a page a few, and then the next video
+// never loads. So a video is stopped and emptied before it goes.
+function release(root) {
+  for (const video of root.querySelectorAll("video")) {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
 function closeViewer() {
   if (!viewer) return;
+  release(viewer.box);
   viewer.box.remove();
   viewer = null;
 }
@@ -852,6 +863,7 @@ function showInViewer() {
   const item = items[viewer.index];
   const stage = $(".repo-lb-stage", box);
   const turn = (viewer.turn += 1);
+  release(stage);
   stage.innerHTML = item.kind === "video"
     ? `<video controls autoplay playsinline></video><p class="repo-lb-wait">Loading the video${item.size ? ` (${humanSize(item.size)})` : ""}…</p>`
     : `<img alt="${esc(baseName(item.path))}">`;
@@ -860,8 +872,14 @@ function showInViewer() {
   const put = (src) => {
     if (!viewer || viewer.turn !== turn) return;
     $(".repo-lb-wait", stage)?.remove();
-    if (src) media.src = src;
-    else stage.innerHTML = `<p class="repo-lb-wait">Couldn't load ${esc(baseName(item.path))}.</p>`;
+    if (!src) {
+      stage.innerHTML = `<p class="repo-lb-wait">Couldn't load ${esc(baseName(item.path))}.</p>`;
+      return;
+    }
+    media.src = src;
+    // Safari sometimes leaves an autoplay video waiting, with nothing loaded. Asking it to play starts it; if the
+    // browser refuses (no tap came first), the video's own play button is there.
+    if (item.kind === "video") media.play().catch(() => {});
   };
   if (ready) put(ready);
   else blobUrl(entry, item.path, at).then(put);
