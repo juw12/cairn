@@ -219,7 +219,8 @@ export function canvasView() {
     { value: files.length, label: files.length === 1 ? "canvas" : "canvases" },
     { value: cardCount, label: cardCount === 1 ? "card" : "cards", sub: "on all canvases" },
     { value: edgeCount, label: edgeCount === 1 ? "connection" : "connections" },
-    { value: edited, label: "edited this week" },
+    // Without file times (a brain read from GitHub) nobody can say what was edited this week: no tile beats a wrong 0.
+    ...(files.some((file) => file.mtime) ? [{ value: edited, label: "edited this week" }] : []),
   ];
   const rows = files.slice(0, 6).map((file) => {
     const data = file.mtime ? null : parseCanvas(file.text);

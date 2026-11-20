@@ -2251,6 +2251,8 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(rows[2]["title"], "Handle the empty file")
         self.assertRegex(rows[2]["when"], r"^[A-Z][a-z]{2} \d{1,4}$")
         self.assertGreater(rows[3]["share"], 0.95, "a row with no time takes the whole row")
+        # The tile above counts the same way: three of the four tasks carry a date from the last week.
+        self.assertEqual(page.inner_text('.vibe-board[data-page="board"] .figure:has(.label:text-is("changed this week")) .value'), "3")
         self.assertEqual(page.evaluate(RECAP_COLLISIONS), [])
 
         # Code inbox: a note that only says where it was synced from is not a task made from code.

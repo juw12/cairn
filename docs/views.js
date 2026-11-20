@@ -5,7 +5,7 @@
 
 import * as core from "./core.js";
 import { renderMarkdown, escapeHtml as esc } from "./md.js";
-import { $, $$, STATUS_HINT, STATUS_LABEL, TYPE_META, byRecent, checklist, emptyState, icon, pageHead, plural, relativeTime, rowItem, snippetOf, statusPill, tagChips, toast, today } from "./ui.js";
+import { $, $$, STATUS_HINT, STATUS_LABEL, TYPE_META, byRecent, checklist, emptyState, icon, noteStamp, pageHead, plural, relativeTime, rowItem, snippetOf, statusPill, tagChips, toast, today } from "./ui.js";
 import { fileByPath, guide, markGuide, noteByPath, readOnly, saveNote, state } from "./state.js";
 import { bookmarks, countNotes, folderTree, searchNotes } from "./vault.js";
 import { render } from "./app.js";
@@ -150,7 +150,7 @@ function boardBlocks(type, extra = "") {
   const week = Date.now() - 7 * 86400000;
   const noun = type === "idea" ? "idea" : "task";
   const tiles = statuses.map((status) => ({ value: count(status), label: STATUS_LABEL[status].toLowerCase(), title: STATUS_HINT[status] || "" }));
-  tiles.push({ value: items.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" });
+  tiles.push({ value: items.filter((n) => noteStamp(n) > week).length, label: "changed this week" });
   if (type === "task") {
     const lists = items.map(checklist).filter((c) => c.total);
     const total = lists.reduce((sum, c) => sum + c.total, 0);
@@ -210,7 +210,7 @@ export function decisions() {
   const tiles = [
     { value: all.length, label: "decisions" },
     ...core.STATUSES.decision.map((status) => ({ value: count(status), label: (STATUS_LABEL[status] || status).toLowerCase() })),
-    { value: all.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" },
+    { value: all.filter((n) => noteStamp(n) > week).length, label: "changed this week" },
   ];
   const latest = [...all].sort(byRecent)[0];
   const blocks = {
@@ -270,7 +270,7 @@ export function notesView() {
     { value: state.notes.length, label: "notes in the brain" },
     ...[["idea", "ideas"], ["task", "tasks"], ["decision", "decisions"], ["journal", "journal pages"]].map(([type, label]) => ({ value: ofType(type), label })),
     { value: tagCounts.size, label: tagCounts.size === 1 ? "tag" : "tags" },
-    { value: state.notes.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" },
+    { value: state.notes.filter((n) => noteStamp(n) > week).length, label: "changed this week" },
   ];
   const newest = [...state.notes].sort(byRecent)[0];
   const blocks = {
