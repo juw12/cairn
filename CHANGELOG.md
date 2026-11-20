@@ -3,6 +3,12 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 83 (2026-11-20): Built-in plugins set themselves up on every device
+
+- Plugins: a plugin that comes with Cairn now installs itself on each of your devices when the brain's plugin list names it, so one list sets up your computer, laptop and phone. Before, every device had to be asked ([#68](https://github.com/juw12/cairn/pull/68))
+- This happens only in a brain you can edit, and never on a device where you turned plugins off. A plugin from outside Cairn still asks before it installs ([#68](https://github.com/juw12/cairn/pull/68))
+- The plugin list is found whether its folder is cairn or Cairn, as a vault kept on Windows or macOS may name it ([#68](https://github.com/juw12/cairn/pull/68))
+
 ## Build 82 (2026-11-20): Pocket meter plugin
 
 - Plugins: a new built-in plugin, Pocket meter. It draws a bar from zero to your ceiling from one note in your brain: the filled part is money that has arrived, a marker shows what is expected, a band shows the likely range, and a list shows which sources contribute ([#67](https://github.com/juw12/cairn/pull/67))
