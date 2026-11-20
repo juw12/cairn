@@ -3,6 +3,10 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 78 (2026-11-20): Dashboards has its own icon
+
+- Dashboards on phone: the page has its own icon (four tiles on paper) on the Home Screen, in the tab and in its bar, so it no longer looks like Cairn. The mark in the bar is no longer a link to Cairn's home. Dashboards are still set up and signed in from Cairn as before ([#59](https://github.com/juw12/cairn/pull/59))
+
 ## Build 77 (2026-11-20): Your totals across computers
 
 - People: your row on the leaderboard counts every computer that syncs into the brain, says so, and lets you pick which computers count. What you publish follows the same choice ([#58](https://github.com/juw12/cairn/pull/58))
