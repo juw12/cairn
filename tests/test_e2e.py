@@ -113,8 +113,9 @@ DEVICES_SEED = """() => {
   window.cairn.rerender();
 }"""
 
-# A brain an agent works in: five tasks that wait for the owner, a dated update with a picture, a run of three
-# automatic notes, and one note whose title is long enough to wrap on a phone.
+# A brain an agent works in: five tasks that wait for the owner, a dated update that opens with a picture, one
+# named for a time that has not come yet, a run of three automatic notes, and one note whose title is long
+# enough to wrap on a phone.
 HOME_SEED = """() => {
   const s = window.cairn.state;
   const pad = (n) => String(n).padStart(2, "0");
@@ -124,7 +125,8 @@ HOME_SEED = """() => {
   for (const n of [1, 2, 3, 4, 5]) {
     add(`tasks/needs-${n}.md`, `---\\ntitle: Sign in to store account ${n} once so the upload can run\\ntype: task\\nstatus: todo\\ntags: [needs-me]\\ncreated: ${day}\\n---\\n\\nOnly you have the password.\\n`);
   }
-  add(`Update Log/${day} 0905 home page shows what matters.md`, "Asked: a Home that leads with what waits for me.\\n\\n![[shots/home.png]]\\n");
+  add(`Update Log/${day} 0905 home page shows what matters.md`, "![[shots/home.png]]\\n\\nAsked: a Home that leads with what waits for me.\\n");
+  add(`Update Log/${day} 2359 named by a wrong clock.md`, "Written this morning, named for tonight.\\n");
   for (const n of [1, 2, 3]) add(`Update Log/${day} 080${n} lab_writer_run_${n}.md`, `Run ${n} of the nightly writer.\\n`);
   add("notes/long.md", "---\\ntitle: A note whose title is long enough to take three lines on a phone, the way the titles of real work notes usually are, with a path like E:/Projects/somewhere/deep\\ntype: note\\n---\\n\\nBody.\\n");
   s.notes = s.files.map((f) => window.cairn.core.noteFromFile(f.path, f.text, f.mtime));
@@ -1794,6 +1796,45 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(result["aliased"], "see [[b|beta note]]")
         self.assertEqual(result["retarget"], "[[Alpha - Notes#Plan|the plan]] and `[[Alpha — Notes]]`")
 
+    def test_unlinked_mentions_on_a_big_brain(self):
+        # Four thousand names in one regular expression froze the Map for seconds in Chrome and for minutes
+        # in Safari. The names are found by a letter tree now: same answers, and a big brain stays quick.
+        page = self.open()
+        result = page.evaluate("""async () => {
+            const G = await import('./graph.js');
+            const core = window.cairn.core;
+            const list = (notes) => G.unlinkedMentions(notes, core.buildGraph(notes)).map((m) => `${m.from}>${m.to}:${m.phrase}x${m.count}`).sort();
+            const small = [
+                core.noteFromFile('long.md', '# Launch Plan Review\\nThe longer name'),
+                core.noteFromFile('short.md', '# Launch Plan\\nThe shorter name'),
+                core.noteFromFile('glow.md', '# Glow\\nA project'),
+                core.noteFromFile('cafe.md', '# Café Notes\\nAccents'),
+                core.noteFromFile('a.md', '# Reader\\nThe LAUNCH PLAN REVIEW is due; then the launch plan again. Launch Plans do not count.'),
+                core.noteFromFile('b.md', '# Words\\nGlowing and aGlow and Glow_2 and éGlow do not count, (Glow) and Glow. do. CAFÉ NOTES too.'),
+                core.noteFromFile('c.md', '# Hidden\\n`Launch Plan` and [Launch Plan](x.md) and https://x.test/Launch Plan stay hidden'),
+            ];
+            const big = [];
+            for (let i = 0; i < 4000; i += 1) {
+                const other = (i * 7 + 13) % 4000;
+                big.push(core.noteFromFile(`n${i}.md`, `# Topic number ${i} alpha\\n` + 'plain words of a note go on and on here. '.repeat(40) + `It mentions Topic number ${other} alpha once.`));
+            }
+            const started = performance.now();
+            const found = G.unlinkedMentions(big, core.buildGraph(big));
+            return { small: list(small), bigCount: found.length, first: found[0], ms: Math.round(performance.now() - started) };
+        }""")
+        self.assertEqual(
+            result["small"],
+            [
+                "a.md>long.md:LAUNCH PLAN REVIEWx1",  # the longest name wins, in any case
+                "a.md>short.md:launch planx1",  # "Launch Plans" is another word
+                "b.md>cafe.md:CAFÉ NOTESx1",
+                "b.md>glow.md:Glowx2",  # whole words only
+            ],
+        )
+        self.assertEqual(result["bigCount"], 4000)
+        self.assertEqual(result["first"]["to"], "n13.md")
+        self.assertLess(result["ms"], 4000, "finding 4,000 names in 4,000 notes must not freeze the page")
+
     # ------------------------------------------------------------ network: profiles + read-only brains
 
     def test_github_input_parsing(self):
@@ -2099,9 +2140,15 @@ class EndToEndTests(unittest.TestCase):
         # Latest updates: the dated notes, the automatic run folded into one row, a picture where the note has one.
         updates = f'{home} [data-panel="recap"]'
         self.assertEqual(page.inner_text(f"{updates} .vp-title"), "Latest updates")
-        self.assertEqual(page.locator(f"{updates} .home-updates > li").count(), 2)
+        self.assertEqual(page.locator(f"{updates} .home-updates > li").count(), 3)
         self.assertIn("2 more like it", page.inner_text(updates))
         self.assertEqual(page.locator(f"{updates} li.has-thumb .recap-thumb").count(), 1)
+        # The first line of an update is what it says, not the name of the picture it opens with.
+        self.assertIn("Asked: a Home that leads with what waits for me.", page.inner_text(f"{updates} li.has-thumb"))
+        self.assertNotIn("shots/home.png", page.inner_text(updates))
+        # A note named for a time that has not come yet shows no time (checked unless it is that minute now).
+        if page.evaluate("() => new Date().getHours() * 60 + new Date().getMinutes() < 23 * 60 + 58"):
+            self.assertNotIn("23:59", page.inner_text(updates))
         # The demo brain holds no such file, so the frame steps aside instead of showing a broken picture.
         page.wait_for_function("() => getComputedStyle(document.querySelector('.recap-thumb')).display === 'none'")
 
@@ -2110,7 +2157,7 @@ class EndToEndTests(unittest.TestCase):
         page.click('.hc-opt[data-range="14"]')
         page.wait_for_function("() => document.querySelectorAll('.hc-bar').length === 14")
         self.assertIn("today", page.inner_text("#home-day .hd-head"))
-        self.assertEqual(page.locator("#home-day .hd-list > li").count(), 2, "the day's updates sit under the chart")
+        self.assertEqual(page.locator("#home-day .hd-list > li").count(), 3, "the day's updates sit under the chart")
         page.locator(".hc-bar").nth(10).click()
         self.assertNotIn("today", page.inner_text("#home-day .hd-head"))
         self.assertEqual(page.locator('.hc-bar[aria-pressed="true"]').count(), 1)

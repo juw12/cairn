@@ -166,10 +166,13 @@ function plainText(line) {
     .trim();
 }
 
+// A line that is only a picture ("![[shot.png]]", "![alt](shot.png)") says nothing as a first line.
+const PICTURE_LINE = /^\s*(?:!\[\[[^\]\n]*\]\]|!\[[^\]\n]*\]\([^)\n]*\))\s*$/;
+
 export function snippetOf(note) {
   const prose = note.body
     .split("\n")
-    .filter((line) => !/^\s*(\||#|```|---)/.test(line))
+    .filter((line) => !/^\s*(\||#|```|---)/.test(line) && !PICTURE_LINE.test(line))
     .join("\n");
   return plainText(core.summary(prose));
 }

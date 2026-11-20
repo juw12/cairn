@@ -136,7 +136,13 @@ export function homeData() {
   const running = recap(notes, stamp);
   const perDay = sessionDays(notes);
   const journal = journalDays(notes);
-  const updates = notes.map(datedUpdate).filter(Boolean).sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
+  // A note stamped later than now ("2026-11-20 2350 ..." written at three in the morning) has a wrong clock
+  // in its name: it keeps its day but shows no time and no longer sits above everything that did happen.
+  const updates = notes
+    .map(datedUpdate)
+    .filter(Boolean)
+    .map((update) => (update.day === day && update.key > stamp ? { ...update, time: "", key: `${update.day}T00:00` } : update))
+    .sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
   const month = day.slice(0, 7);
   const data = {
     stamp,
