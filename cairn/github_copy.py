@@ -281,9 +281,10 @@ def folder_bytes(folder: Path) -> int:
     return total
 
 
-def summary(folder: Path, state: dict, others: list[dict] | None = None) -> str:
+def summary(folder: Path, state: dict, others: list[dict] | None = None, asked: bool = False) -> str:
     """One paragraph about this computer's copy. With `others` (the copies other computers say they
-    hold, see other_copies), it also says whether this is the only one."""
+    hold, see other_copies), it also says whether this is the only one; `asked` when the brain
+    already asks every computer for one."""
     if not state.get("at"):
         line = f"No copy in {folder} yet. Make one with: cairn vibe github copy \"{folder}\""
         return " ".join([line, *state.get("problems", [])])
@@ -307,7 +308,9 @@ def summary(folder: Path, state: dict, others: list[dict] | None = None) -> str:
     if others:
         line += " Also on " + ", ".join(f"{other['device']} (checked {other['at'].replace('T', ' ')})" for other in others) + "."
     elif others is not None:
-        line += " No other computer holds a copy: besides GitHub, this disk is the only place. `cairn vibe github copy everywhere` asks your other computers for one."
+        line += " No other computer holds a copy: besides GitHub, this disk is the only place."
+        line += (" Your other computers are asked for one; each starts when its Cairn next runs." if asked
+                 else " `cairn vibe github copy everywhere` asks your other computers for one.")
     return line
 
 
