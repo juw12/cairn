@@ -1,9 +1,16 @@
 """Build a public page you can host anywhere from the notes marked ``publish: true``.
 
 ``cairn publish --site FOLDER`` writes plain HTML: an index of your work (each claim with the links
-that back it) and one page per public note. There is no JavaScript, no GitHub call and no account:
-open ``index.html`` from disk, or put the folder on any static host (Cloudflare Pages, Netlify,
-GitHub Pages, your own server).
+that back it) and one page per public note. There is no GitHub call and no account: open
+``index.html`` from disk, or put the folder on any static host (Cloudflare Pages, Netlify, GitHub
+Pages, your own server). ``cairn publish --to OWNER/REPO`` puts the same pages in the public repo's
+``docs/`` folder, where GitHub Pages serves them.
+
+The index has a search box over every public note. It is one small script (``search.js``) that
+carries the notes' words with it, so it works from disk and asks no server; without JavaScript the
+box stays hidden and every page reads the same. With ``--url`` (the address the folder will have)
+each page also names its own address and a ``sitemap.xml`` lists them all, which is what Google and
+Bing read to find the pages.
 
 Privacy follows publish.py: only ``publish: true`` notes are read, and links to notes that stay
 private become plain text. Note text is always escaped, so a note can't add markup or script to the
@@ -24,6 +31,11 @@ from . import core, publish
 
 MANIFEST = ".cairn-site.json"
 STYLESHEET = "site.css"
+SEARCH_SCRIPT = "search.js"
+SITEMAP = "sitemap.xml"
+ROBOTS = "robots.txt"
+NO_JEKYLL = ".nojekyll"  # GitHub Pages then serves the files as they are
+SEARCH_TEXT_LIMIT = 20000  # characters of one note the search script carries
 HOME_URL = "https://juw12.github.io/p/cairn/"
 
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
@@ -184,6 +196,254 @@ def render_markdown(body: str, link=lambda target: "") -> str:
     return "\n".join(out)
 
 
+# ------------------------------------------------------------ plain words (search, descriptions)
+
+_PLAIN_LINK_RE = re.compile(
+    r"!\[\[[^\]\n]+\]\]"
+    r"|\[\[(?P<wiki>[^\]\n]+)\]\]"
+    r"|!\[[^\]\n]*\]\([^)\s]+(?:\s+\"[^\"\n]*\")?\)"
+    r"|\[(?P<label>[^\]\n]*)\]\([^)\s]+(?:\s+\"[^\"\n]*\")?\)"
+)
+_LINE_MARK_RE = re.compile(r"^\s*(?:>\s?)*(?:#{1,6}\s+|(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?")
+
+
+def plain_text(body: str) -> str:
+    """The words of a note without its Markdown marks, on one line."""
+
+    def label(match: re.Match) -> str:
+        if match["wiki"] is not None:
+            target, _, alias = match["wiki"].partition("|")
+            return alias.strip() or target.split("#")[0].strip().split("/")[-1].removesuffix(".md")
+        return match["label"] or ""
+
+    words: list[str] = []
+    for line in body.replace("\r\n", "\n").split("\n"):
+        if _FENCE_RE.match(line) or _RULE_RE.match(line) or _TABLE_RULE_RE.match(line):
+            continue
+        line = _PLAIN_LINK_RE.sub(label, _LINE_MARK_RE.sub("", line))
+        words.append(re.sub(r"\*\*|`+", "", line).replace("|", " "))
+    return re.sub(r"\s+", " ", " ".join(words)).strip()
+
+
+def _shorten(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:.-") + "\u2026"
+
+
+def _body(note: dict) -> str:
+    return re.sub(r"\A\s*#\s+.+\n?", "", note["body"], count=1)  # the title is already the page heading
+
+
+def _summary(note: dict) -> str:
+    """One or two lines that say what the note is: its claim, or how it starts."""
+    return _shorten(_text(note["meta"].get("claim")) or plain_text(_body(note)), 160)
+
+
+# ------------------------------------------------------------ search (one script, no server)
+
+SEARCH_JS = """\
+// Search for this page. The notes' words are in this file, so it works from disk and asks no server.
+(function () {
+  "use strict";
+  var notes = __NOTES__;
+  var MOST = 50;
+  var form = document.getElementById("search");
+  var box = document.getElementById("q");
+  var count = document.getElementById("search-count");
+  var results = document.getElementById("search-results");
+  var listing = document.getElementById("listing");
+  if (!form || !box || !count || !results || !listing) return;
+
+  // Lower case and without accents, so "cafe" finds the same word written with an accent.
+  function fold(text) {
+    text = String(text).toLowerCase();
+    return text.normalize ? text.normalize("NFD").replace(/[\\u0300-\\u036f]/g, "") : text;
+  }
+
+  notes.forEach(function (note) {
+    note.title = fold(note.t);
+    note.tags = fold(note.g.join(" "));
+    note.text = fold(note.x);
+  });
+
+  function times(text, word) {
+    var found = 0;
+    var at = text.indexOf(word);
+    while (at >= 0 && found < 5) {
+      found += 1;
+      at = text.indexOf(word, at + word.length);
+    }
+    return found;
+  }
+
+  // Every word must be somewhere in the note. A word in the title counts most, then a tag, then the text.
+  function score(note, words) {
+    var total = 0;
+    for (var i = 0; i < words.length; i += 1) {
+      var inTitle = note.title.indexOf(words[i]) >= 0;
+      var inTags = note.tags.indexOf(words[i]) >= 0;
+      var inText = times(note.text, words[i]);
+      if (!inTitle && !inTags && !inText) return 0;
+      total += (inTitle ? 20 : 0) + (inTags ? 8 : 0) + inText;
+    }
+    return total + (note.title === words.join(" ") ? 100 : 0);
+  }
+
+  function snippet(note, words) {
+    var lower = note.x.toLowerCase();
+    var at = -1;
+    for (var i = 0; i < words.length && at < 0; i += 1) at = lower.indexOf(words[i]);
+    var start = Math.max(0, at - 70);
+    if (start > 0) {
+      var space = note.x.indexOf(" ", start);
+      if (space >= 0 && space < at) start = space + 1;
+    }
+    var text = note.x.slice(start, start + 220);
+    var more = start + 220 < note.x.length;
+    if (more && text.lastIndexOf(" ") > 120) text = text.slice(0, text.lastIndexOf(" "));
+    return (start > 0 ? "\\u2026 " : "") + text + (more ? " \\u2026" : "");
+  }
+
+  // Text goes in as text nodes, never as markup, so a note cannot add anything to the page.
+  function marked(text, words) {
+    var parent = document.createElement("p");
+    var escaped = words.map(function (word) { return word.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&"); });
+    var parts = text.split(new RegExp("(" + escaped.join("|") + ")", "ig"));
+    parts.forEach(function (part, index) {
+      if (!part) return;
+      if (index % 2) {
+        var mark = document.createElement("mark");
+        mark.textContent = part;
+        parent.appendChild(mark);
+      } else {
+        parent.appendChild(document.createTextNode(part));
+      }
+    });
+    return parent;
+  }
+
+  function card(note, words) {
+    var section = document.createElement("section");
+    section.className = "card";
+    var details = [note.d, note.g.slice(0, 4).join(", ")].filter(Boolean).join(" \\u00b7 ");
+    if (details) {
+      var meta = document.createElement("p");
+      meta.className = "meta";
+      meta.textContent = details;
+      section.appendChild(meta);
+    }
+    var heading = document.createElement("h3");
+    var link = document.createElement("a");
+    link.href = note.u;
+    link.textContent = note.t;
+    heading.appendChild(link);
+    section.appendChild(heading);
+    if (note.x) section.appendChild(marked(snippet(note, words), words));
+    return section;
+  }
+
+  function remember(query) {
+    try {
+      history.replaceState(null, "", query ? "?q=" + encodeURIComponent(query) : location.pathname);
+    } catch (error) { /* opened from disk in a browser that refuses: the search still works */ }
+  }
+
+  function show(query) {
+    var words = fold(query).split(/\\s+/).filter(Boolean);
+    while (results.firstChild) results.removeChild(results.firstChild);
+    var searching = words.length > 0;
+    results.hidden = !searching;
+    count.hidden = !searching;
+    listing.hidden = searching;
+    remember(searching ? query.trim() : "");
+    if (!searching) return;
+    var hits = [];
+    notes.forEach(function (note) {
+      var points = score(note, words);
+      if (points) hits.push({ note: note, points: points });
+    });
+    hits.sort(function (a, b) {
+      return b.points - a.points || (a.note.d < b.note.d ? 1 : a.note.d > b.note.d ? -1 : 0);
+    });
+    var asked = "\\u201c" + query.trim() + "\\u201d";
+    if (!hits.length) {
+      count.textContent = "Nothing found for " + asked + ". Try fewer or other words.";
+    } else {
+      count.textContent = hits.length + (hits.length === 1 ? " note" : " notes") + " for " + asked
+        + (hits.length > MOST ? ", the first " + MOST + " shown. Add a word to narrow it down." : "");
+    }
+    hits.slice(0, MOST).forEach(function (hit) { results.appendChild(card(hit.note, words)); });
+  }
+
+  form.hidden = false;
+  form.addEventListener("submit", function (event) { event.preventDefault(); });
+  box.addEventListener("input", function () { show(box.value); });
+  document.addEventListener("keydown", function (event) {
+    var typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName || "");
+    if (event.key === "/" && !typing && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      box.focus();
+    } else if (event.key === "Escape" && event.target === box && box.value) {
+      box.value = "";
+      show("");
+    }
+  });
+  var asked = /[?&]q=([^&]*)/.exec(location.search);
+  if (asked) {
+    try {
+      box.value = decodeURIComponent(asked[1].replace(/\\+/g, " "));
+    } catch (error) { box.value = ""; }
+    if (box.value) show(box.value);
+  }
+})();
+"""
+
+
+def _search_script(notes: list[dict]) -> str:
+    entries = [
+        {
+            "t": note["title"],
+            "u": _href("index.html", page_path(note["path"])),
+            "d": _when(note),
+            "g": [str(tag) for tag in note["tags"]],
+            "x": " ".join(part for part in (_text(note["meta"].get("claim")), plain_text(_body(note))) if part)[:SEARCH_TEXT_LIMIT],
+        }
+        for note in sorted(notes, key=lambda note: note["path"])
+    ]
+    # ensure_ascii keeps the file plain ASCII, which is also valid JavaScript whatever the notes hold.
+    return SEARCH_JS.replace("__NOTES__", json.dumps(entries, ensure_ascii=True, separators=(",", ":")))
+
+
+# ------------------------------------------------------------ addresses (canonical links, sitemap)
+
+def base_url(url: str) -> str:
+    """`url` as the address of the site's folder, ending in a slash. "" when no address was given."""
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if not re.match(r"(?i)https?://[^/\s]+", url) or re.search(r"[\s<>\"']", url):
+        raise publish.PublishError("--url needs the full web address the page will have, e.g. https://you.github.io/brain/")
+    return url.split("#")[0].split("?")[0].rstrip("/") + "/"
+
+
+def _address(base: str, page: str) -> str:
+    return base + ("" if page == "index.html" else urllib.parse.quote(page)) if base else ""
+
+
+def _sitemap(notes: list[dict], base: str) -> str:
+    def day(note: dict) -> str:
+        when = _when(note)
+        return when if re.fullmatch(r"\d{4}-\d{2}-\d{2}", when) else ""
+
+    rows = [(base, max((day(note) for note in notes), default=""))]
+    rows += [(_address(base, page_path(note["path"])), day(note)) for note in sorted(notes, key=lambda note: note["path"])]
+    urls = "".join(
+        f"  <url><loc>{html.escape(loc)}</loc>{f'<lastmod>{when}</lastmod>' if when else ''}</url>\n" for loc, when in rows
+    )
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n'
+
+
 # ------------------------------------------------------------ pages
 
 CSS = """\
@@ -222,17 +482,38 @@ img { max-width: 100%; height: auto; border-radius: 8px; }
 table { border-collapse: collapse; font-size: 0.9rem; }
 th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
 hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+.search { margin: 20px 0 8px; }
+.search label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.search input { width: 100%; font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.search input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+#search-count { margin: 0 0 14px; }
+#search-results .card p { overflow-wrap: anywhere; }
+mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+[hidden] { display: none !important; }
 footer { max-width: 760px; margin: 0 auto; padding: 0 20px 48px; font-size: 0.8rem; }
 """
 
 
-def _page(title: str, content: str, css_href: str) -> str:
+def _page(title: str, content: str, css_href: str, description: str = "", address: str = "", kind: str = "article", head: str = "") -> str:
+    """`description` is what a search result shows under the title; `address` is the page's own web address."""
+    extra = [
+        f'<meta name="description" content="{html.escape(description)}">' if description else "",
+        f'<link rel="canonical" href="{html.escape(address)}">' if address else "",
+        f'<meta property="og:type" content="{kind}">',
+        f'<meta property="og:title" content="{html.escape(title)}">',
+        f'<meta property="og:description" content="{html.escape(description)}">' if description else "",
+        f'<meta property="og:url" content="{html.escape(address)}">' if address else "",
+        '<meta name="twitter:card" content="summary">',
+        head,
+    ]
     return (
         '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         '<meta name="generator" content="Cairn">\n'
         f"<title>{html.escape(title)}</title>\n"
-        f'<link rel="stylesheet" href="{css_href}">\n</head>\n<body>\n<main>\n{content}\n</main>\n'
+        + "".join(f"{line}\n" for line in extra if line)
+        + f'<link rel="stylesheet" href="{css_href}">\n</head>\n<body>\n<main>\n{content}\n</main>\n'
         f'<footer>Made with <a href="{HOME_URL}">Cairn</a> from notes marked <code>publish: true</code>. '
         "Everything else stays private.</footer>\n</body>\n</html>\n"
     )
@@ -261,9 +542,9 @@ def _when(note: dict) -> str:
     return str(meta.get("updated") or meta.get("date") or meta.get("created") or "")[:10]
 
 
-def _note_page(note: dict, site_title: str, link) -> str:
+def _note_page(note: dict, site_title: str, link, base: str = "") -> str:
     meta, path = note["meta"], page_path(note["path"])
-    body = re.sub(r"\A\s*#\s+.+\n?", "", note["body"], count=1)  # the title is already the page heading
+    body = _body(note)
     details = " · ".join(html.escape(part) for part in (_text(meta.get("role")), _when(note)) if part)
     tags = "".join(f"<span>{html.escape(str(tag))}</span>" for tag in note["tags"])
     claim = _text(meta.get("claim"))
@@ -275,18 +556,34 @@ def _note_page(note: dict, site_title: str, link) -> str:
         f'<div class="claim">{html.escape(claim)}{_evidence_html(_evidence(meta))}</div>' if claim else "",
         render_markdown(body, link),
     ]
-    return _page(f"{note['title']} · {site_title}", "\n".join(part for part in content if part), _href(path, STYLESHEET))
+    return _page(
+        f"{note['title']} · {site_title}", "\n".join(part for part in content if part), _href(path, STYLESHEET),
+        description=_summary(note), address=_address(base, path),
+    )
 
 
-def _index_page(notes: list[dict], site_title: str) -> str:
+def _index_page(notes: list[dict], site_title: str, base: str = "") -> str:
     newest_first = sorted(notes, key=lambda note: (_when(note), note["title"].lower()), reverse=True)
     work = [note for note in newest_first if _text(note["meta"].get("claim"))]
     other = [note for note in newest_first if not _text(note["meta"].get("claim"))]
     content = [f"<h1>{html.escape(site_title)}</h1>"]
+    pieces = f'{len(work)} piece{"s" if len(work) != 1 else ""} of work'
     if work:
-        content.append(f'<p class="lead">{len(work)} piece{"s" if len(work) != 1 else ""} of work, each with links to the evidence.</p>')
+        content.append(f'<p class="lead">{pieces}, each with links to the evidence.</p>')
     elif not other:
         content.append('<p class="lead">Nothing is published yet.</p>')
+    if notes:
+        # Hidden until search.js runs, so a browser without JavaScript shows no dead box.
+        ask = f'Search {len(notes)} note{"s" if len(notes) != 1 else ""}'
+        content.append(
+            '<form class="search" id="search" role="search" hidden>'
+            f'<label for="q">{ask}</label>'
+            f'<input id="q" name="q" type="search" placeholder="{ask}" autocomplete="off" spellcheck="false">'
+            "</form>\n"
+            '<p class="meta" id="search-count" role="status" hidden></p>\n'
+            '<div id="search-results" hidden></div>'
+        )
+    content.append('<div id="listing">')
     for note in work:
         href = _href("index.html", page_path(note["path"]))
         details = " · ".join(html.escape(part) for part in (_text(note["meta"].get("role")), _when(note)) if part)
@@ -302,15 +599,21 @@ def _index_page(notes: list[dict], site_title: str) -> str:
             for note in other
         )
         content.append(f'<h2>Notes</h2>\n<ul class="plain">{rows}</ul>')
-    return _page(site_title, "\n".join(content), STYLESHEET)
+    content.append("</div>")
+    count = f'{len(notes)} public note{"s" if len(notes) != 1 else ""}'
+    description = f"{site_title}: {pieces if work else count}, each on its own page. Search them all."
+    return _page(
+        site_title, "\n".join(content), STYLESHEET,
+        description=description if notes else "", address=_address(base, "index.html"), kind="website",
+        head=f'<script src="{SEARCH_SCRIPT}" defer></script>' if notes else "",
+    )
 
 
-def build(source: Path, destination: Path, title: str = "") -> dict:
-    """Write the site for `source` into `destination`. Returns {"write", "delete", "notes"}."""
-    if destination.resolve() == source.resolve():
-        raise publish.PublishError("Pick a separate folder for the site, not the brain itself.")
+def files(public: dict[str, str], title: str = "", url: str = "") -> dict[str, str]:
+    """Every file of the site as {path: text}. `public` is {note path: text}, private links already removed
+    (publish.unlink_private). `url` is the address the folder will be served at, when that is known."""
     site_title = title.strip() or "Public brain"
-    public = publish.unlink_private(publish.select_public(source))
+    base = base_url(url)
     notes = []
     for path, text in public.items():
         note = core.note_from_file(path, text)
@@ -318,7 +621,12 @@ def build(source: Path, destination: Path, title: str = "") -> dict:
         notes.append({**note, "meta": parsed["meta"], "body": parsed["body"]})
     index = core.link_index(notes)
 
-    files = {STYLESHEET: CSS, "index.html": _index_page(notes, site_title)}
+    pages = {STYLESHEET: CSS, NO_JEKYLL: "Tells GitHub Pages to serve these files as they are.\n", "index.html": _index_page(notes, site_title, base)}
+    if notes:
+        pages[SEARCH_SCRIPT] = _search_script(notes)
+    if base:
+        pages[SITEMAP] = _sitemap(notes, base)
+        pages[ROBOTS] = f"User-agent: *\nAllow: /\n\nSitemap: {base}{SITEMAP}\n"  # read by crawlers when the folder is a site's root
     for note in notes:
         here = page_path(note["path"])
 
@@ -326,7 +634,20 @@ def build(source: Path, destination: Path, title: str = "") -> dict:
             found = core.resolve_target(index, target.strip(), source_note)
             return _href(here, page_path(found)) if found else ""
 
-        files[here] = _note_page(note, site_title, link)
+        pages.setdefault(here, _note_page(note, site_title, link, base))  # a note never replaces the index
+    return pages
+
+
+def manifest_text(paths) -> str:
+    return json.dumps({"builtBy": "cairn", "files": sorted(paths)}, indent=2) + "\n"
+
+
+def build(source: Path, destination: Path, title: str = "", url: str = "") -> dict:
+    """Write the site for `source` into `destination`. Returns {"write", "delete", "notes"}."""
+    if destination.resolve() == source.resolve():
+        raise publish.PublishError("Pick a separate folder for the site, not the brain itself.")
+    public = publish.unlink_private(publish.select_public(source))
+    pages = files(public, title, url)
 
     manifest_path = destination / MANIFEST
     try:
@@ -334,15 +655,15 @@ def build(source: Path, destination: Path, title: str = "") -> dict:
     except (OSError, ValueError):
         previous = []
     written, removed = [], []
-    for relative, text in files.items():
+    for relative, text in pages.items():
         target = destination / relative
         if not target.exists() or target.read_text(encoding="utf-8") != text:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8", newline="\n")
             written.append(relative)
     for relative in previous:
-        if relative not in files and (destination / relative).is_file():
+        if relative not in pages and (destination / relative).is_file():
             (destination / relative).unlink()
             removed.append(relative)
-    manifest_path.write_text(json.dumps({"builtBy": "cairn", "files": sorted(files)}, indent=2) + "\n", encoding="utf-8", newline="\n")
-    return {"write": sorted(written), "delete": sorted(removed), "notes": len(notes)}
+    manifest_path.write_text(manifest_text(pages), encoding="utf-8", newline="\n")
+    return {"write": sorted(written), "delete": sorted(removed), "notes": len(public)}

@@ -134,7 +134,8 @@ Cairn in its own window. After that, everything happens inside the app:
   setting, the Windows proxy, `HTTPS_PROXY`, signing in to the proxy as you) and remembers the one that works.
 - **Your public brain stays current.** In Settings, name your public repo (e.g. `you/brain`) and turn on
   *Publish automatically*: after each sync, notes marked `publish: true` are published, but only when one of
-  them changed.
+  them changed. The same notes go online as a web page anyone can read and search, at
+  `https://you.github.io/brain/` ([below](#a-web-page-anyone-can-search)).
 - **Always there.** Closing the window keeps Cairn in the tray and it starts with Windows.
 - **Updates itself, no restarts.** Cairn checks for a new version every 20 minutes. Changes to the app's
   screens are swapped in with a quick reload the moment you pause (your open note stays open); the rarer
@@ -476,6 +477,25 @@ python -m cairn publish --to YOUR-NAME/brain --source "path/to/your/vault"
 
 The full format is in [PROOF.md](PROOF.md).
 
+<a id="a-web-page-anyone-can-search"></a>
+**A web page anyone can search.** The same commit puts those notes in the public repo's `docs/` folder as
+a web page, and switches GitHub Pages on for it, so your public brain is online at
+`https://YOUR-NAME.github.io/brain/` (see [@juw12's](https://juw12.github.io/brain/)). Nobody needs
+Cairn, a GitHub account or a sign-in to read it:
+
+- **Search box** over every public note. Every word you type must be in the note; a word in the title
+  counts most, then a tag, then the text. `/` jumps to the box, and the address keeps the search
+  (`?q=offline+voice`), so a search can be sent as a link. The words travel with the page in one small
+  script, so no server is asked and there is no rate limit. Without JavaScript the box is not shown and
+  the pages read the same.
+- **Found by Google and Bing.** Every note is its own plain HTML page with a title, a description and its
+  own address, and `sitemap.xml` lists them all with the day each last changed.
+- Only the owner of a repo can switch GitHub Pages on. If you publish as a collaborator, Cairn says so
+  and names the one setting (repo Settings → Pages → Branch `main`, folder `/docs`); the next publish by
+  the owner does it by itself.
+- A repo that already keeps something else in `docs/` is left alone, and `--no-site` publishes the notes
+  without the page.
+
 ### Share a page without GitHub
 
 Want a link you can send to anyone, with no repo, topic or token? Build a plain web page from the
@@ -486,11 +506,14 @@ python -m cairn publish --site my-page --title "Your Name"
 ```
 
 `my-page/index.html` lists your work (each claim with the links that back it) and every public note
-gets its own page. It is plain HTML with no JavaScript and no calls to GitHub, so it opens straight
-from disk and has no rate limit. To put it online, upload the folder to any static host (Cloudflare
-Pages, Netlify, GitHub Pages, your own server). Run the command again after you change notes: pages of
-notes you un-publish are removed, and files you added to the folder yourself are left alone. This page
-shows your claims and evidence links as written; the checked proof levels stay in the Proof view.
+gets its own page. It is plain HTML with no calls to GitHub, so it opens straight from disk and has no
+rate limit; the one script is the search box on the first page, and everything reads the same without
+it. To put it online, upload the folder to any static host (Cloudflare Pages, Netlify, GitHub Pages,
+your own server). Add `--url https://the-address-it-will-have/` and each page names its own address and
+a `sitemap.xml` is written, which is what Google and Bing read to find the pages. Run the command again
+after you change notes: pages of notes you un-publish are removed, and files you added to the folder
+yourself are left alone. This page shows your claims and evidence links as written; the checked proof
+levels stay in the Proof view.
 
 ### Edit your brain from any device
 

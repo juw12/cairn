@@ -1,5 +1,6 @@
 ﻿"""One-click sync, the desktop app's API and its first-run choices. Uses only temp folders."""
 
+import hashlib
 import http.client
 import json
 import shutil
@@ -10,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cairn import desktop
+from cairn import desktop, publish
 from cairn.brain import Brain, SyncError, clone_repo, repo_folder_name
 from cairn.cli import build_parser
 from cairn.server import make_server
@@ -410,7 +411,10 @@ class AutoPublishTests(unittest.TestCase):
 
         def fake_publish(source, repo, http, today, dry_run=False):
             self.reports.append((Path(source), repo))
-            return {"repo": repo, "created": False, "write": ["brain/open.md"], "delete": [], "commit": "abc1234def"}
+            return {
+                "repo": repo, "created": False, "write": ["brain/open.md"], "delete": [], "commit": "abc1234def",
+                "site": {"url": "https://juw12.github.io/brain/", "live": True, "note": ""},
+            }
 
         for name, value in (("publish_to_github", fake_publish), ("find_token", lambda: "t"), ("make_http", lambda token: None)):
             patcher = mock.patch(f"cairn.publish.{name}", value)
@@ -437,7 +441,18 @@ class AutoPublishTests(unittest.TestCase):
         self.assertEqual(len(self.reports), 2)
         state = self.hooks.state()
         self.assertEqual(state["lastPublish"]["commit"], "abc1234")
+        self.assertEqual((state["lastPublish"]["site"], state["lastPublish"]["siteLive"]), ("https://juw12.github.io/brain/", True))
         self.assertTrue(state["autoPublish"])
+
+    def test_a_computer_that_published_before_the_web_page_existed_publishes_once_more(self):
+        self.hooks.act("publish-settings", {"to": "juw12/brain", "auto": True})
+        files = publish.unlink_private(publish.select_public(self.vault))
+        before = hashlib.sha256()  # the fingerprint as Cairn wrote it up to build 84: the notes alone
+        for path in sorted(files):
+            before.update(path.encode("utf-8") + b"\0" + files[path].encode("utf-8") + b"\0")
+        self.config.set("publishedDigest", before.hexdigest())
+        self.assertTrue(self.hooks.maybe_publish()["published"])
+        self.assertEqual(self.hooks.maybe_publish(), {"published": False, "reason": "up to date"})
 
     def test_publish_now_and_errors_are_reported(self):
         with self.assertRaises(ValueError):

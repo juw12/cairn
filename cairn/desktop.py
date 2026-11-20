@@ -307,7 +307,9 @@ def public_digest(source: Path) -> str:
     from . import publish
 
     files = publish.unlink_private(publish.select_public(source))
-    digest = hashlib.sha256()
+    # The first line stands for what a publish sends besides the notes. Changing it makes every computer
+    # publish once more: "web page" is when the page in docs/ was added.
+    digest = hashlib.sha256(b"notes + web page 1\0")
     for path in sorted(files):
         digest.update(path.encode("utf-8") + b"\0" + files[path].encode("utf-8") + b"\0")
     return digest.hexdigest()
@@ -328,11 +330,17 @@ def publish_now(source: Path, repo: str, config: "Config", force: bool = False) 
         config.set("lastPublish", {"at": stamp, "error": str(error), "repo": repo})
         raise SyncError(str(error)) from error
     config.data["publishedDigest"] = digest
+    web = report.get("site") or {}
     config.set("lastPublish", {
         "at": stamp, "repo": repo, "commit": (report.get("commit") or "")[:7],
         "changed": len(report["write"]) + len(report["delete"]),
+        "site": web.get("url", ""), "siteLive": bool(web.get("live")), "siteNote": web.get("note", ""),
     })
-    return {"published": bool(report.get("commit")), "commit": report.get("commit"), "changed": len(report["write"]) + len(report["delete"])}
+    return {
+        "published": bool(report.get("commit")), "commit": report.get("commit"),
+        "changed": len(report["write"]) + len(report["delete"]),
+        "site": web.get("url", ""), "siteLive": bool(web.get("live")),
+    }
 
 
 def valid_repo(text: str) -> str:

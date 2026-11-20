@@ -1,8 +1,10 @@
 """cairn publish --site: a plain-HTML public page from publish: true notes, with nothing private in it."""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from xml.etree import ElementTree
 
 from cairn import publish, site
 from cairn.cli import main
@@ -108,6 +110,69 @@ class SiteTests(unittest.TestCase):
         self.assertIn("<pre><code>&lt;b&gt;raw&lt;/b&gt;</code></pre>", rendered)
         self.assertIn("<hr>\n<p>last line</p>", rendered)
 
+    def test_index_has_a_search_box_that_stays_hidden_without_javascript(self):
+        site.build(self.source, self.out, "Ada Lovelace")
+        index = (self.out / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<form class="search" id="search" role="search" hidden>', index)
+        self.assertIn('placeholder="Search 2 notes"', index)
+        self.assertIn('<script src="search.js" defer></script>', index)
+        self.assertIn('<div id="listing">', index)
+        page = (self.out / "notes/built-x.html").read_text(encoding="utf-8")
+        self.assertNotIn("search.js", page)  # a note's page needs no script at all
+
+    def test_search_script_carries_public_words_only_and_cannot_add_markup(self):
+        site.build(self.source, self.out)
+        script = (self.out / "search.js").read_text(encoding="utf-8")
+        self.assertTrue(script.isascii())
+        notes = json.loads(script[script.index("var notes = ") + len("var notes = "):script.index(";\n  var MOST")])
+        self.assertEqual([note["u"] for note in notes], ["Other%20public.html", "notes/built-x.html"])
+        built = notes[1]
+        self.assertEqual((built["t"], built["d"], built["g"]), ("Built X", "2026-11-10", ["tools"]))
+        self.assertTrue(built["x"].startswith("Built X & shipped it See Secret plan and the other one."))
+        for private in ("salary numbers", "not yet ready", "hidden folder text", "diagram.png"):
+            self.assertNotIn(private, script)
+        self.assertNotIn("innerHTML", script)  # note text only ever goes in as text nodes
+
+    def test_plain_text_drops_the_markdown_marks(self):
+        text = site.plain_text(
+            "## Plan\n\n- [x] ship **v1** with `cairn`\n> see [[notes/Road map|the map]] and [docs](https://example.org/d)\n\n"
+            "| a | b |\n|---|---|\n| 1 | 2 |\n\n```\ncode line\n```\n![shot](https://example.org/s.png)\n"
+        )
+        self.assertEqual(text, "Plan ship v1 with cairn see the map and docs a b 1 2 code line")
+
+    def test_every_page_says_what_it_is_for_search_engines(self):
+        site.build(self.source, self.out, "Ada Lovelace")
+        page = (self.out / "notes/built-x.html").read_text(encoding="utf-8")
+        self.assertIn('<meta name="description" content="Built X &amp; shipped it">', page)
+        self.assertIn('<meta property="og:title" content="Built X · Ada Lovelace">', page)
+        other = (self.out / "Other public.html").read_text(encoding="utf-8")
+        self.assertIn('<meta name="description" content="back to Built X">', other)
+        self.assertNotIn("canonical", page)  # no address was given, so none is claimed
+        self.assertFalse((self.out / "sitemap.xml").exists())
+
+    def test_url_adds_each_pages_address_and_a_sitemap(self):
+        report = site.build(self.source, self.out, "Ada", "https://ada.example/brain")
+        self.assertIn("sitemap.xml", report["write"])
+        index = (self.out / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<link rel="canonical" href="https://ada.example/brain/">', index)
+        other = (self.out / "Other public.html").read_text(encoding="utf-8")
+        self.assertIn('<link rel="canonical" href="https://ada.example/brain/Other%20public.html">', other)
+        sitemap = (self.out / "sitemap.xml").read_text(encoding="utf-8")
+        ElementTree.fromstring(sitemap)  # well-formed
+        self.assertIn("<url><loc>https://ada.example/brain/</loc><lastmod>2026-11-10</lastmod></url>", sitemap)
+        self.assertIn("<url><loc>https://ada.example/brain/notes/built-x.html</loc><lastmod>2026-11-10</lastmod></url>", sitemap)
+        self.assertIn("<url><loc>https://ada.example/brain/Other%20public.html</loc><lastmod>2026-11-01</lastmod></url>", sitemap)
+        self.assertEqual(sitemap.count("<url>"), 3)
+        self.assertIn("Sitemap: https://ada.example/brain/sitemap.xml", (self.out / "robots.txt").read_text(encoding="utf-8"))
+        for bad in ("ada.example/brain", "javascript:alert(1)", 'https://ada.example/"><script>'):
+            with self.assertRaises(publish.PublishError):
+                site.build(self.source, self.out, "Ada", bad)
+
+    def test_a_note_named_index_does_not_replace_the_front_page(self):
+        (self.source / "index.md").write_text("---\ntitle: My index note\npublish: true\n---\nbody\n", encoding="utf-8")
+        site.build(self.source, self.out, "Ada")
+        self.assertIn("<h1>Ada</h1>", (self.out / "index.html").read_text(encoding="utf-8"))
+
     def test_refuses_to_write_into_the_brain_itself(self):
         with self.assertRaises(publish.PublishError):
             site.build(self.source, self.source)
@@ -116,6 +181,9 @@ class SiteTests(unittest.TestCase):
         code = main(["publish", "--source", str(self.source), "--site", str(self.out), "--title", "Ada"])
         self.assertEqual(code, 0)
         self.assertIn("<h1>Ada</h1>", (self.out / "index.html").read_text(encoding="utf-8"))
+        code = main(["publish", "--source", str(self.source), "--site", str(self.out), "--title", "Ada", "--url", "https://ada.example/"])
+        self.assertEqual(code, 0)
+        self.assertIn("<loc>https://ada.example/</loc>", (self.out / "sitemap.xml").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

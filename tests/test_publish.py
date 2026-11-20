@@ -35,10 +35,13 @@ def make_source(root: Path) -> Path:
 class FakeGitHub:
     """Just enough of the GitHub API for publish_to_github: repos, topics, refs, trees, commits."""
 
-    def __init__(self, exists=True, private=False):
+    def __init__(self, exists=True, private=False, admin=True, pages=None):
         self.files = {"README.md": "# brain\n"} if exists else {}
         self.exists = exists
         self.private = private
+        self.admin = admin  # False: a collaborator, who may push but not change the repo's settings
+        self.pages = pages  # what GET /pages answers; None = GitHub Pages is off
+        self.homepage = ""
         self.topics = []
         self.commits = 0
         self.calls = []
@@ -51,7 +54,20 @@ class FakeGitHub:
         if path == "/repos/me/brain" and method == "GET":
             if not self.exists:
                 return 404, {"message": "Not Found"}
-            return 200, {"default_branch": "main", "private": self.private, "topics": self.topics}
+            return 200, {"default_branch": "main", "private": self.private, "topics": self.topics,
+                         "permissions": {"admin": self.admin, "push": True}, "homepage": self.homepage}
+        if path == "/repos/me/brain" and method == "PATCH":
+            self.homepage = body["homepage"]
+            return 200, {}
+        if path == "/repos/me/brain/pages" and method == "GET":
+            return (200, self.pages) if self.pages else (404, {"message": "Not Found"})
+        if path == "/repos/me/brain/pages" and method == "POST":
+            if not self.admin:
+                return 403, {"message": "Resource not accessible"}
+            self.pages = {"html_url": "https://me.github.io/brain/", "source": body["source"], "build_type": "legacy"}
+            return 201, self.pages
+        if path == "/users/me":
+            return 200, {"login": "me", "name": "Ada Lovelace"}
         if path == "/user/repos" and method == "POST":
             self.exists = True
             self.files = {"README.md": "# brain\n"}
@@ -143,8 +159,81 @@ class PublishTests(unittest.TestCase):
         # Un-publish: removed in the next commit.
         (self.source / "notes/built-x.md").write_text(PRIVATE, encoding="utf-8")
         third = publish.publish_to_github(self.source, "me/brain", github, "2026-11-07")
-        self.assertEqual(third["delete"], ["brain/notes/built-x.md"])
+        self.assertEqual(third["delete"], ["brain/notes/built-x.md", "docs/notes/built-x.html"])
         self.assertNotIn("brain/notes/built-x.md", github.files)
+        self.assertNotIn("docs/notes/built-x.html", github.files)
+
+    def test_the_notes_also_go_online_as_a_web_page_with_search(self):
+        github = FakeGitHub(exists=False)
+        report = publish.publish_to_github(self.source, "me/brain", github, "2026-11-07")
+        self.assertEqual(github.commits, 1, "notes and web page travel in the same commit")
+        self.assertEqual(report["site"]["url"], "https://me.github.io/brain/")
+        self.assertTrue(report["site"]["live"])
+        self.assertEqual(github.pages["source"], {"branch": "main", "path": "/docs"})
+        self.assertEqual(github.homepage, "https://me.github.io/brain/")
+        index = github.files["docs/index.html"]
+        self.assertIn("<h1>Ada Lovelace</h1>", index)  # the name on the GitHub profile
+        self.assertIn('<link rel="canonical" href="https://me.github.io/brain/">', index)
+        self.assertIn('id="search"', index)
+        self.assertIn("Built X", github.files["docs/search.js"])
+        self.assertIn("<loc>https://me.github.io/brain/notes/built-x.html</loc>", github.files["docs/sitemap.xml"])
+        self.assertIn(".nojekyll", json.loads(github.files[publish.SITE_MANIFEST])["files"])
+        self.assertIn("https://me.github.io/brain/", github.files["README.md"])
+        everything = "\n".join(github.files.values())
+        for private in ("salary numbers", "not yet", "hidden folder", "diagram.png"):
+            self.assertNotIn(private, everything)
+        # Nothing changed: no commit, and Pages is not switched on a second time.
+        calls = len(github.calls)
+        again = publish.publish_to_github(self.source, "me/brain", github, "2026-11-07")
+        self.assertIsNone(again["commit"])
+        self.assertTrue(again["site"]["live"])
+        self.assertNotIn(("POST", "/repos/me/brain/pages"), github.calls[calls:])
+
+    def test_a_collaborator_publishes_the_page_and_is_told_how_the_owner_puts_it_online(self):
+        github = FakeGitHub(admin=False)
+        report = publish.publish_to_github(self.source, "me/brain", github, "2026-11-07")
+        self.assertIn("docs/index.html", github.files)
+        self.assertFalse(report["site"]["live"])
+        self.assertIn("Settings > Pages", report["site"]["note"])
+        self.assertEqual(github.files["README.md"], "# brain\n", "a README somebody wrote is never replaced")
+        # Later the owner publishes: nothing new to commit, but Pages is switched on.
+        github.admin = True
+        later = publish.publish_to_github(self.source, "me/brain", github, "2026-11-08")
+        self.assertIsNone(later["commit"])
+        self.assertTrue(later["site"]["live"])
+        self.assertEqual(github.pages["source"]["path"], "/docs")
+
+    def test_cairns_own_readme_gets_the_link_once_the_page_can_go_online(self):
+        github = FakeGitHub()
+        github.files["README.md"] = publish._readme("me")  # written by an older Cairn, before the web page
+        publish.publish_to_github(self.source, "me/brain", github, "2026-11-07")
+        self.assertIn("Read and search it on the web: https://me.github.io/brain/", github.files["README.md"])
+
+    def test_a_docs_folder_that_holds_something_else_is_left_alone(self):
+        github = FakeGitHub()
+        github.files["docs/index.html"] = "<h1>my own web app</h1>\n"
+        report = publish.publish_to_github(self.source, "me/brain", github, "2026-11-07")
+        self.assertEqual(github.files["docs/index.html"], "<h1>my own web app</h1>\n")
+        self.assertFalse(any(path.startswith("docs/") for path in report["write"]))
+        self.assertFalse(report["site"]["live"])
+        self.assertIn("other files in docs/", report["site"]["note"])
+        self.assertIsNone(github.pages)
+        self.assertIn("brain/notes/built-x.md", github.files, "the notes are still published")
+
+    def test_pages_set_up_another_way_is_reported_and_no_site_leaves_docs_out(self):
+        root = FakeGitHub(pages={"html_url": "https://me.example/", "source": {"branch": "main", "path": "/"}, "build_type": "legacy"})
+        report = publish.publish_to_github(self.source, "me/brain", root, "2026-11-07")
+        self.assertEqual(report["site"], {"url": "https://me.example/docs/", "live": True, "note": ""})
+        self.assertIn('href="https://me.example/docs/"', root.files["docs/index.html"])
+        workflow = FakeGitHub(pages={"html_url": "https://me.github.io/brain/", "source": {"branch": "main", "path": "/"}, "build_type": "workflow"})
+        report = publish.publish_to_github(self.source, "me/brain", workflow, "2026-11-07")
+        self.assertFalse(report["site"]["live"])
+        self.assertIn("show something else", report["site"]["note"])
+        plain = FakeGitHub()
+        report = publish.publish_to_github(self.source, "me/brain", plain, "2026-11-07", site=False)
+        self.assertNotIn("site", report)
+        self.assertFalse(any(path.startswith("docs/") for path in plain.files))
+        self.assertNotIn(("GET", "/repos/me/brain/pages"), plain.calls)
 
     def test_refuses_a_private_target_and_dry_run_writes_nothing(self):
         with self.assertRaises(publish.PublishError):
