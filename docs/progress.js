@@ -396,6 +396,25 @@ export function deviceNotes(notes, device) {
   });
 }
 
+/**
+ * The notes that count when only some computers are picked: the sessions those computers ran, and every note
+ * that is not a session. `names` null or empty means all of them.
+ */
+export function notesOfDevices(notes, names) {
+  const picked = new Set(names || []);
+  return picked.size ? notes.filter((note) => note.type !== "session" || picked.has(deviceOf(note))) : notes;
+}
+
+/**
+ * A kept choice of computers, checked against the ones the brain holds sessions of (`list` from deviceList):
+ * the names that still exist, in the list's order, or null when that is none of them or all of them.
+ */
+export function deviceChoice(list, kept) {
+  const wanted = new Set(Array.isArray(kept) ? kept.filter((name) => typeof name === "string") : []);
+  const names = list.map((device) => device.name).filter((name) => wanted.has(name));
+  return names.length && names.length < list.length ? names : null;
+}
+
 export function formatMinutes(minutes) {
   if (minutes === null || minutes === undefined) return "";
   if (minutes < 1) return "under a minute";

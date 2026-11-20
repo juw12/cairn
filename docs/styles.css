@@ -2309,6 +2309,11 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .lb { max-width: 820px; }
 .lb-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .lb-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+/* which of your computers count as "You": all of them, or the ones picked */
+.lb-devices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 13px; }
+.lb-devices .chip { max-width: 100%; min-width: 0; }
+.lb-devices .lb-device-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-devices .chip b { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; opacity: 0.75; }
 .lb-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--ink); }
 .lb-row { display: grid; grid-template-columns: 26px 32px minmax(0, 1fr) minmax(60px, 180px) auto 28px; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .lb-place { font: 600 14px/1 var(--mono); text-align: right; color: var(--muted); }
@@ -2332,7 +2337,7 @@ details.rc-section > summary .muted { margin-left: 4px; }
 @media (max-width: 600px) {
   .lb-row { grid-template-columns: 22px 32px minmax(0, 1fr) auto 28px; gap: 8px 10px; }
   .lb-bar { grid-column: 3 / -1; grid-row: 2; }
-  .lb-add .btn, .lb-publish .btn, .lb-tabs .chip, .lb-head .btn { min-height: 40px; }
+  .lb-add .btn, .lb-publish .btn, .lb-tabs .chip, .lb-devices .chip, .lb-head .btn { min-height: 40px; }
 }
 
 /* ------------------------------------------------------------ Vibe: blocks you fold and arrange */

@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 77,
+      "date": "2026-11-20",
+      "title": "Your totals across computers",
+      "changes": [
+        "People: your row on the leaderboard counts every computer that syncs into the brain, says so, and lets you pick which computers count. What you publish follows the same choice (#58)",
+        "People: an unpublished row now reads \"not published\" instead of \"only on this device\", which sounded as if only one computer was counted (#58)"
+      ]
+    },
+    {
       "build": 76,
       "date": "2026-11-20",
       "title": "Who pushes, on the folded GitHub block",

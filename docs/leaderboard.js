@@ -8,11 +8,13 @@ import * as auth from "./auth.js";
 import { ask, icon, toast, today } from "./ui.js";
 import { fileByPath, readOnly, scheduleGitRefresh, state, upsertFile } from "./state.js";
 import { compact } from "./recap.js";
+import { deviceChoice, deviceList, notesOfDevices } from "./progress.js";
 import { hoursText } from "./share.js";
 import { renderView } from "./app.js";
 
 export const STATS_PATH = "vibe-stats.md";
 export const FRIENDS_KEY = "cairn.friends";
+export const DEVICES_KEY = "cairn.lbDevices";
 // Where a brain's notes live inside its repo, most likely first.
 const ROOTS = ["brain/", ".brain/", ""];
 
@@ -146,6 +148,68 @@ export function setLeaderboardStat(statId) {
   renderView();
 }
 
+// ------------------------------------------------------------ which of your computers count
+
+// Sessions reach a brain from every computer that syncs into it, so your totals are all of them together
+// unless you pick some. The choice decides the row "You" and what Publish writes; it is kept on this device.
+let keptDevices;
+
+function keptChoice() {
+  if (keptDevices === undefined) {
+    try {
+      keptDevices = JSON.parse(localStorage.getItem(DEVICES_KEY) || "null");
+    } catch {
+      keptDevices = null; // storage is off: the choice lasts until the page closes
+    }
+  }
+  return keptDevices;
+}
+
+// The computers with at least one session, the one used last first.
+const myDevices = () => deviceList(state.notes).filter((device) => device.sessions);
+const pickedDevices = (list = myDevices()) => deviceChoice(list, keptChoice());
+const myStats = (names) => core.vibeStats(notesOfDevices(state.notes, names), today());
+const deviceLabel = (name) => name || "No computer named";
+
+// "all 2 devices", "MacBook Pro only", "2 of 3 devices"; nothing to say with a single computer.
+function countedText(list, picked) {
+  if (list.length < 2) return "";
+  if (!picked) return `all ${list.length} devices`;
+  return picked.length === 1 ? `${deviceLabel(picked[0])} only` : `${picked.length} of ${list.length} devices`;
+}
+
+// One press on a computer counts it alone; further presses add or take away; "All devices" clears the choice.
+export function toggleLeaderboardDevice(name) {
+  const list = myDevices();
+  const picked = new Set(typeof name === "string" ? pickedDevices(list) || [] : []);
+  if (typeof name === "string") {
+    if (picked.has(name)) picked.delete(name);
+    else picked.add(name);
+  }
+  keptDevices = deviceChoice(list, [...picked]);
+  try {
+    if (keptDevices) localStorage.setItem(DEVICES_KEY, JSON.stringify(keptDevices));
+    else localStorage.removeItem(DEVICES_KEY);
+  } catch {
+    /* storage is off */
+  }
+  renderView();
+}
+
+// The chips: all computers together, then each one with its own figure for the ranking shown.
+function devicesBar(list, picked, statId) {
+  if (list.length < 2) return "";
+  const stat = STATS[statId];
+  const figure = (names) => esc(stat.text(totalsOf(myStats(names))[statId]));
+  const chip = (on, attribute, label, value) =>
+    `<button class="chip${on ? " on" : ""}" data-action="lb-device"${attribute} aria-pressed="${on}"><span class="lb-device-name">${label}</span> <b>${value}</b></button>`;
+  return `<div class="lb-devices" role="group" aria-label="Which of your computers count as you">
+      <span class="muted">You are</span>
+      ${chip(!picked, "", "All devices", figure(null))}
+      ${list.map((device) => chip(Boolean(picked?.includes(device.name)), ` data-device="${esc(device.name)}"`, esc(deviceLabel(device.name)), figure([device.name]))).join("")}
+    </div>`;
+}
+
 // ------------------------------------------------------------ publishing your own totals (opt-in)
 
 function publishedTotals() {
@@ -155,7 +219,10 @@ function publishedTotals() {
 
 export async function publishStats() {
   if (readOnly()) return;
-  const stats = core.vibeStats(state.notes, today());
+  const devices = myDevices();
+  const picked = pickedDevices(devices);
+  const counted = countedText(devices, picked);
+  const stats = myStats(picked);
   const totals = totalsOf(stats);
   const github = state.info.mode === "github";
   const ok = await ask({
@@ -165,6 +232,7 @@ export async function publishStats() {
       : `This saves ${STATS_PATH} in your brain, marked publish: true. It becomes public the next time the brain is published or pushed to a public repo.`,
     list: [
       ...Object.entries(STATS).map(([id, stat]) => `${stat.label}: ${stat.text(totals[id])}`),
+      ...(counted ? [`Counted: ${counted}. The names of your computers are not published.`] : []),
       "Not included: session titles, folders, model names, messages.",
     ],
     confirm: "Publish totals",
@@ -211,9 +279,7 @@ function rowHtml(row, statId, top) {
     .map(([id, stat]) => `<span>${esc(stat.text(row.totals[id]))} ${esc(stat.label.toLowerCase())}</span>`)
     .join("");
   const note = row.me
-    ? row.published
-      ? `published ${esc(row.published)}`
-      : "only on this device"
+    ? [row.counted, row.published ? `published ${row.published}` : "not published"].filter(Boolean).map(esc).join(" · ")
     : row.totals.updated
       ? `updated ${esc(row.totals.updated)}`
       : "";
@@ -245,13 +311,16 @@ export function leaderboardView() {
   }
   const mine = !readOnly();
   const published = mine ? publishedTotals() : null;
+  const devices = mine ? myDevices() : [];
+  const picked = pickedDevices(devices);
   if (mine) {
     const me = auth.session();
     rows.push({
       me: true,
       login: me?.login || "you",
       avatar: me?.avatar || "",
-      totals: totalsOf(core.vibeStats(state.notes, today())),
+      totals: totalsOf(myStats(picked)),
+      counted: countedText(devices, picked),
       published: published?.updated || (published ? "earlier" : ""),
     });
   }
@@ -283,6 +352,7 @@ export function leaderboardView() {
         <button class="btn sm ghost" data-action="lb-refresh"${board.loading ? " disabled" : ""}>${board.loading ? "Loading…" : "Refresh"}</button>
       </div>
       <div class="lb-tabs" role="group" aria-label="Rank by">${tabs}</div>
+      ${devicesBar(devices, picked, statId)}
       ${ranked.length ? `<ol class="lb-list">${ranked.map((row) => rowHtml(row, statId, top)).join("")}</ol>` : ""}
       ${waitingHtml}
       <form class="lb-add" id="friend-form" autocomplete="off">
@@ -291,6 +361,6 @@ export function leaderboardView() {
         <button class="btn" type="submit">Add friend</button>
       </form>
       ${publish}
-      <p class="muted lb-note">All-time totals that each person chose to publish in their own brain. Self-reported, not verified. Your friends list stays on this device.</p>
+      <p class="muted lb-note">All-time totals that each person chose to publish in their own brain. Self-reported, not verified. Your own row counts every computer that syncs into this brain${devices.length > 1 ? ", or the ones you pick above" : ""}. Your friends list stays on this device.</p>
     </section>`;
 }
