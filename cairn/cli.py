@@ -263,6 +263,7 @@ def _vibe_watch(brain: Brain, args) -> int:
         "laptop": not args.no_laptop,
         "github": not args.no_github,
         "github_accounts": tuple(args.github_account or ()),
+        "repo_copy": not args.no_github and not args.once,
     }
     if args.vector_process:
         options["vector_names"] = tuple(args.vector_process)
@@ -388,6 +389,38 @@ def _vibe_github_move(brain: Brain, args, account: str) -> int:
     return 0
 
 
+def _vibe_github_copy(brain: Brain, args, account: str) -> int:
+    """`cairn vibe github copy FOLDER`: keep a full copy (a git mirror) of every repo of the accounts the
+    GitHub CLI is signed in to, in FOLDER on this computer. The folder is remembered, so later runs need
+    none; `--account NAME` copies one account only. Only repos pushed to since the last run are fetched."""
+    from pathlib import Path
+
+    from . import github_copy, github_usage
+    from .brain import ConflictError
+
+    chosen = github_copy.settings()
+    named = " ".join(args.text[1:]).strip()
+    if not named and not chosen:
+        print("Usage: cairn vibe github copy FOLDER [--account NAME]   (the folder is remembered: later runs need none)", file=sys.stderr)
+        return 2
+    folder = Path(named).expanduser().resolve() if named else Path(chosen["folder"])
+    try:
+        # one account when asked for; every signed-in one when a folder is named; else as last time
+        remembered = [github_usage.account_name(account)] if account else [] if named else list(chosen.get("accounts") or [])
+        names = remembered or github_copy.accounts_to_copy()
+        github_copy.remember(folder, remembered)
+        state = github_copy.copy(folder, names, say=print)
+    except (github_copy.CopyError, ValueError, OSError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    try:
+        github_copy.write_note(brain, folder, state)
+    except (ConflictError, OSError):
+        pass  # the copy is made; its note is written again by the next run
+    print(github_copy.summary(folder, state))
+    return 1 if state["problems"] or github_copy.counts(state)["failed"] else 0
+
+
 def _vibe_github_push(args) -> int:
     """`cairn vibe github push-as`: which of your GitHub accounts this computer pushes as.
     `cairn vibe github push-as NAME` makes it NAME, one of the accounts the GitHub CLI is signed in to."""
@@ -411,7 +444,8 @@ def _vibe_github(brain: Brain, args) -> int:
     """`cairn vibe github 1801 --at 2026-11-16T14:51`: count the month's Actions minutes on from the
     figure GitHub itself shows or mails. With no number, say what the month's note holds.
     `--account NAME` is for another account you are signed in to; `move REPO --to NAME` hands a repo over;
-    `push-as [NAME]` says or sets which account this computer pushes as."""
+    `push-as [NAME]` says or sets which account this computer pushes as; `copy [FOLDER]` keeps a full
+    copy of every repo on this computer."""
     import datetime as dt
 
     from . import core, github_usage, publish
@@ -421,6 +455,8 @@ def _vibe_github(brain: Brain, args) -> int:
         return _vibe_github_move(brain, args, account)
     if args.text and args.text[0] == "push-as":
         return _vibe_github_push(args)
+    if args.text and args.text[0] == "copy":
+        return _vibe_github_copy(brain, args, account)
     try:
         account = github_usage.account_name(account) if account else ""
     except ValueError as error:
