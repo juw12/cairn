@@ -614,10 +614,23 @@ export class GitHubStore {
     const { owner, name, branch } = this.repo;
     const clean = target.trim().replaceAll("\\", "/").replace(/^\.\//, "");
     const folder = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : "";
-    const options = [...new Set([folder ? `${folder}/${clean}` : null, clean].filter(Boolean))];
-    return options
-      .filter((path) => !path.split("/").includes(".."))
-      .map((path) => `https://raw.githubusercontent.com/${owner}/${name}/${encodeURIComponent(branch || "main")}/${this.root}${path}`.replace(/ /g, "%20"));
+    const options = [...new Set([folder ? `${folder}/${clean}` : null, clean].filter(Boolean))].filter((path) => !path.split("/").includes(".."));
+    if (this.repo.isPrivate) return this.privateAsset(options);
+    return options.map((path) => `https://raw.githubusercontent.com/${owner}/${name}/${encodeURIComponent(branch || "main")}/${this.root}${path}`.replace(/ /g, "%20"));
+  }
+
+  // A private brain: the picture is read with your sign-in and kept for this visit, so a page that shows
+  // it again does not ask GitHub twice.
+  async privateAsset(options) {
+    this.assets ||= new Map();
+    for (const path of options) {
+      if (!this.assets.has(path)) {
+        this.assets.set(path, gh.fileBlob(this.repo, this.root + path).then((blob) => (blob ? URL.createObjectURL(blob) : null)));
+      }
+      const url = await this.assets.get(path);
+      if (url) return [url];
+    }
+    return [];
   }
 
   assertWritable() {

@@ -10,6 +10,7 @@ const SHELL = [
   "ui.js",
   "state.js",
   "views.js",
+  "home.js",
   "map.js",
   "map3d.js",
   "graph.js",

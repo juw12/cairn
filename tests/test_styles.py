@@ -21,6 +21,16 @@ class StylesheetTests(unittest.TestCase):
                 self.assertGreaterEqual(depth, 0, f"{sheet.name}:{number} closes a block that was never opened")
             self.assertEqual(depth, 0, f"{sheet.name} leaves {depth} block(s) open")
 
+    def test_recap_rows_are_not_sized_by_a_baseline(self):
+        # Safari on a phone sizes a baseline-aligned grid row by one line of text, so a title that wraps
+        # ran into the rows under it. The rows start at the top and the title is allowed to wrap.
+        css = strip_comments_and_strings((DOCS / "styles.css").read_text(encoding="utf-8"))
+        row = re.search(r"^\.page-recap li \{([^}]*)\}", css, re.M).group(1)
+        self.assertIn("align-items: start", row)
+        title = re.search(r"^\.page-recap \.txt \.link-button \{([^}]*)\}", css, re.M).group(1)
+        self.assertIn("white-space: normal", title)
+        self.assertIn("display: inline", title)
+
 
 if __name__ == "__main__":
     unittest.main()

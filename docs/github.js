@@ -300,6 +300,18 @@ export async function readFile(repo, fullPath) {
   }
 }
 
+// One file of a repo as a blob the page can show (a picture in a private brain, which raw.githubusercontent.com
+// will not hand out without a token), or null when it is not there. Signed in only.
+export async function fileBlob(repo, fullPath) {
+  if (!session()) return null;
+  try {
+    const url = `${API}/repos/${repo.owner}/${repo.name}/contents/${encodePath(fullPath)}?ref=${encodeURIComponent(repo.branch)}`;
+    return await (await request(url, { headers: { Accept: "application/vnd.github.raw" } })).blob();
+  } catch {
+    return null;
+  }
+}
+
 // Create (sha = null) or update (sha = the version you edited). Returns the new sha.
 export async function writeFile(repo, fullPath, text, sha, message) {
   const body = { message, content: encodeBase64(text), branch: repo.branch };

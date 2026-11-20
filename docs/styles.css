@@ -340,7 +340,7 @@ button.tag:hover, .tag.on { background: var(--ink); color: var(--bg); }
 .item-card[draggable="false"] { cursor: pointer; }
 .item-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
 .item-card.dragging { opacity: .5; transform: rotate(-1deg) scale(.98); }
-.item-card .title { font-weight: 560; line-height: 1.35; }
+.item-card .title { font-weight: 560; line-height: 1.35; overflow-wrap: anywhere; }
 .item-card .snippet { font-size: 12.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .item-card .foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); font-family: var(--mono); }
 .item-card .foot .grow { flex: 1; }
@@ -1742,6 +1742,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .ap-brief { margin-top: 14px; }
 .ap-brief summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
 .ap-figures .value.warn { color: var(--danger); }
+/* A word ("OpenCode") in a tile, not a number: at full size it runs off a small phone. */
+@media (max-width: 700px) { .ap-figures .figure .value { font-size: 30px; } }
 .ap-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 32px; }
 .ap-jobs { display: flex; flex-direction: column; max-height: 420px; overflow: auto; }
 .ap-job { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; row-gap: 2px; align-items: baseline; width: 100%; padding: 10px 8px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -2376,10 +2378,13 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .figures.page-figures .figure .value { font-size: 32px; }
 .figures.page-figures .figure .sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page-recap { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.page-recap li { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 5px 0; font-size: 13.5px; line-height: 1.45; }
-.page-recap .t { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.page-recap .txt { min-width: 0; overflow-wrap: anywhere; color: var(--ink-2); }
+/* Rows start at the top, not on a shared baseline: a title that wraps is a button several lines tall, and
+   Safari sizes a baseline-aligned row by one line, which let the rows run into each other on a phone. */
+.page-recap li { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: start; padding: 5px 0; font-size: 13.5px; line-height: 1.45; }
+.page-recap .t { font-family: var(--mono); font-size: 11.5px; line-height: 19.6px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.page-recap .txt { display: block; min-width: 0; overflow-wrap: anywhere; color: var(--ink-2); }
 .page-recap .txt strong, .page-recap .txt .link-button { color: var(--ink); }
+.page-recap .txt .link-button { display: inline; max-width: 100%; font: inherit; font-weight: 600; line-height: inherit; white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 .page-recap-empty { margin: 0; }
 .vp-body > .proj-lead:last-of-type { margin-bottom: 8px; }
 .vp-body > .proj-foot { margin-top: 0; }
@@ -2412,4 +2417,78 @@ details.rc-section > summary .muted { margin-left: 4px; }
 @media (hover: none) and (pointer: coarse) {
   .vp-tools { opacity: 1; }
   .vp-grip { display: none; }
+}
+
+/* ------------------------------------------------------------ Home: what needs you, what runs, activity, updates */
+/* Rows stack on their own lines of fixed height: nothing here is sized by a baseline, so a title that wraps
+   on a phone pushes the row taller instead of running into the next one. */
+.home-list { list-style: none; margin: 0; padding: 0; }
+.home-list > li { border-bottom: 1px solid var(--line); }
+.home-list > li:last-child { border-bottom: 0; }
+.home-row, .home-device { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 0; border: 0; background: none; text-align: left; font-size: 13.5px; line-height: 20px; color: var(--ink); }
+.home-row:hover .hr-title { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.hr-dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--line-strong); }
+.hr-dot.live { background: var(--journal); }
+.hr-dot.bad { background: var(--danger); }
+.hr-dot.warn { background: var(--idea); }
+.hr-dot.task { background: var(--task); }
+.hr-dot.decision { background: var(--decision); }
+.hr-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 2px 14px; }
+.hr-title { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.hr-meta { flex: none; max-width: 46%; font-family: var(--mono); font-size: 11.5px; line-height: 20px; color: var(--muted); text-align: right; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+/* A computer's line is short and there are few of them: show all of it. */
+.home-device .hr-meta { display: block; max-width: 60%; }
+.hr-badge { display: inline-block; padding: 0 6px; border-radius: 4px; background: var(--sunken); color: var(--ink-2); font-family: var(--mono); font-size: 11px; font-weight: 500; line-height: 18px; vertical-align: 1px; }
+.hr-badge.bad { background: var(--danger-soft); color: var(--danger); }
+.hr-badge.warn { background: var(--idea-soft); color: var(--idea-ink); }
+.hr-badge.decision { background: var(--decision-soft); color: var(--decision); }
+.home-idle, .home-devices-note { margin: 4px 0 0; }
+.home-idle .link-button { display: inline; font: inherit; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
+
+.home-chart { display: grid; gap: 8px; }
+.hc-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.hc-opts { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+.hc-opt { height: 30px; padding: 0 11px; border: 0; background: none; font-size: 12.5px; line-height: 30px; color: var(--ink-2); }
+.hc-opt + .hc-opt { border-left: 1px solid var(--line-strong); }
+.hc-opt[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.hc-total { margin: 4px 0 0; font-size: 13.5px; line-height: 20px; }
+.hc-plot { display: grid; grid-template-columns: repeat(var(--bars), minmax(0, 1fr)); align-items: stretch; height: 132px; padding-top: 4px; border-bottom: 1px solid var(--line-strong); touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.hc-bar { position: relative; display: block; min-width: 0; height: 100%; padding: 0 1px; border: 0; background: none; }
+.hc-bar > i { position: absolute; left: 12%; right: 12%; bottom: 0; display: block; min-height: 0; border-radius: 2px 2px 0 0; background: var(--line-strong); overflow: hidden; }
+.hc-bar > i > b { position: absolute; left: 0; right: 0; bottom: 0; display: block; background: var(--journal); }
+.hc-bar.is-today > i { background: var(--ink-2); }
+.hc-bar:hover > i { background: var(--ink-2); }
+.hc-bar[aria-pressed="true"] { background: var(--accent-soft); }
+.hc-bar[aria-pressed="true"] > i { background: var(--accent); }
+.hc-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.hc-axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--muted); }
+.hc-key { margin: 0; line-height: 18px; }
+.hc-key i { display: inline-block; width: 9px; height: 9px; margin: 0 3px 0 0; border-radius: 2px; background: var(--line-strong); vertical-align: -1px; }
+.hc-key i.k-part { margin-left: 8px; background: var(--journal); }
+.home-day { margin-top: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); }
+.home-day > :last-child { margin-bottom: 0; }
+.hd-head { font-size: 13.5px; line-height: 20px; }
+.hd-nums { display: flex; flex-wrap: wrap; gap: 2px 18px; margin: 6px 0 4px; font-size: 13px; line-height: 22px; color: var(--ink-2); }
+.hd-nums b { font-family: var(--display); font-size: 22px; font-weight: 400; line-height: 22px; color: var(--ink); }
+.hd-mood { margin: 0 0 4px; }
+.hd-sub { margin: 10px 0 0; font-size: 12px; font-weight: 600; line-height: 18px; color: var(--muted); }
+.hd-list { margin-top: 6px; }
+
+/* An update row with its picture: the picture opens the note, and goes away when the file is not on this device. */
+.page-recap li.has-thumb { grid-template-columns: 84px minmax(0, 1fr) auto; }
+.recap-detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 1px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.recap-thumb { display: block; width: 72px; height: 48px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--sunken); overflow: hidden; }
+.recap-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+.recap-thumb:has(.missing), .recap-thumb:has(img:not([src])) { display: none; }
+.home-updates > li { padding: 7px 0; border-bottom: 1px solid var(--line); }
+.home-updates > li:last-child { border-bottom: 0; }
+@media (max-width: 700px) {
+  .hr-main { display: block; }
+  .hr-meta, .home-device .hr-meta { max-width: none; text-align: left; line-height: 18px; }
+  .hc-plot { height: 116px; }
+  .hc-opt { padding: 0 9px; }
+  .page-recap:is(.home-updates, .hd-list) li { grid-template-columns: 68px minmax(0, 1fr); gap: 10px; }
+  .page-recap:is(.home-updates, .hd-list) li.has-thumb { grid-template-columns: 68px minmax(0, 1fr) auto; }
+  .recap-thumb { width: 56px; height: 40px; }
+  .home-day { padding: 10px 12px; }
 }
