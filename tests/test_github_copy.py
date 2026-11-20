@@ -416,6 +416,24 @@ class TestExtras(CopyCase):
         state = self.copy()
         self.assertIn("wrong size", state["repos"]["ada/engine"]["extras"]["error"])
         self.assertFalse((github_extras.extras_folder(self.folder, "ada/engine") / "releases" / "v1.0" / "engine.exe").exists())
+        self.assertEqual(len(self.hub.fetched), 2)  # asked for once more before giving up
+
+    def test_a_file_cut_short_once_is_asked_for_again_in_the_same_run(self):
+        self.hub.add("ada", "engine")
+        self.hub.release("ada/engine", "v1.0", engine_exe=b"0123456789")
+        url, whole = "asset://ada/engine/v1.0/engine_exe", b"0123456789"
+        self.hub.files[url] = b"01234"
+        real = self.hub.fetch
+
+        def cut_short_once(asked, path, token):
+            real(asked, path, token)
+            self.hub.files[url] = whole
+
+        self.hub.fetch = cut_short_once
+        state = self.copy()
+        self.assertNotIn("error", state["repos"]["ada/engine"]["extras"])
+        self.assertEqual(self.hub.fetched, [url, url])
+        self.assertEqual((github_extras.extras_folder(self.folder, "ada/engine") / "releases" / "v1.0" / "engine.exe").read_bytes(), whole)
 
     def test_a_tag_or_file_name_cannot_leave_its_folder(self):
         self.assertEqual(github_extras.safe_name("release/v1:0"), "release_v1_0")

@@ -212,6 +212,8 @@ def copy_releases(target: Path, key: str, http, token: str, fetch=None) -> tuple
             if not (path.is_file() and path.stat().st_size == wanted):
                 try:
                     fetch(asset["url"], path, token)
+                    if path.stat().st_size != wanted:  # cut short on the way: a second try mostly brings it whole
+                        fetch(asset["url"], path, token)
                 except ExtrasError as error:
                     missing.append(str(error))
                     continue
