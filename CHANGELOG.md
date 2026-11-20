@@ -5,7 +5,7 @@ the app shows the same list under Version history.
 
 ## Build 78 (2026-11-20): Dashboards has its own icon
 
-- Dashboards on phone: the page has its own icon (four tiles on paper) on the Home Screen, in the tab and in its bar, so it no longer looks like Cairn. The mark in the bar is no longer a link to Cairn's home. Dashboards are still set up and signed in from Cairn as before ([#59](https://github.com/juw12/cairn/pull/59))
+- Dashboards on phone: the page has its own icon (four tiles on paper) on the Home Screen, in the tab and in its bar, so it no longer looks like Cairn. The mark in the bar is no longer a link to Cairn's home. Dashboards are still set up and signed in from Cairn as before ([#60](https://github.com/juw12/cairn/pull/60))
 
 ## Build 77 (2026-11-20): Your totals across computers
 
