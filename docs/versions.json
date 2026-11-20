@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 81,
+      "date": "2026-11-20",
+      "title": "Private pictures open directly",
+      "changes": [
+        "Latest updates uses the vault’s known paths to load a private picture without asking GitHub for a file that isn’t there. A picture beside the note still wins when both folders contain it.",
+        "A phone-sized WebKit test now opens the Map with 4,000 notes and checks that it draws the linked notes and responds to a tap."
+      ]
+    },
+    {
       "build": 80,
       "date": "2026-11-20",
       "title": "Map opens on a big brain",
