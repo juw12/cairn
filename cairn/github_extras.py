@@ -41,6 +41,7 @@ FILES_AT_ONCE = 4  # release files of one repo fetched together
 SLOW_SECONDS = 30  # a connection that brings less than SLOW_BYTES in this long is left for a new one
 SLOW_BYTES = 6 << 20
 RECONNECTS = 5  # how often one file may change connection
+BREATH_SECONDS = 3  # the wait before a new connection, after one that broke or never opened
 ABOUT = ("description", "homepage", "topics", "private", "visibility", "default_branch", "archived", "fork", "has_issues", "has_wiki", "has_pages", "created_at")
 
 STAMPS = """
@@ -178,14 +179,20 @@ def download(url: str, path: Path, token: str) -> None:
     """One release file. The sign-in goes to GitHub only: it is not passed on to the file store GitHub
     sends the request to. A connection that crawls is left for a new one, which carries on from the
     same byte: through an office proxy some ran at a tenth of the speed of the rest, for as long as
-    they were kept."""
+    they were kept. So is one that breaks or never opens (the proxy answered 504 for one file in 545),
+    unless the answer was a no (400 to 499), which asking again does not change."""
     part = path.with_name(path.name + ".part")  # a download that stops half way is never taken for the file
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with open(part, "wb") as out:
             for left in range(RECONNECTS, -1, -1):
-                if _receive(url, token, out, patient=not left):  # the last connection is kept however slow
-                    break
+                try:
+                    if _receive(url, token, out, patient=not left):  # the last connection is kept however slow
+                        break
+                except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
+                    if not left or 400 <= (getattr(error, "code", None) or 0) < 500:
+                        raise
+                    time.sleep(BREATH_SECONDS)
     except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
         part.unlink(missing_ok=True)
         reason = getattr(error, "reason", "") or getattr(error, "code", "") or type(error).__name__
@@ -195,7 +202,7 @@ def download(url: str, path: Path, token: str) -> None:
 
 def _receive(url: str, token: str, out, patient: bool) -> bool:
     """Write what one connection brings after what `out` holds already. False when it was left for
-    being slow, with what it did bring kept."""
+    being slow or stopped before the end, with what it did bring kept."""
     have = out.tell()
     request = urllib.request.Request(url, headers={"Accept": "application/octet-stream", "User-Agent": "cairn"})
     request.add_unredirected_header("Authorization", f"Bearer {token}")
@@ -211,7 +218,8 @@ def _receive(url: str, token: str, out, patient: bool) -> bool:
         if have and response.status != 206:  # the whole file again, not the rest of it
             out.seek(0)
             out.truncate()
-        since, got = time.monotonic(), 0
+        promised = int(response.headers.get("Content-Length") or 0)
+        since, got, start = time.monotonic(), 0, out.tell()
         while block := response.read1(CHUNK):
             out.write(block)
             got += len(block)
@@ -219,7 +227,7 @@ def _receive(url: str, token: str, out, patient: bool) -> bool:
                 if got < SLOW_BYTES:
                     return False
                 since, got = time.monotonic(), 0
-    return True
+        return out.tell() - start >= promised  # a line that dropped ends like a file that is whole
 
 
 def copy_talk(target: Path, repo: dict, http) -> int:

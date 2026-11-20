@@ -547,7 +547,8 @@ class TestExtras(CopyCase):
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         target = Path(self.tmp.name) / "down" / "engine.exe"
-        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}):
+        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}), \
+                mock.patch.object(github_extras, "BREATH_SECONDS", 0):
             github_extras.download(f"http://127.0.0.1:{server.server_port}/asset", target, TOKEN)
             self.assertEqual(target.read_bytes(), b"0123456789")
             self.assertEqual(seen, {"/asset": f"Bearer {TOKEN}", "/store": None})
@@ -600,6 +601,51 @@ class TestExtras(CopyCase):
             asked.clear()
             github_extras.download(f"http://127.0.0.1:{server.server_port}/patient", folder / "patient", TOKEN)
         self.assertEqual(((folder / "patient").read_bytes(), len(asked)), (whole, 1))  # the last connection is kept, however slow
+
+    def test_a_connection_that_breaks_or_never_opens_is_tried_again_but_a_no_is_not(self):
+        whole = bytes(range(40))
+        asked: list[tuple[str, str | None]] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                earlier = len([path for path, _ in asked if path == self.path])
+                wanted = self.headers.get("Range")
+                asked.append((self.path, wanted))
+                if self.path == "/gone":
+                    self.send_error(404)
+                elif self.path == "/proxy-gave-up" and not earlier:
+                    self.send_error(504)
+                elif self.path == "/breaks" and not earlier:
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(whole)))
+                    self.end_headers()
+                    self.wfile.write(whole[:15])  # and then the line drops
+                else:
+                    rest = whole[int(wanted[6:-1]):] if wanted else whole
+                    self.send_response(206 if wanted else 200)
+                    self.send_header("Content-Length", str(len(rest)))
+                    self.end_headers()
+                    self.wfile.write(rest)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        folder = Path(self.tmp.name) / "down"
+        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}), \
+                mock.patch.object(github_extras, "BREATH_SECONDS", 0):
+            for name in ("proxy-gave-up", "breaks"):
+                github_extras.download(f"http://127.0.0.1:{server.server_port}/{name}", folder / name, TOKEN)
+                self.assertEqual((folder / name).read_bytes(), whole)
+            with self.assertRaises(github_extras.ExtrasError):
+                github_extras.download(f"http://127.0.0.1:{server.server_port}/gone", folder / "gone", TOKEN)
+        self.assertEqual([wanted for path, wanted in asked if path == "/proxy-gave-up"], [None, None])
+        self.assertEqual([wanted for path, wanted in asked if path == "/breaks"], [None, "bytes=15-"])  # the rest only
+        self.assertEqual(len([path for path, _ in asked if path == "/gone"]), 1)  # GitHub said no: not asked again
+        self.assertEqual(sorted(path.name for path in folder.iterdir()), ["breaks", "proxy-gave-up"])
 
 
 class TestEveryComputer(CopyCase):
