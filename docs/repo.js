@@ -601,7 +601,7 @@ function tile(entry, item, list, index, at = entry.ref) {
     inner = src
       ? `<img src="${esc(src)}" alt="" loading="lazy">`
       : `<img alt="" data-repo-src="${esc(item.path)}" data-repo-at="${esc(at)}">`;
-  } else if (src || item.size <= PREVIEW_VIDEO_BYTES) {
+  } else if (src || (item.size > 0 && item.size <= PREVIEW_VIDEO_BYTES)) {
     // "#t=0.1" makes a phone draw the first frame instead of a blank box.
     inner = `${src
       ? `<video src="${esc(src)}#t=0.1" muted playsinline preload="metadata" tabindex="-1"></video>`
@@ -610,7 +610,7 @@ function tile(entry, item, list, index, at = entry.ref) {
     inner = `<span class="repo-play">${icon("play")}</span>`;
   }
   return `<button type="button" class="repo-tile ${item.kind}" data-repo-list="${esc(list)}" data-repo-index="${index}" title="${esc(item.path)}" aria-label="${esc(label)}">
-    ${inner}<span class="repo-tile-name">${esc(name)}${item.kind === "video" ? ` · ${humanSize(item.size)}` : ""}</span>
+    ${inner}<span class="repo-tile-name">${esc(name)}${item.kind === "video" && item.size ? ` · ${humanSize(item.size)}` : ""}</span>
   </button>`;
 }
 
@@ -980,7 +980,10 @@ document.addEventListener("click", (event) => {
   }
   const save = target.closest("[data-repo-download]");
   if (save) return download(entry, save.dataset.repoDownload);
-  if (target.closest("[data-repo-refresh]")) return load(entry, { force: true });
+  if (target.closest("[data-repo-refresh]")) {
+    load(entry, { force: true });
+    return renderView();
+  }
   return undefined;
 });
 

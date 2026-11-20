@@ -2153,8 +2153,11 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
   .repo-grid, .repo-folders { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .repo-grid.small { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .repo-doc { padding: 14px; }
+  /* On a phone the two arrows sit beside the caption, under the picture, so they never cover a video's own controls. */
   .repo-lightbox { grid-template-columns: 0 minmax(0, 1fr) 0; }
-  .repo-lb-nav { position: absolute; bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .repo-lb-stage img, .repo-lb-stage video { max-height: calc(100vh - 150px); max-height: calc(100dvh - 150px); }
+  .repo-lb-cap { align-content: center; min-height: 64px; padding-left: 68px; padding-right: 68px; }
+  .repo-lb-nav { position: absolute; bottom: calc(10px + env(safe-area-inset-bottom)); }
   .repo-lb-nav.prev { left: 14px; }
   .repo-lb-nav.next { right: 14px; }
 }

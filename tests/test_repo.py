@@ -457,6 +457,15 @@ class RepoPageTests(unittest.TestCase):
         columns = page.evaluate("getComputedStyle(document.querySelector('.repo-grid')).gridTemplateColumns.split(' ').length")
         self.assertEqual(columns, 2)
         self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 390)
+        # Full screen, the two arrows sit under the picture, so they never cover a video's own controls.
+        page.click(".repo-tile.video")
+        page.wait_for_selector(".repo-lightbox video")
+        stage, arrow = page.evaluate(
+            "() => ['.repo-lb-stage', '.repo-lb-nav.next'].map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.top, r.bottom]; })"
+        )
+        self.assertGreaterEqual(arrow[0], stage[1])
+        self.assertLessEqual(arrow[1], 844)
+        page.keyboard.press("Escape")
         page.click(".repo-tabs button:has-text('Pushes')")
         page.wait_for_selector(".repo-push")
         page.click(".repo-push-row")
