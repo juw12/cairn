@@ -435,6 +435,27 @@ class TestExtras(CopyCase):
         self.assertEqual(self.hub.fetched, [url, url])
         self.assertEqual((github_extras.extras_folder(self.folder, "ada/engine") / "releases" / "v1.0" / "engine.exe").read_bytes(), whole)
 
+    def test_the_files_of_a_repo_come_a_few_at_a_time(self):
+        self.hub.add("ada", "engine")
+        self.hub.release("ada/engine", "v1.0", a_bin=b"1", b_bin=b"22", c_bin=b"333", d_bin=b"4444", e_bin=b"55555")
+        real, lock, now, most = self.hub.fetch, threading.Lock(), [0], [0]
+
+        def slow(url, path, token):
+            with lock:
+                now[0] += 1
+                most[0] = max(most[0], now[0])
+            time.sleep(0.2)
+            real(url, path, token)
+            with lock:
+                now[0] -= 1
+
+        self.hub.fetch = slow
+        held = self.copy()["repos"]["ada/engine"]["extras"]
+        self.assertEqual((held["files"], held["bytes"]), (5, 15))
+        self.assertNotIn("error", held)
+        self.assertGreater(most[0], 1)
+        self.assertLessEqual(most[0], github_extras.FILES_AT_ONCE)
+
     def test_a_tag_or_file_name_cannot_leave_its_folder(self):
         self.assertEqual(github_extras.safe_name("release/v1:0"), "release_v1_0")
         self.assertEqual(github_extras.safe_name("../.."), "_")

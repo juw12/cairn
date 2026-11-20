@@ -27,6 +27,7 @@ import os
 import shutil
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import publish
@@ -35,6 +36,7 @@ FULL_DAYS = 7  # a repo's extras are fetched again at least this often
 PAGES = 200  # the most pages of one list that are read (100 rows each)
 QUIET_SECONDS = 900  # how long a download may say nothing: an office proxy reads a big file whole before passing it on
 CHUNK = 1 << 20
+FILES_AT_ONCE = 4  # release files of one repo fetched together
 ABOUT = ("description", "homepage", "topics", "private", "visibility", "default_branch", "archived", "fork", "has_issues", "has_wiki", "has_pages", "created_at")
 
 STAMPS = """
@@ -198,32 +200,37 @@ def copy_talk(target: Path, repo: dict, http) -> int:
 
 
 def copy_releases(target: Path, key: str, http, token: str, fetch=None) -> tuple[int, int, int, list[str]]:
-    """Releases and their files. (releases, files held, bytes held, files that would not come)."""
+    """Releases and their files, a few files at a time: one connection brings a big file slowly, and a
+    repo can hold hundreds. (releases, files held, bytes held, files that would not come)."""
     fetch = download if fetch is None else fetch
     releases = _pages(http, f"/repos/{key}/releases")
     _write_json(target / "releases.json", releases)
-    files = size = 0
-    missing: list[str] = []
+    wanted: dict[Path, tuple[str, int]] = {}  # by where it goes, so two never write one file
     for release in releases:
         where = target / "releases" / safe_name(release.get("tag_name") or release.get("id"))
         for asset in release.get("assets") or []:
-            path = where / safe_name(asset["name"])
-            wanted = int(asset.get("size") or 0)
-            if not (path.is_file() and path.stat().st_size == wanted):
-                try:
-                    fetch(asset["url"], path, token)
-                    if path.stat().st_size != wanted:  # cut short on the way: a second try mostly brings it whole
-                        fetch(asset["url"], path, token)
-                except ExtrasError as error:
-                    missing.append(str(error))
-                    continue
-                if path.stat().st_size != wanted:
-                    path.unlink(missing_ok=True)
-                    missing.append(f"{path.name} came back the wrong size")
-                    continue
-            files += 1
-            size += wanted
-    return len(releases), files, size, missing
+            wanted[where / safe_name(asset["name"])] = (asset["url"], int(asset.get("size") or 0))
+
+    def one(path: Path) -> str:
+        """Nothing when the file is held whole, else why it is not."""
+        url, size = wanted[path]
+        if path.is_file() and path.stat().st_size == size:
+            return ""
+        try:
+            fetch(url, path, token)
+            if path.stat().st_size != size:  # cut short on the way: a second try mostly brings it whole
+                fetch(url, path, token)
+        except ExtrasError as error:
+            return str(error)
+        if path.stat().st_size != size:
+            path.unlink(missing_ok=True)
+            return f"{path.name} came back the wrong size"
+        return ""
+
+    with ThreadPoolExecutor(FILES_AT_ONCE) as pool:
+        results = list(pool.map(one, wanted))
+    held = [wanted[path][1] for path, why in zip(wanted, results) if not why]
+    return len(releases), len(held), sum(held), [why for why in results if why]
 
 
 def copy_actions(target: Path, key: str, http) -> int:
