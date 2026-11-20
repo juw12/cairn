@@ -2,6 +2,19 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 86,
+      "date": "2026-11-21",
+      "title": "Your public brain is a web page anyone can search",
+      "changes": [
+        "Public brain: the notes you mark publish: true now also go online as a web page, at https://your-name.github.io/brain/. Anyone can read it without Cairn, a GitHub account or a sign-in. Publishing puts the page in the docs folder of your public repo in the same commit and switches GitHub Pages on for it ([#73](https://github.com/juw12/cairn/pull/73))",
+        "The page has a search box over every public note. Every word you type must be in the note; a word in the title counts most, then a tag, then the text. / jumps to the box and the address keeps the search, so a search can be sent as a link ([#73](https://github.com/juw12/cairn/pull/73))",
+        "Google and Bing can find the notes: each one is its own page with a title, a description and its own address, and a sitemap lists them all with the day each last changed ([#73](https://github.com/juw12/cairn/pull/73))",
+        "Settings, Public brain: under Publish now there is a link to the page once it is online. Until then the line says what is missing, for instance the one GitHub setting only the owner of the repo can turn on",
+        "Each computer publishes once more by itself after this update, so the page appears without anyone asking. A repo that keeps something else in its docs folder is left alone ([#73](https://github.com/juw12/cairn/pull/73))",
+        "Cairn itself is easier to find: the app names one address for search engines whatever follows the question mark, says what it is in the form they read, has its own sitemap, and shows a short description with links when JavaScript is off"
+      ]
+    },
+    {
       "build": 85,
       "date": "2026-11-20",
       "title": "Look inside a repo without opening GitHub",

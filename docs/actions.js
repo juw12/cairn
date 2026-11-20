@@ -276,6 +276,15 @@ function publishStatus(last) {
   return `Last published ${last.at}${last.commit ? ` (${last.commit})` : ""} to ${last.repo}.`;
 }
 
+// The public brain as a web page anyone can read and search: a link once GitHub serves it, else what is missing.
+function publishSite(last) {
+  if (!last || last.error || !(last.site || last.siteNote)) return "";
+  if (last.site && last.siteLive) {
+    return `Web page, with search: <a href="${esc(last.site)}" target="_blank" rel="noopener">${esc(last.site.replace(/^https?:\/\//, ""))}</a>`;
+  }
+  return esc(last.siteNote || "");
+}
+
 function phoneStatus(info) {
   const phone = info.phone;
   if (!info.phoneAccess || !phone?.running) {
@@ -456,6 +465,7 @@ export async function openSettings() {
           <button class="btn sm" data-settings="publish">${icon("refresh", "sm")} Publish now</button>
           <small class="muted" data-publish-status>${esc(publishStatus(info.lastPublish))}</small>
         </div>
+        <small class="muted" data-publish-site>${publishSite(info.lastPublish)}</small>
       </fieldset>
       ${info.phone ? `<fieldset class="settings-publish settings-phone">
         <legend>Phone</legend>
@@ -564,6 +574,7 @@ export async function openSettings() {
         button.disabled = false;
         const fresh = await state.store.desktop().catch(() => null);
         status.textContent = fresh ? publishStatus(fresh.lastPublish) : "";
+        $("[data-publish-site]", wrap).innerHTML = fresh ? publishSite(fresh.lastPublish) : "";
         if (result?.published) toast(`Published ${plural(result.changed, "change")}.`);
         else if (result) toast("Your public brain is already up to date.");
         return;
