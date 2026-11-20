@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 86 (2026-11-21): Your public brain is a web page anyone can search
+
+- Public brain: the notes you mark publish: true now also go online as a web page, at https://your-name.github.io/brain/. Anyone can read it without Cairn, a GitHub account or a sign-in. Publishing puts the page in the docs folder of your public repo in the same commit and switches GitHub Pages on for it ([[#73](https://github.com/juw12/cairn/pull/73)](https://github.com/juw12/cairn/pull/73))
+- The page has a search box over every public note. Every word you type must be in the note; a word in the title counts most, then a tag, then the text. / jumps to the box and the address keeps the search, so a search can be sent as a link ([[#73](https://github.com/juw12/cairn/pull/73)](https://github.com/juw12/cairn/pull/73))
+- Google and Bing can find the notes: each one is its own page with a title, a description and its own address, and a sitemap lists them all with the day each last changed ([[#73](https://github.com/juw12/cairn/pull/73)](https://github.com/juw12/cairn/pull/73))
+- Settings, Public brain: under Publish now there is a link to the page once it is online. Until then the line says what is missing, for instance the one GitHub setting only the owner of the repo can turn on
+- Each computer publishes once more by itself after this update, so the page appears without anyone asking. A repo that keeps something else in its docs folder is left alone ([[#73](https://github.com/juw12/cairn/pull/73)](https://github.com/juw12/cairn/pull/73))
+- Cairn itself is easier to find: the app names one address for search engines whatever follows the question mark, says what it is in the form they read, has its own sitemap, and shows a short description with links when JavaScript is off
+
 ## Build 85 (2026-11-20): Look inside a repo without opening GitHub
 
 - Projects: a repo’s name now opens the repo inside Cairn instead of on github.com. The Look tab shows every picture and video in it, the most telling first (banners, screenshots and demos before app icons), its folders as cards with a cover picture, and its README as GitHub draws it ([#72](https://github.com/juw12/cairn/pull/72))

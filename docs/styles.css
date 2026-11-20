@@ -1069,6 +1069,8 @@ details.callout[open] > summary::after { transform: rotate(90deg); }
 .settings-publish .field { display: grid; gap: 6px; margin-top: 8px; font-size: 13.5px; }
 .settings-publish input[type="text"] { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
 .settings-publish .publish-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.settings-publish [data-publish-site] { display: block; margin-top: 6px; overflow-wrap: anywhere; }
+.settings-publish [data-publish-site]:empty { display: none; }
 /* Pair a phone: the QR code stays black on white in both themes so every camera reads it. */
 .pair-phone { max-width: 420px; }
 .settings-phone small { display: block; }
