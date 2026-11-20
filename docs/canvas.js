@@ -219,12 +219,17 @@ export function canvasView() {
     { value: files.length, label: files.length === 1 ? "canvas" : "canvases" },
     { value: cardCount, label: cardCount === 1 ? "card" : "cards", sub: "on all canvases" },
     { value: edgeCount, label: edgeCount === 1 ? "connection" : "connections" },
-    { value: edited, label: "edited this week" },
+    // Without file times (a brain read from GitHub) nobody can say what was edited this week: no tile beats a wrong 0.
+    ...(files.some((file) => file.mtime) ? [{ value: edited, label: "edited this week" }] : []),
   ];
-  const rows = files.slice(0, 6).map((file) => ({
-    when: file.mtime ? relativeTime(file.mtime) : "",
-    html: `<button class="link-button" data-cv-open="${esc(file.path)}">${esc(canvasName(file.path))}</button> <span class="muted">· edited</span>`,
-  }));
+  const rows = files.slice(0, 6).map((file) => {
+    const data = file.mtime ? null : parseCanvas(file.text);
+    const detail = file.mtime ? "edited" : data ? plural(data.nodes.filter((n) => n.type !== "group").length, "card") : "";
+    return {
+      when: file.mtime ? relativeTime(file.mtime) : "",
+      html: `<button class="link-button" data-cv-open="${esc(file.path)}">${esc(canvasName(file.path))}</button>${detail ? ` <span class="muted">· ${detail}</span>` : ""}`,
+    };
+  });
   const newest = files[0];
   return `${head}${boardHtml("canvas", {
     dashboard: { html: dashboardHtml(tiles), summary: `${plural(files.length, "canvas", "canvases")} · ${plural(cardCount, "card")}` },

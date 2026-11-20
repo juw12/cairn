@@ -5,7 +5,7 @@
 
 import * as core from "./core.js";
 import { renderMarkdown, escapeHtml as esc } from "./md.js";
-import { $, $$, STATUS_HINT, STATUS_LABEL, TYPE_META, byRecent, checklist, emptyState, icon, pageHead, plural, relativeTime, rowItem, snippetOf, statusPill, tagChips, toast, today } from "./ui.js";
+import { $, $$, STATUS_HINT, STATUS_LABEL, TYPE_META, byRecent, checklist, emptyState, icon, noteStamp, pageHead, plural, relativeTime, rowItem, snippetOf, statusPill, tagChips, toast, today } from "./ui.js";
 import { fileByPath, guide, markGuide, noteByPath, readOnly, saveNote, state } from "./state.js";
 import { bookmarks, countNotes, folderTree, searchNotes } from "./vault.js";
 import { render } from "./app.js";
@@ -150,7 +150,7 @@ function boardBlocks(type, extra = "") {
   const week = Date.now() - 7 * 86400000;
   const noun = type === "idea" ? "idea" : "task";
   const tiles = statuses.map((status) => ({ value: count(status), label: STATUS_LABEL[status].toLowerCase(), title: STATUS_HINT[status] || "" }));
-  tiles.push({ value: items.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" });
+  tiles.push({ value: items.filter((n) => noteStamp(n) > week).length, label: "changed this week" });
   if (type === "task") {
     const lists = items.map(checklist).filter((c) => c.total);
     const total = lists.reduce((sum, c) => sum + c.total, 0);
@@ -210,7 +210,7 @@ export function decisions() {
   const tiles = [
     { value: all.length, label: "decisions" },
     ...core.STATUSES.decision.map((status) => ({ value: count(status), label: (STATUS_LABEL[status] || status).toLowerCase() })),
-    { value: all.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" },
+    { value: all.filter((n) => noteStamp(n) > week).length, label: "changed this week" },
   ];
   const latest = [...all].sort(byRecent)[0];
   const blocks = {
@@ -270,7 +270,7 @@ export function notesView() {
     { value: state.notes.length, label: "notes in the brain" },
     ...[["idea", "ideas"], ["task", "tasks"], ["decision", "decisions"], ["journal", "journal pages"]].map(([type, label]) => ({ value: ofType(type), label })),
     { value: tagCounts.size, label: tagCounts.size === 1 ? "tag" : "tags" },
-    { value: state.notes.filter((n) => (n.mtime || 0) > week).length, label: "changed this week" },
+    { value: state.notes.filter((n) => noteStamp(n) > week).length, label: "changed this week" },
   ];
   const newest = [...state.notes].sort(byRecent)[0];
   const blocks = {
@@ -323,10 +323,12 @@ export function sourceKey(item) {
 }
 
 export function codeView() {
-  const refresh = `<button class="btn" data-action="refresh-todos">${icon("refresh")} Rescan</button>`;
+  const canScan = Boolean(state.info?.canScan);
+  const refresh = canScan ? `<button class="btn" data-action="refresh-todos">${icon("refresh")} Rescan</button>` : "";
   const head = pageHead("Code inbox", "TODO, FIXME and HACK comments found in the code around your brain. Turn the ones that matter into tasks; each task remembers its file and line.", refresh);
   const todos = state.todos || [];
-  const fromCode = state.notes.filter((n) => typeof n.meta.source === "string" && n.meta.source);
+  // `source` is also where a synced note came from (github-sync, opencode); a task made here points at file:line.
+  const fromCode = state.notes.filter((n) => n.type === "task" && typeof n.meta.source === "string" && /:\d+$/.test(n.meta.source));
   const tracked = new Set(fromCode.map((n) => n.meta.source));
   const groups = new Map();
   for (const item of todos) {
@@ -334,7 +336,9 @@ export function codeView() {
     groups.get(item.path).push(item);
   }
   let inbox;
-  if (state.todos === null) inbox = `<div class="card">${emptyState("code", "Scanning your code…", "Looking for TODO, FIXME and HACK comments.")}</div>`;
+  // A brain read from GitHub holds notes, not the code around them, so there is nothing to wait for.
+  if (!canScan) inbox = `<div class="card">${emptyState("code", "No code to scan here", "This brain holds your notes only. Open Cairn in the project folder on your computer to see its TODO, FIXME and HACK comments.")}</div>`;
+  else if (state.todos === null) inbox = `<div class="card">${emptyState("code", "Scanning your code…", "Looking for TODO, FIXME and HACK comments.")}</div>`;
   else if (state.todosError) inbox = `<div class="card">${emptyState("code", "Couldn’t scan the code", esc(state.todosError))}</div>`;
   else if (!todos.length) inbox = `<div class="card">${emptyState("check", "Inbox zero", state.info.emptyScanHint || "No TODO, FIXME or HACK comments found. Nice and tidy.")}</div>`;
   else {
@@ -366,7 +370,7 @@ export function codeView() {
     { value: scanned ? todos.length - trackedCount : "–", label: "not tracked yet" },
   ];
   const blocks = {
-    dashboard: { html: dashboardHtml(tiles), summary: scanned ? `${plural(todos.length, "comment")} · ${trackedCount} tracked` : "scanning…" },
+    dashboard: { html: dashboardHtml(tiles), summary: scanned ? `${plural(todos.length, "comment")} · ${trackedCount} tracked` : canScan ? "scanning…" : "no code on this device" },
     recap: {
       html: noteRecap(fromCode, (n) => `${STATUS_LABEL[n.status] || n.status} · from ${n.meta.source}`, "No tasks made from code comments yet."),
       summary: fromCode.length ? `${plural(fromCode.length, "task")} made from code` : "no tasks from code yet",

@@ -39,7 +39,8 @@ function timeAgo(seconds) {
   if (diff < 60) return "just now";
   if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} h ago`;
-  return new Date(seconds * 1000).toLocaleDateString();
+  const date = new Date(seconds * 1000);
+  return date.toLocaleDateString("en-US", date.getFullYear() === new Date().getFullYear() ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
 }
 
 // ============================================================ rendering

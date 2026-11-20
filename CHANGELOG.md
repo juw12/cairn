@@ -3,6 +3,16 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 84 (2026-11-20): Recap reads right on a phone
+
+- Recap on Board, Ideas, Decisions, Notes, Map and Autopilot: on a brain read from GitHub (the phone) every row was squeezed into the narrow time column, one word a line. A row now uses its whole width, shows the note’s own day (today, yesterday, Nov 12) and the list is in that order, newest first
+- The “changed this week” number on Board, Ideas, Decisions and Notes counts by the same dates, so on the phone it no longer says 0 above a list of today’s changes
+- Recap: a title that is a whole paragraph is shortened to about three lines; the note itself keeps the full title
+- Code inbox on the phone no longer says “Scanning your code…” for ever. It says there is no code to scan there, and its Recap lists only tasks made from a code comment, not every note that was synced from somewhere
+- Journal, On your mind: a long name in a chip is shortened with dots and keeps its count, instead of being cut at the edge of the card
+- Autopilot queue on a phone shows two lines of each title instead of about twenty characters
+- Chat shows an older chat’s day as “Nov 12”, not “11/12/2026”. Canvas Recap shows how many cards a canvas has when its edit time is not known
+
 ## Build 83 (2026-11-20): Built-in plugins set themselves up on every device
 
 - Plugins: a plugin that comes with Cairn now installs itself on each of your devices when the brain's plugin list names it, so one list sets up your computer, laptop and phone. Before, every device had to be asked ([#68](https://github.com/juw12/cairn/pull/68))
