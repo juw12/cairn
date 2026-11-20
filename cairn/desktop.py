@@ -1138,6 +1138,10 @@ class DesktopApp:
         self.hooks.pick_folder = self.pick_folder
         self.hooks.request_restart = self.restart
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        from . import connect
+
+        # a new chat in the user's AI app starts with this brain as its memory
+        threading.Thread(target=connect.auto_connect, args=(brain,), daemon=True).start()
         self.hooks.phone = PhoneAccess(self.server, config_dir() / "devices.json")
         self.hooks.sync_phone()
         url = f"http://127.0.0.1:{self.server.server_address[1]}/"
