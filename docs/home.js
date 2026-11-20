@@ -1,5 +1,6 @@
 // Home (the Today page): what is waiting for you, what is running, the day's numbers, an activity chart you
 // can tap through, the latest dated updates with their pictures, and the computers that feed this brain.
+// What the computers have left for each other is its own block, in handoffs.js.
 // A block with nothing to say is left out, so a brain without agent sessions keeps its plain page.
 
 import * as core from "./core.js";
@@ -48,7 +49,7 @@ const IMAGE_RE = /!\[\[([^\]|#\n]+\.(?:png|jpe?g|gif|webp|avif|svg))(?:[|#][^\]\
 const plainName = (text) => String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 function datedUpdate(note) {
-  if (note.type !== "note") return null;
+  if (note.type !== "note" || core.isHandoff(note)) return null;
   const match = DATED_RE.exec(note.slug);
   if (!match) return null;
   const [, day, hour, minute, rest] = match;
@@ -423,7 +424,7 @@ function recapBlock(d) {
     };
   }
   // No dated notes: the notes you touched last. Sessions are left out, their place is Working now.
-  const own = state.notes.filter((note) => note.type !== "session" && !machineFromNote(note));
+  const own = state.notes.filter((note) => note.type !== "session" && !machineFromNote(note) && !core.isHandoff(note));
   const recent = [...own].sort(byRecent);
   return {
     html: `${noteRecap(own, noteLabel, "Nothing yet. Capture a thought in the bar above.")}${recent.length ? all : ""}`,

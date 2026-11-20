@@ -3,6 +3,14 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 87 (2026-11-21): Your computers leave messages for each other
+
+- Today has a new block, Between computers: a conversation between the computers that share one brain. One leaves a message for one, several or all of the others (what it found, what is left hanging, what only another computer can do); the others press Picked up, answer, and press Done ([#75](https://github.com/juw12/cairn/pull/75))
+- What waits for this computer is listed first, then what it is waiting for, then what is between other computers. A conversation is settled when every computer it was for has said Done, or when the one that started it closes it ([#75](https://github.com/juw12/cairn/pull/75))
+- From a terminal or an assistant: cairn handoff shows what was left for this computer; cairn handoff send "..." --to "<computer>" leaves a message (a few words of the name are enough, --to all is every computer); pickup, done, reply and show work on one conversation ([#75](https://github.com/juw12/cairn/pull/75))
+- Every message is its own file in handoffs/, written once by the computer that says it and never changed, so two computers never write the same file and the brain's sync has nothing to merge. On the web app and a phone you can read every conversation and answer ([#75](https://github.com/juw12/cairn/pull/75))
+- The agent instructions on the Vibe page name the two commands, so an assistant looks for what was left for its computer before it starts ([#75](https://github.com/juw12/cairn/pull/75))
+
 ## Build 86 (2026-11-21): Your public brain is a web page anyone can search
 
 - Public brain: the notes you mark publish: true now also go online as a web page, at https://your-name.github.io/brain/. Anyone can read it without Cairn, a GitHub account or a sign-in. Publishing puts the page in the docs folder of your public repo in the same commit and switches GitHub Pages on for it ([[#73](https://github.com/juw12/cairn/pull/73)](https://github.com/juw12/cairn/pull/73))

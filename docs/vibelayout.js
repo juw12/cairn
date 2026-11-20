@@ -68,6 +68,7 @@ const PAGES = {
     label: "Today",
     panels: [
       { id: "needs", label: "Needs you" },
+      { id: "handoffs", label: "Between computers" },
       { id: "now", label: "Working now" },
       { id: "dashboard", label: "Dashboard" },
       { id: "chart", label: "Activity" },

@@ -1018,3 +1018,180 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
         "skills": skills,
         "daily": daily,
     }
+
+
+# ---------------------------------------------------------------- handoffs (a conversation between computers)
+#
+# One brain is shared by several computers. A handoff is a message one of them leaves for the others: what it
+# found, what is left hanging, what only another computer can do. Every message is its own file in handoffs/,
+# written once by the computer that says it and never edited, so two computers never write the same file and
+# git has nothing to merge. An answer ("picked up", "done", or just a note) is one more file that names the
+# first message in `thread`. Where a conversation stands is worked out from its files, here.
+
+HANDOFF_TYPE = "handoff"
+HANDOFF_FOLDER = "handoffs"
+HANDOFF_SAYS = ("note", "picked-up", "done")
+HANDOFF_EVERYONE = "all"
+# Two messages stamped the same second read in the order they make sense: taken on, talked about, finished.
+_HANDOFF_SAME_SECOND = {"picked-up": 0, "note": 1, "done": 2}
+_HANDOFF_SLUG_FROM = 24
+_HANDOFF_SLUG_TITLE = 44
+
+
+def device_key(name) -> str:
+    """Two spellings of one computer's name are the same computer: case and spacing do not count."""
+    return " ".join(str(name if name is not None else "").split()).lower()
+
+
+def _handoff_names(value) -> list[str]:
+    """The computers named in `to`. A list is several names; a plain value is one name, never split at a
+    comma (a model name may hold one: "MacBook Pro 15,4")."""
+    items = value if isinstance(value, list) else [value] if isinstance(value, str) else []
+    seen, names = set(), []
+    for item in items:
+        name = " ".join(str(item).split())
+        key = device_key(name)
+        if key and key not in seen:
+            seen.add(key)
+            names.append(name)
+    return names
+
+
+def is_handoff(note: dict) -> bool:
+    return note["meta"].get("type") == HANDOFF_TYPE
+
+
+def _handoff_thread_id(note: dict) -> str:
+    raw = note["meta"].get("thread")
+    name = raw.strip() if isinstance(raw, str) else ""
+    if name.startswith("[[") and name.endswith("]]"):
+        name = name[2:-2].split("|")[0].strip()
+    name = name.rsplit("/", 1)[-1]
+    name = _MD_SUFFIX_RE.sub("", name)
+    return name or note["slug"]
+
+
+def handoff_threads(notes: list[dict]) -> list[dict]:
+    """The conversations between computers, open ones first, then the one that moved last.
+
+    Each: {id, title, path, from, to, everyone, messages: [{path, title, from, says, at}],
+    parts: [{device, state: waiting | picked-up | done, at}], open, last}.
+    `to` names the computers it is for; none (or "all") means every computer. A named computer's part is done
+    when it says `done`; the conversation is closed when every named computer has, or when the computer that
+    started it says `done` itself.
+    """
+    groups: dict[str, list[dict]] = {}
+    for note in notes:
+        if not is_handoff(note):
+            continue
+        meta = note["meta"]
+        says = meta.get("says") if meta.get("says") in HANDOFF_SAYS else "note"
+        message = {
+            "path": note["path"],
+            "slug": note["slug"],
+            "title": note["title"],
+            "from": " ".join(str(meta.get("from") if isinstance(meta.get("from"), str) else "").split()),
+            "says": says,
+            "at": meta.get("created") if isinstance(meta.get("created"), str) else "",
+            "to": _handoff_names(meta.get("to")),
+        }
+        groups.setdefault(_handoff_thread_id(note), []).append(message)
+
+    threads = []
+    for thread_id, messages in groups.items():
+        messages.sort(key=lambda m: (m["at"], _HANDOFF_SAME_SECOND[m["says"]], m["path"]))
+        head = next((m for m in messages if m["slug"] == thread_id), messages[0])
+        messages.remove(head)  # the first message leads, whatever the clocks of the computers say
+        messages.insert(0, head)
+        sender = device_key(head["from"])
+        named = [name for name in head["to"] if device_key(name) != sender]
+        everyone = not head["to"] or any(device_key(name) == HANDOFF_EVERYONE for name in head["to"])
+        if everyone:
+            named = []
+        closed = False
+        said: dict[str, dict] = {}
+        for message in messages:
+            if message["says"] == "note":
+                continue
+            key = device_key(message["from"])
+            if key == sender:
+                closed = closed or message["says"] == "done"
+                continue
+            if key in said and said[key]["state"] == "done":
+                continue
+            said[key] = {"device": message["from"], "state": message["says"], "at": message["at"]}
+        parts = []
+        for name in named:
+            answer = said.pop(device_key(name), None)
+            parts.append({"device": name, "state": answer["state"] if answer else "waiting", "at": answer["at"] if answer else ""})
+        waiting_on_named = [part for part in parts if part["state"] != "done"]
+        parts.extend(said.values())  # a computer that was not named and stepped in anyway
+        threads.append({
+            "id": thread_id,
+            "title": head["title"],
+            "path": head["path"],
+            "from": head["from"],
+            "to": named,
+            "everyone": everyone,
+            "messages": [{key: m[key] for key in ("path", "title", "from", "says", "at")} for m in messages],
+            "parts": parts,
+            "open": not closed and (everyone or not named or bool(waiting_on_named)),
+            "last": max(m["at"] for m in messages),
+        })
+    threads.sort(key=lambda t: t["id"])
+    threads.sort(key=lambda t: t["last"], reverse=True)
+    threads.sort(key=lambda t: not t["open"])
+    return threads
+
+
+def handoff_waits_for(thread: dict, device: str) -> str:
+    """What a conversation still wants from one computer: "waiting", "picked-up", or "" (nothing)."""
+    key = device_key(device)
+    if not thread["open"] or not key or key == device_key(thread["from"]):
+        return ""
+    for part in thread["parts"]:
+        if device_key(part["device"]) == key:
+            return "" if part["state"] == "done" else part["state"]
+    return "waiting" if thread["everyone"] else ""
+
+
+def handoff_inbox(threads: list[dict], device: str) -> dict:
+    """The conversations as one computer sees them: {mine, asked, others, settled}, each a list of ids.
+    mine: it is asked to do something. asked: it started them and they are still open."""
+    key = device_key(device)
+    inbox: dict[str, list[str]] = {"mine": [], "asked": [], "others": [], "settled": []}
+    for thread in threads:
+        if not thread["open"]:
+            inbox["settled"].append(thread["id"])
+        elif handoff_waits_for(thread, device):
+            inbox["mine"].append(thread["id"])
+        elif key and key == device_key(thread["from"]):
+            inbox["asked"].append(thread["id"])
+        else:
+            inbox["others"].append(thread["id"])
+    return inbox
+
+
+def handoff_message(sender: str, title: str, body: str, stamp: str, existing_paths: list[str],
+                    to: list[str] | None = None, thread: str = "", says: str = "note") -> dict:
+    """{path, text} of a new message. `stamp` is "2026-11-20T23:41:07" (the seconds keep two messages of
+    one minute in order). A first message names who it is for in `to` (none: every computer); an answer
+    names the first message's file in `thread` and what it says."""
+    sender = " ".join(str(sender).split())
+    title = " ".join(str(title).split())
+    meta: dict = {"title": title or "Untitled", "type": HANDOFF_TYPE, "from": sender}
+    if thread:
+        meta["thread"] = f"[[{thread}]]"
+        meta["says"] = says if says in HANDOFF_SAYS else "note"
+    else:
+        names = _handoff_names(to or [])
+        meta["to"] = [HANDOFF_EVERYONE] if not names or any(device_key(n) == HANDOFF_EVERYONE for n in names) else names
+    meta["tags"] = [HANDOFF_TYPE]
+    meta["created"] = stamp
+    prefix = f"{stamp[:10]}-{stamp[11:16].replace(':', '')}"
+    who = slugify(sender)[:_HANDOFF_SLUG_FROM].strip("-") if sender else "someone"
+    what = slugify(title)[:_HANDOFF_SLUG_TITLE].strip("-")
+    taken = {p[len(HANDOFF_FOLDER) + 1 : -3] for p in existing_paths if p.startswith(HANDOFF_FOLDER + "/") and p.endswith(".md")}
+    slug = unique_slug(f"{prefix}-{who}-{what}", taken)
+    body = str(body or "").strip()
+    return {"path": f"{HANDOFF_FOLDER}/{slug}.md", "text": serialize_note(meta, body + "\n" if body else "")}
