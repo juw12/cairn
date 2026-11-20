@@ -70,6 +70,8 @@ export class ServerStore {
       // Handing a repo to another GitHub account uses the GitHub CLI on this computer; a paired phone may not.
       canMoveRepos: Boolean(this.meta.githubMove),
       path: this.meta.path || null,
+      // What this computer is called in the brain: Today lists what the other computers left for it (handoffs.js).
+      device: typeof this.meta.device === "string" ? this.meta.device : "",
     };
   }
 

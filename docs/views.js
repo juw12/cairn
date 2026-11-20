@@ -12,6 +12,7 @@ import { render } from "./app.js";
 import { homeLogStrip, homeLogSummary } from "./voicelog.js";
 import { boardHtml, dashboardHtml, noteRecap } from "./vibelayout.js";
 import { homeBlocks, homeData, homeLede } from "./home.js";
+import { handoffsBlock } from "./handoffs.js";
 
 // Past this many notes a brain is not new any more, and a Home column shows this many rows.
 const ESTABLISHED_NOTES = 50;
@@ -65,6 +66,7 @@ export function home() {
   const logStrip = homeLogStrip();
   const blocks = {
     ...homeBlocks(),
+    handoffs: handoffsBlock(),
     log: logStrip ? { html: logStrip, summary: homeLogSummary() } : null,
     focus: {
       html: `<div class="columns-3">

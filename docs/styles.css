@@ -2560,6 +2560,44 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .home-idle, .home-devices-note { margin: 4px 0 0; }
 .home-idle .link-button { display: inline; font: inherit; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
 
+/* ------------------------------------------------------------ Home: between computers (handoffs.js) */
+/* A conversation is a row like the others on Home; opened, its messages stack under it, each in its own box. */
+.handoffs { display: grid; gap: 12px; }
+.ho-section { min-width: 0; }
+.ho-head { margin: 0 0 2px; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.ho-row { cursor: pointer; }
+.ho-row .hr-meta { max-width: 60%; }
+.ho-thread.is-open > .ho-row .hr-title { display: block; overflow: visible; }
+.ho-new { background: var(--task-soft); color: var(--task); }
+.ho-done { background: var(--journal-soft); color: var(--journal-ink); }
+.ho-open { padding: 0 0 12px 18px; }
+.ho-msgs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ho-msg { min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.ho-msg.own { border-color: var(--line-strong); background: var(--surface); }
+.ho-who { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; font-size: 12.5px; line-height: 20px; }
+.ho-file { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted); }
+.ho-line { margin: 4px 0 0; font-size: 13.5px; line-height: 20px; overflow-wrap: anywhere; }
+.ho-body { margin-top: 4px; font-size: 13.5px; overflow-wrap: anywhere; }
+.ho-body > :first-child { margin-top: 0; }
+.ho-body > :last-child { margin-bottom: 0; }
+.ho-parts { margin: 8px 0 0; }
+.ho-reply, .ho-form { display: grid; gap: 8px; margin-top: 10px; }
+.ho-form { margin-top: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.ho-reply textarea, .ho-form textarea { height: auto; min-height: 52px; padding: 9px 10px; resize: vertical; font: inherit; line-height: 1.5; }
+.ho-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ho-to { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.ho-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12.5px; cursor: pointer; }
+.ho-chip:has(input:checked) { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.ho-chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ho-chip input { margin: 0; accent-color: var(--accent); }
+.ho-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0; }
+.ho-empty { margin: 0; }
+@media (max-width: 640px) {
+  .ho-open { padding-left: 0; }
+  .ho-row .hr-main { flex-direction: column; }
+  .ho-row .hr-meta { max-width: 100%; text-align: left; }
+}
+
 .home-chart { display: grid; gap: 8px; }
 .hc-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 .hc-opts { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }

@@ -2161,6 +2161,115 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector(".drawer")
         self.assertEqual(self.errors, [])
 
+    def test_today_carries_the_conversation_between_computers(self):
+        page = self.open()
+        block = '.vibe-board[data-page="home"] section[data-panel="handoffs"]'
+        # One computer, nothing said: the page stays as plain as it was.
+        page.wait_for_selector('.vibe-board[data-page="home"] section[data-panel="focus"]')
+        self.assertEqual(page.locator(block).count(), 0)
+
+        page.evaluate(DEVICES_SEED)
+        page.wait_for_selector(block)
+        self.assertIn("Nothing is open between your computers.", page.inner_text(block))
+
+        # This is the MacBook Pro, and the other computer has left it something.
+        page.evaluate("""() => {
+          const s = window.cairn.state;
+          const core = window.cairn.core;
+          const message = core.handoffMessage("ASUS EXPERTBOOK", "Check Buddy on a real Mac", "Run the **self-test** and say what the log says.",
+            "2026-11-20T09:00:00", s.files.map((f) => f.path), { to: ["MacBook Pro"] });
+          s.files.push({ path: message.path, text: message.text, mtime: Date.now() });
+          s.vibeHere = "MacBook Pro";
+          s.notes = s.files.filter((f) => f.path.endsWith(".md")).map((f) => core.noteFromFile(f.path, f.text, f.mtime));
+          window.cairn.rerender();
+        }""")
+        page.wait_for_selector(f"{block} .ho-row")
+        handoffs = lambda: page.evaluate("() => window.cairn.state.files.filter((f) => f.path.startsWith('handoffs/')).map((f) => f.text)")  # noqa: E731
+        # The files are listed by name, not by time: find a message by its title.
+        message = lambda title: next(text for text in handoffs() if f"title: {title}\n" in text)  # noqa: E731
+        self.assertIn("for this computer", page.inner_text(f"{block} .ho-head").lower())
+        self.assertEqual(page.inner_text(f"{block} .ho-row .ho-new"), "New")
+        self.assertIn("from ASUS EXPERTBOOK", page.inner_text(f"{block} .ho-row .hr-meta"))
+        self.assertIn("1 for this computer", page.text_content(f"{block} .vp-sum"))
+        # It is a conversation, not one of the day's dated updates.
+        self.assertNotIn("Check Buddy on a real Mac", page.inner_text('.vibe-board[data-page="home"] section[data-panel="recap"]'))
+
+        # Open it: the message, rendered, and what this computer can say.
+        page.click(f"{block} .ho-row")
+        page.wait_for_selector(f"{block} .ho-thread.is-open .ho-body strong")
+        self.assertIn("MacBook Pro: has not picked it up", page.inner_text(f"{block} .ho-parts"))
+        page.click(f'{block} [data-action="handoff-say"][data-says="picked-up"]')
+        page.wait_for_selector(f"{block} .ho-row .hr-badge.warn")
+        self.assertEqual(len(handoffs()), 2)
+        self.assertIn("from: MacBook Pro\n", message("Picked up"))
+        self.assertIn("says: picked-up\n", message("Picked up"))
+        self.assertIn('thread: "[[2026-11-20-0900-asus-expertbook-check-buddy-on-a-real-mac]]"', message("Picked up"))
+        self.assertEqual(page.locator(f'{block} [data-action="handoff-say"][data-says="picked-up"]').count(), 0)
+
+        # An answer; what is typed survives the page drawing itself again.
+        page.fill("#handoff-reply", "Which Buddy version?")
+        page.evaluate("() => window.cairn.rerender()")
+        self.assertEqual(page.input_value("#handoff-reply"), "Which Buddy version?")
+        page.click(f'{block} .ho-reply button[type="submit"]')
+        page.wait_for_function("() => window.cairn.state.files.filter((f) => f.path.startsWith('handoffs/')).length === 3")
+        self.assertIn("says: note\n", message("Which Buddy version?"))
+        self.assertEqual(page.input_value("#handoff-reply"), "")
+        self.assertEqual(page.locator(f"{block} .ho-msg").count(), 3)
+        self.assertEqual(page.locator(f"{block} .ho-msg.own").count(), 2)
+
+        # Done, with a last line: the conversation is settled and leaves the list.
+        page.fill("#handoff-reply", "24 of 24 checks pass.")
+        page.click(f'{block} [data-action="handoff-say"][data-says="done"]')
+        page.wait_for_selector(f'{block} [data-action="handoff-settled"]')
+        self.assertEqual(len(handoffs()), 4)
+        self.assertIn("says: done\n", message("24 of 24 checks pass."))
+        self.assertEqual(page.locator(f"{block} .ho-row").count(), 0)
+        self.assertIn("Nothing is waiting for this computer", page.inner_text(block))
+        page.click(f'{block} [data-action="handoff-settled"]')
+        page.wait_for_selector(f"{block} .ho-row")
+        self.assertIn("Check Buddy on a real Mac", page.inner_text(f"{block} .ho-row"))
+
+        # Leave one for the other computer. With one other computer it is already ticked.
+        page.click(f'{block} [data-action="handoff-write"]')
+        page.wait_for_selector("#handoff-form")
+        self.assertEqual(page.eval_on_selector_all('#handoff-form input[name="to"]', "els => els.map((e) => [e.value, e.checked])"), [["ASUS EXPERTBOOK", True]])
+        self.assertIn("From MacBook Pro.", page.inner_text("#handoff-form"))
+        page.fill("#handoff-title", "The fix is in pull request 45")
+        page.fill("#handoff-body", "Merge it and cut a release.")
+        page.evaluate("() => window.cairn.rerender()")
+        self.assertEqual(page.input_value("#handoff-title"), "The fix is in pull request 45")
+        self.assertEqual(page.input_value("#handoff-body"), "Merge it and cut a release.")
+        page.click('#handoff-form button[type="submit"]')
+        page.wait_for_function("() => window.cairn.state.files.filter((f) => f.path.startsWith('handoffs/')).length === 5")
+        sent = message("The fix is in pull request 45")
+        self.assertIn("from: MacBook Pro\n", sent)
+        self.assertIn("to: [ASUS EXPERTBOOK]\n", sent)
+        self.assertIn("Merge it and cut a release.\n", sent)
+        self.assertEqual(page.locator("#handoff-form").count(), 0)
+        self.assertIn("this computer is waiting for", page.locator(f"{block} .ho-head").first.inner_text().lower())
+        self.assertIn("to ASUS EXPERTBOOK", page.locator(f"{block} .ho-row .hr-meta").first.inner_text())
+        self.assertIn("waiting for 1 answer", page.text_content(f"{block} .vp-sum"))
+        self.assertEqual(self.errors, [])
+
+        # On a phone the rows stack and nothing runs off the side.
+        phone = self.open(viewport=(390, 844))
+        phone.evaluate(DEVICES_SEED)
+        phone.evaluate("""() => {
+          const s = window.cairn.state;
+          const core = window.cairn.core;
+          const message = core.handoffMessage("ASUS EXPERTBOOK", "A long title that has to wrap on a narrow screen without pushing the page wider than it is",
+            "", "2026-11-20T09:00:00", s.files.map((f) => f.path), { to: [] });
+          s.files.push({ path: message.path, text: message.text, mtime: Date.now() });
+          s.notes = s.files.filter((f) => f.path.endsWith(".md")).map((f) => core.noteFromFile(f.path, f.text, f.mtime));
+          window.cairn.rerender();
+        }""")
+        phone.wait_for_selector(f"{block} .ho-row")
+        phone.click(f"{block} .ho-row")
+        phone.wait_for_selector(f"{block} .ho-reply")
+        # The web app is no computer: it reads and answers, and has nothing to pick up.
+        self.assertEqual(phone.locator(f'{block} [data-action="handoff-say"]').count(), 0)
+        self.assertEqual(phone.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth"), True)
+
     def test_home_leads_with_what_needs_you_and_what_runs(self):
         page = self.open()
         home = '.vibe-board[data-page="home"]'
@@ -2171,7 +2280,7 @@ class EndToEndTests(unittest.TestCase):
         page.evaluate(HOME_SEED)
         page.wait_for_selector(f'{home} [data-panel="now"]')
         panels = page.eval_on_selector_all(f"{home} .vibe-panel", "els => els.map((e) => e.dataset.panel)")
-        self.assertEqual(panels, ["needs", "now", "dashboard", "chart", "recap", "devices", "log", "focus"])
+        self.assertEqual(panels, ["needs", "handoffs", "now", "dashboard", "chart", "recap", "devices", "log", "focus"])
         lede = page.inner_text(".today .lede")
         self.assertIn("2 sessions working on 2 computers", lede)
         self.assertIn("5 things waiting for you", lede)

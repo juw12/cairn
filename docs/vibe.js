@@ -31,6 +31,8 @@ const AGENT_HOOK = [
   "Run tests with:    cairn vibe check -- <test command>",
   "When finished:     cairn vibe end --result shipped|partial|dropped \"<one-line summary>\"",
   "Parallel agents:   set CAIRN_SESSION=<session slug> in each terminal (start prints it)",
+  "Other computers:   cairn handoff   shows what they left for this one; answer with cairn handoff pickup|done|reply \"<a few words of its name>\"",
+  "Left hanging:      cairn handoff send \"<what another computer must know or do>\" --to \"<computer>\"   (or --to all)",
 ].join("\n");
 
 let pollTimer = null;

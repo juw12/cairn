@@ -541,6 +541,46 @@ def cmd_feedback(brain: Brain, args) -> int:
     return 0
 
 
+def cmd_handoff(brain: Brain, args) -> int:
+    """A conversation between the computers that share this brain (cairn/handoff.py)."""
+    from . import handoff
+
+    words = list(args.text)
+    extra = args.message or ""
+    if args.file:
+        try:
+            extra = sys.stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8")
+        except OSError as error:
+            print(f"Cannot read {args.file}: {error}", file=sys.stderr)
+            return 2
+    try:
+        if args.action == "list":
+            print(handoff.overview(brain, args.sender or "", everything=args.all), end="")
+            return 0
+        if args.action == "show":
+            print(handoff.transcript(brain, handoff.find_thread(handoff.threads(brain), " ".join(words))), end="")
+            return 0
+        if args.action == "send":
+            if not args.to:
+                raise handoff.HandoffError('Who is it for? Add --to "<computer>" (several times for several), or --to all.')
+            note = handoff.send(brain, " ".join(words), extra, to=args.to, sender=args.sender or "")
+            for_whom = ", ".join(note["meta"]["to"])
+            print(f"Left for {'every computer' if for_whom == 'all' else for_whom}: brain/{note['path']}")
+            print("It reaches them with the brain's next sync.")
+            return 0
+        says = {"reply": "note", "pickup": "picked-up", "done": "done"}[args.action]
+        if not words:
+            raise handoff.HandoffError("Which conversation? Give its name, or a few words of it.")
+        text = "\n\n".join(part for part in (" ".join(words[1:]), extra.strip()) if part)
+        note = handoff.answer(brain, words[0], text, says=says, sender=args.sender or "")
+        said = {"note": "Answered", "picked-up": "Picked up", "done": "Done"}[says]
+        print(f"{said}: brain/{note['path']}")
+        return 0
+    except handoff.HandoffError as error:
+        print(error, file=sys.stderr)
+        return 2
+
+
 def cmd_serve(brain: Brain, args) -> int:
     from .server import serve
 
@@ -961,6 +1001,24 @@ def build_parser() -> argparse.ArgumentParser:
     autopilot_parser.add_argument("action", nargs="?", default="status", choices=["status", "on", "off", "add", "run", "set"])
     autopilot_parser.add_argument("text", nargs="*")
     autopilot_parser.add_argument("--workdir", default="", help="add: where the agent works (default: a new folder per goal)")
+    handoff_parser = sub.add_parser(
+        "handoff",
+        help="leave a message for your other computers, and see what they left for this one",
+        description=(
+            "A conversation between the computers that share this brain. "
+            "list (default) | send TITLE --to COMPUTER | show THREAD | reply THREAD TEXT | pickup THREAD [TEXT] | done THREAD [TEXT]. "
+            "THREAD is a conversation's name or a few words of it. Messages travel with the brain's sync."
+        ),
+    )
+    handoff_parser.add_argument("action", nargs="?", default="list", choices=["list", "send", "show", "reply", "pickup", "done"])
+    handoff_parser.add_argument("text", nargs="*", help="send: the title. Others: the conversation, then what to say")
+    handoff_parser.add_argument("--to", action="append", default=[], metavar="COMPUTER",
+                                help='send: who it is for, a name or a few words of it; repeat for several; "all" for every computer')
+    handoff_parser.add_argument("-m", "--message", default="", help="the longer text under the title")
+    handoff_parser.add_argument("--file", default="", metavar="PATH", help='read the longer text from a file ("-": standard input)')
+    handoff_parser.add_argument("--from", dest="sender", default="", metavar="COMPUTER",
+                                help="which computer is speaking (default: this one, or $CAIRN_DEVICE)")
+    handoff_parser.add_argument("--all", action="store_true", help="list: also what is between other computers, and what is settled")
     feedback_parser = sub.add_parser("feedback", help='record feedback: cairn feedback "toggle is hard to find" --rating 3')
     feedback_parser.add_argument("text", nargs="+")
     feedback_parser.add_argument("--rating", type=int, choices=range(1, 6), metavar="1-5")
@@ -1141,6 +1199,7 @@ def main(argv: list[str] | None = None) -> int:
         "publish": cmd_publish,
         "vibe": cmd_vibe,
         "feedback": cmd_feedback,
+        "handoff": cmd_handoff,
         "mcp": cmd_mcp,
         "connect": cmd_connect,
         "precedent": cmd_precedent,

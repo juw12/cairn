@@ -342,6 +342,39 @@ and stays paired, so a home-screen bookmark keeps working: live sessions, autopi
   closes the port.
 - If the phone can't connect, Windows Firewall may be blocking Python: allow it on private networks.
 
+### Let your computers leave messages for each other
+
+One brain, several computers: a laptop at home, one at work, a Mac for the things only a Mac can check. What
+one of them found, left hanging or cannot do itself used to get lost between them. Now it leaves a message.
+
+```bash
+cairn handoff                                          # what the other computers left for this one
+cairn handoff send "Buddy 1.13 is untested on a real Mac" --to "macbook" -m "Run the self-test, tell me what the log says."
+cairn handoff send "Pull Cairn before the next session" --to all
+cairn handoff show "buddy"                             # one conversation in full
+cairn handoff pickup "buddy"                           # this computer has taken it on
+cairn handoff reply "buddy" "Which macOS do you want it on?"
+cairn handoff done "buddy" "24 of 24 checks pass. The update check fails: see pull request 45."
+cairn handoff --all                                    # also what is between other computers, and what is settled
+```
+
+- **Who it is for:** `--to` takes a computer's name or a few words of it (`macbook` for `MacBook Pro 15,4`),
+  several times for several computers, or `all` for every computer. A computer is known once it has written
+  into the brain (a session, its `machines/` note or a message). `cairn vibe device` shows this one's name.
+- **Where it stands:** a conversation is for one computer or many. Each one says `pickup` when it takes it on
+  and `done` when its part is finished; anyone can `reply` in between, also a computer it was not for. It is
+  settled when every computer it was for has said `done`, or when the one that started it says `done` itself.
+- **In the app:** the Today page has a block **Between computers**: *For this computer* first, then *This
+  computer is waiting for*, then what is between the others, with **Picked up**, **Done** and an answer box
+  under each conversation, and a form to leave a new message. The web app and a phone are not a computer, so
+  there you read every conversation and answer.
+- **How it travels:** every message is its own Markdown file in `brain/handoffs/`, written once by the
+  computer that says it and never changed. Two computers never write the same file, so the brain's git remote
+  (or any folder sync) carries the conversation with nothing to merge. A message arrives with the other
+  computer's next sync, not at once.
+- **For assistants:** the agent instructions on the Vibe page tell an assistant to run `cairn handoff` before
+  it starts, and to leave one when it stops with something another computer has to do.
+
 ### Get a daily status report in Telegram
 
 A Telegram bot of your own tells you once a day whether Cairn is healthy and what the day held, and answers
@@ -638,6 +671,7 @@ cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ a
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
 cairn vibe device                        # the name this computer puts on its sessions (--adopt names older ones)
+cairn handoff                            # what your other computers left for this one (send, show, pickup, reply, done)
 cairn vibe github copy D:/github-copy    # a full copy of every repo of your GitHub accounts on this computer, with issues, releases and wikis
 cairn vibe github copy everywhere        # ask your other computers to keep their own copy too (everywhere off stops asking)
 cairn precedent brief "goal"             # a brief from your own history (learn, queue, next, log, install)

@@ -996,3 +996,181 @@ export function vibeStats(notes, today, days = 14) {
     daily,
   };
 }
+
+// ------------------------------------------------------------ handoffs (a conversation between computers)
+//
+// One brain is shared by several computers. A handoff is a message one of them leaves for the others: what it
+// found, what is left hanging, what only another computer can do. Every message is its own file in handoffs/,
+// written once by the computer that says it and never edited, so two computers never write the same file and
+// git has nothing to merge. An answer ("picked up", "done", or just a note) is one more file that names the
+// first message in `thread`. Where a conversation stands is worked out from its files, here (and in core.py).
+
+export const HANDOFF_TYPE = "handoff";
+export const HANDOFF_FOLDER = "handoffs";
+export const HANDOFF_SAYS = ["note", "picked-up", "done"];
+export const HANDOFF_EVERYONE = "all";
+// Two messages stamped the same second read in the order they make sense: taken on, talked about, finished.
+const HANDOFF_SAME_SECOND = { "picked-up": 0, note: 1, done: 2 };
+const HANDOFF_SLUG_FROM = 24;
+const HANDOFF_SLUG_TITLE = 44;
+
+const oneSpaced = (text) => String(text ?? "").trim().split(/\s+/).join(" ");
+const trimDashes = (text) => text.replace(/^-+|-+$/g, "");
+
+/** Two spellings of one computer's name are the same computer: case and spacing do not count. */
+export function deviceKey(name) {
+  return oneSpaced(name).toLowerCase();
+}
+
+// The computers named in `to`. A list is several names; a plain value is one name, never split at a comma
+// (a model name may hold one: "MacBook Pro 15,4").
+function handoffNames(value) {
+  const items = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const seen = new Set();
+  const names = [];
+  for (const item of items) {
+    const name = oneSpaced(item);
+    const key = deviceKey(name);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+export const isHandoff = (note) => note.meta.type === HANDOFF_TYPE;
+
+function handoffThreadId(note) {
+  const raw = note.meta.thread;
+  let name = typeof raw === "string" ? raw.trim() : "";
+  if (name.startsWith("[[") && name.endsWith("]]")) name = name.slice(2, -2).split("|")[0].trim();
+  name = name.split("/").pop().replace(/\.md$/i, "");
+  return name || note.slug;
+}
+
+/**
+ * The conversations between computers, open ones first, then the one that moved last.
+ * Each: { id, title, path, from, to, everyone, messages: [{ path, title, from, says, at }],
+ * parts: [{ device, state: waiting | picked-up | done, at }], open, last }.
+ * `to` names the computers it is for; none (or "all") means every computer. A named computer's part is done
+ * when it says `done`; the conversation is closed when every named computer has, or when the computer that
+ * started it says `done` itself.
+ */
+export function handoffThreads(notes) {
+  const groups = new Map();
+  for (const note of notes) {
+    if (!isHandoff(note)) continue;
+    const meta = note.meta;
+    const message = {
+      path: note.path,
+      slug: note.slug,
+      title: note.title,
+      from: oneSpaced(typeof meta.from === "string" ? meta.from : ""),
+      says: HANDOFF_SAYS.includes(meta.says) ? meta.says : "note",
+      at: typeof meta.created === "string" ? meta.created : "",
+      to: handoffNames(meta.to),
+    };
+    const id = handoffThreadId(note);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(message);
+  }
+
+  const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const threads = [];
+  for (const [id, messages] of groups) {
+    messages.sort((a, b) => byText(a.at, b.at) || HANDOFF_SAME_SECOND[a.says] - HANDOFF_SAME_SECOND[b.says] || byText(a.path, b.path));
+    const head = messages.find((message) => message.slug === id) || messages[0];
+    messages.splice(messages.indexOf(head), 1); // the first message leads, whatever the clocks of the computers say
+    messages.unshift(head);
+    const sender = deviceKey(head.from);
+    const everyone = !head.to.length || head.to.some((name) => deviceKey(name) === HANDOFF_EVERYONE);
+    const named = everyone ? [] : head.to.filter((name) => deviceKey(name) !== sender);
+    let closed = false;
+    const said = new Map();
+    for (const message of messages) {
+      if (message.says === "note") continue;
+      const key = deviceKey(message.from);
+      if (key === sender) {
+        closed = closed || message.says === "done";
+        continue;
+      }
+      if (said.get(key)?.state === "done") continue;
+      said.set(key, { device: message.from, state: message.says, at: message.at });
+    }
+    const parts = [];
+    for (const name of named) {
+      const answer = said.get(deviceKey(name));
+      said.delete(deviceKey(name));
+      parts.push({ device: name, state: answer ? answer.state : "waiting", at: answer ? answer.at : "" });
+    }
+    const waitingOnNamed = parts.some((part) => part.state !== "done");
+    parts.push(...said.values()); // a computer that was not named and stepped in anyway
+    threads.push({
+      id,
+      title: head.title,
+      path: head.path,
+      from: head.from,
+      to: named,
+      everyone,
+      messages: messages.map(({ path, title, from, says, at }) => ({ path, title, from, says, at })),
+      parts,
+      open: !closed && (everyone || !named.length || waitingOnNamed),
+      last: messages.reduce((latest, message) => (message.at > latest ? message.at : latest), ""),
+    });
+  }
+  return threads.sort((a, b) => Number(!a.open) - Number(!b.open) || byText(b.last, a.last) || byText(a.id, b.id));
+}
+
+/** What a conversation still wants from one computer: "waiting", "picked-up", or "" (nothing). */
+export function handoffWaitsFor(thread, device) {
+  const key = deviceKey(device);
+  if (!thread.open || !key || key === deviceKey(thread.from)) return "";
+  const part = thread.parts.find((entry) => deviceKey(entry.device) === key);
+  if (part) return part.state === "done" ? "" : part.state;
+  return thread.everyone ? "waiting" : "";
+}
+
+/**
+ * The conversations as one computer sees them: { mine, asked, others, settled }, each a list of ids.
+ * mine: it is asked to do something. asked: it started them and they are still open.
+ */
+export function handoffInbox(threads, device) {
+  const key = deviceKey(device);
+  const inbox = { mine: [], asked: [], others: [], settled: [] };
+  for (const thread of threads) {
+    if (!thread.open) inbox.settled.push(thread.id);
+    else if (handoffWaitsFor(thread, device)) inbox.mine.push(thread.id);
+    else if (key && key === deviceKey(thread.from)) inbox.asked.push(thread.id);
+    else inbox.others.push(thread.id);
+  }
+  return inbox;
+}
+
+/**
+ * { path, text } of a new message. `stamp` is "2026-11-20T23:41:07" (the seconds keep two messages of one
+ * minute in order). A first message names who it is for in `to` (none: every computer); an answer names the
+ * first message's file in `thread` and what it says.
+ */
+export function handoffMessage(sender, title, body, stamp, existingPaths, { to = [], thread = "", says = "note" } = {}) {
+  sender = oneSpaced(sender);
+  title = oneSpaced(title);
+  const meta = { title: title || "Untitled", type: HANDOFF_TYPE, from: sender };
+  if (thread) {
+    meta.thread = `[[${thread}]]`;
+    meta.says = HANDOFF_SAYS.includes(says) ? says : "note";
+  } else {
+    const names = handoffNames(to || []);
+    meta.to = !names.length || names.some((name) => deviceKey(name) === HANDOFF_EVERYONE) ? [HANDOFF_EVERYONE] : names;
+  }
+  meta.tags = [HANDOFF_TYPE];
+  meta.created = stamp;
+  const prefix = `${stamp.slice(0, 10)}-${stamp.slice(11, 16).replace(":", "")}`;
+  const who = sender ? trimDashes(slugify(sender).slice(0, HANDOFF_SLUG_FROM)) : "someone";
+  const what = trimDashes(slugify(title).slice(0, HANDOFF_SLUG_TITLE));
+  const folder = `${HANDOFF_FOLDER}/`;
+  const taken = new Set(existingPaths.filter((p) => p.startsWith(folder) && p.endsWith(".md")).map((p) => p.slice(folder.length, -3)));
+  const slug = uniqueSlug(`${prefix}-${who}-${what}`, taken);
+  const text = String(body || "").trim();
+  return { path: `${folder}${slug}.md`, text: serializeNote(meta, text ? `${text}\n` : "") };
+}

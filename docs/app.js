@@ -31,6 +31,7 @@ import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
 import { movePanel, openPanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
 import { pickChartDay, setChartMetric, setChartRange, showNeeds, wireHome } from "./home.js";
+import { sayHandoff, sendHandoff, toggleHandoff, toggleHandoffForm, toggleSettled } from "./handoffs.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
 import { wireRepo } from "./repo.js";
 import { initDatabases } from "./database.js";
@@ -395,6 +396,10 @@ function wireGlobal() {
       "home-chart-day": () => pickChartDay(actionEl.dataset.day),
       "home-chart-range": () => setChartRange(actionEl.dataset.range) && renderView(),
       "home-chart-metric": () => setChartMetric(actionEl.dataset.metric) && renderView(),
+      "handoff-open": () => toggleHandoff(actionEl.dataset.thread),
+      "handoff-write": toggleHandoffForm,
+      "handoff-settled": toggleSettled,
+      "handoff-say": () => sayHandoff(actionEl.dataset.thread, actionEl.dataset.says),
       "home-needs-all": () => {
         showNeeds();
         setView("notes");
@@ -524,6 +529,14 @@ function wireGlobal() {
     if (event.target.id === "people-form") {
       event.preventDefault();
       return lookupProfile(event.target.query.value);
+    }
+    if (event.target.id === "handoff-form") {
+      event.preventDefault();
+      return sendHandoff(event.target);
+    }
+    if (event.target.dataset.handoffReply) {
+      event.preventDefault();
+      return sayHandoff(event.target.dataset.handoffReply, "note");
     }
     if (event.target.id === "friend-form") {
       event.preventDefault();

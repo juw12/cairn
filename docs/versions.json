@@ -2,6 +2,18 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 87,
+      "date": "2026-11-21",
+      "title": "Your computers leave messages for each other",
+      "changes": [
+        "Today has a new block, Between computers: a conversation between the computers that share one brain. One leaves a message for one, several or all of the others (what it found, what is left hanging, what only another computer can do); the others press Picked up, answer, and press Done (#75)",
+        "What waits for this computer is listed first, then what it is waiting for, then what is between other computers. A conversation is settled when every computer it was for has said Done, or when the one that started it closes it (#75)",
+        "From a terminal or an assistant: cairn handoff shows what was left for this computer; cairn handoff send \"...\" --to \"<computer>\" leaves a message (a few words of the name are enough, --to all is every computer); pickup, done, reply and show work on one conversation (#75)",
+        "Every message is its own file in handoffs/, written once by the computer that says it and never changed, so two computers never write the same file and the brain's sync has nothing to merge. On the web app and a phone you can read every conversation and answer (#75)",
+        "The agent instructions on the Vibe page name the two commands, so an assistant looks for what was left for its computer before it starts (#75)"
+      ]
+    },
+    {
       "build": 86,
       "date": "2026-11-21",
       "title": "Your public brain is a web page anyone can search",

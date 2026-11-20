@@ -65,7 +65,54 @@ VIBE_NOTES = {
     "feedback/d.md": "---\ntitle: Ok\ntype: feedback\nstatus: wontfix\nrating: 4\n---\n",
 }
 SKILL_CASES = [["/refine app cairn", "note"], ["  /ambitious-founder idea", "note"], ["/council", "prompt"], ["not /skill", "note"], ["/-bad", "note"], ["/Precedent limits", "note"]]
+# A conversation between three computers, as [sender, title, body, stamp, to, index of the message it answers, says],
+# then files written by hand that bend the rules.
+HANDOFF_SCRIPT = [
+    ["MacBook Pro 15,4", "Buddy 1.13.0 checked on the real Mac", "Self-test: 24 of 24.\n\n- one\n- two\n", "2026-11-20T23:01:05", ["ASUS EXPERTBOOK P5405CSA"], None, "note"],
+    ["ASUS EXPERTBOOK P5405CSA", "Picked up", "", "2026-11-20T23:02:00", [], 0, "picked-up"],
+    ["asus  expertbook p5405csa", "Which macOS: 15 or 14?", "", "2026-11-20T23:02:30", [], 0, "note"],
+    ["ASUS EXPERTBOOK P5405CSA", "Pull Cairn", "", "2026-11-20T23:03:00", [], None, "note"],
+    ["Office PC", "Done", "", "2026-11-20T23:04:00", [], 3, "done"],
+    ["ASUS EXPERTBOOK P5405CSA", "Café pictures: rebuild them!", "They show 0.6.3.", "2026-11-20T22:00:00", ["Office PC", "MacBook Pro 15,4", "office  pc"], None, "note"],
+    ["MacBook Pro 15,4", "Done", "", "2026-11-20T22:30:00", [], 5, "done"],
+    ["MacBook Pro 15,4", "Old question", "", "2026-11-19T08:00:00", ["ASUS EXPERTBOOK P5405CSA"], None, "note"],
+    ["ASUS EXPERTBOOK P5405CSA", "Answered long ago", "", "2026-11-19T09:00:00", [], 7, "done"],
+    ["MacBook Pro 15,4", "Old question", "", "2026-11-19T08:00:00", ["all", "Office PC"], None, "note"],
+    ["", "  ", "", "2026-11-20T10:00:00", ["MacBook Pro 15,4"], None, "shouted"],
+    ["Phone", "A note to myself and the Mac", "", "2026-11-20T12:00:00", ["Phone"], None, "note"],
+    ["Phone", "Closed by its writer", "", "2026-11-20T12:30:00", [], 11, "done"],
+    ["ASUS EXPERTBOOK P5405CSA", "All in one second", "", "2026-11-20T13:00:00", ["Office PC"], None, "note"],
+    ["Office PC", "Finished", "", "2026-11-20T13:00:01", [], 13, "done"],
+    ["Office PC", "A word in between", "", "2026-11-20T13:00:01", [], 13, "note"],
+    ["Office PC", "Picked up", "", "2026-11-20T13:00:01", [], 13, "picked-up"],
+]
+HANDOFF_BY_HAND = {
+    "handoffs/by-hand.md": "---\ntitle: Written in an editor\ntype: handoff\nfrom: Office PC\nto: MacBook Pro 15,4\ncreated: 2026-11-20\n---\nOne name, with a comma, not in a list.\n",
+    "handoffs/by-hand-answer.md": "---\ntype: handoff\nfrom: MacBook Pro 15,4\nthread: handoffs/by-hand.md\nsays: Done\n---\n# Heading as title\n",
+    "notes/moved-out.md": "---\ntitle: Moved to another folder\ntype: handoff\nfrom: Office PC\nto: [All]\nthread: \"[[by-hand|the first one]]\"\nsays: picked-up\ncreated: 2026-11-20T09:00\n---\n",
+    "handoffs/orphan.md": "---\ntitle: Its first message never arrived\ntype: handoff\nfrom: Office PC\nthread: \"[[never-synced]]\"\nsays: picked-up\ncreated: 2026-11-20T09:30:00\n---\n",
+    "handoffs/not-one.md": "---\ntitle: A plain note that lives here\nfrom: Office PC\nto: [MacBook Pro 15,4]\n---\n",
+    "tasks/pick-it-up.md": "---\ntitle: A task tagged handoff\ntype: task\ntags: [handoff]\n---\n",
+}
+HANDOFF_DEVICES = ["MacBook Pro 15,4", "ASUS EXPERTBOOK P5405CSA", "office pc", "Phone", "A computer nobody has heard of", ""]
 CODE = "x = 1  # TODO: fix\n// FIXME(juwen): leak */\n<!-- HACK temp -->\n-- XXX sql\nprint('TODO no')\n  * TODO in docblock\n"
+
+
+def python_handoffs():
+    files, slugs = dict(HANDOFF_BY_HAND), []
+    for sender, title, body, stamp, to, answers, says in HANDOFF_SCRIPT:
+        thread = slugs[answers] if answers is not None else ""
+        message = core.handoff_message(sender, title, body, stamp, list(files), to=to, thread=thread, says=says)
+        files[message["path"]] = message["text"]
+        slugs.append(message["path"].rsplit("/", 1)[-1][:-3])
+    threads = core.handoff_threads([core.note_from_file(p, t, 0) for p, t in files.items()])
+    return {
+        "files": files,
+        "threads": threads,
+        "inbox": [core.handoff_inbox(threads, device) for device in HANDOFF_DEVICES],
+        "waits": [[core.handoff_waits_for(thread, device) for device in HANDOFF_DEVICES] for thread in threads],
+        "keys": [core.device_key(device) for device in [*HANDOFF_DEVICES, "  MacBook\tPro  15,4 ", None]],
+    }
 
 
 def python_results(demo_files, vault_files):
@@ -97,6 +144,7 @@ def python_results(demo_files, vault_files):
             "backlinks": core.backlinks(vn, "Inbox/My Note.md"),
         })([core.note_from_file(p, t, 0) for p, t in VAULT_NOTES.items()]),
         "sync": [core.plan_sync(*case) for case in SYNC_CASES],
+        "handoffs": python_handoffs(),
         "vibe": (lambda vn: {
             "types": [n["type"] for n in vn],
             "statuses": [n["status"] for n in vn],
@@ -146,6 +194,24 @@ async ([inputs, demoFiles, vaultFiles]) => {
       backlinks: core.backlinks(vn, 'Inbox/My Note.md'),
     }))(Object.entries(inputs.vault).map(([p, t]) => core.noteFromFile(p, t, 0))),
     sync: inputs.sync.map((c) => core.planSync(...c)),
+    handoffs: (() => {
+      const files = { ...inputs.handoffByHand };
+      const slugs = [];
+      for (const [sender, title, body, stamp, to, answers, says] of inputs.handoffScript) {
+        const thread = answers !== null ? slugs[answers] : '';
+        const message = core.handoffMessage(sender, title, body, stamp, Object.keys(files), { to, thread, says });
+        files[message.path] = message.text;
+        slugs.push(message.path.split('/').pop().slice(0, -3));
+      }
+      const threads = core.handoffThreads(Object.entries(files).map(([p, t]) => core.noteFromFile(p, t, 0)));
+      return {
+        files,
+        threads,
+        inbox: inputs.handoffDevices.map((device) => core.handoffInbox(threads, device)),
+        waits: threads.map((thread) => inputs.handoffDevices.map((device) => core.handoffWaitsFor(thread, device))),
+        keys: [...inputs.handoffDevices, '  MacBook\tPro  15,4 ', null].map((device) => core.deviceKey(device)),
+      };
+    })(),
     vibe: ((vn) => ({
       types: vn.map((n) => n.type),
       statuses: vn.map((n) => n.status),
@@ -185,6 +251,9 @@ class ParityTests(unittest.TestCase):
                     "sync": SYNC_CASES,
                     "vibe": VIBE_NOTES,
                     "skills": SKILL_CASES,
+                    "handoffScript": HANDOFF_SCRIPT,
+                    "handoffByHand": HANDOFF_BY_HAND,
+                    "handoffDevices": HANDOFF_DEVICES,
                 }
                 actual = page.evaluate(JS_HARNESS, [inputs, demo, vault])
                 browser.close()

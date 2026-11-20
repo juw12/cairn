@@ -184,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
                     "path": str(brain.root) if self.desktop is not None else None,
                     "mcp": mcp.server_entry(brain),
                     "githubMove": self.github_moves,
+                    "device": machine.device_name(),  # this computer's name, so Today knows which handoffs are for it
                 })
             elif route == "/api/files":
                 self._send_json({"files": brain.files()})
