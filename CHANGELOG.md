@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 81 (2026-11-20): Private pictures open directly
+
+- Latest updates uses the vault’s known paths to load a private picture without asking GitHub for a file that isn’t there. A picture beside the note still wins when both folders contain it.
+- A phone-sized WebKit test now opens the Map with 4,000 notes and checks that it draws the linked notes and responds to a tap.
+
 ## Build 80 (2026-11-20): Map opens on a big brain
 
 - Map and a note's Unlinked mentions no longer freeze on a large brain. On 4,000 notes the search for mentions took 5 seconds in Chrome and did not finish in Safari on a phone; it takes half a second in both now, with the same results ([#64](https://github.com/juw12/cairn/pull/64))

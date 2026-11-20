@@ -1837,6 +1837,36 @@ class EndToEndTests(unittest.TestCase):
 
     # ------------------------------------------------------------ network: profiles + read-only brains
 
+    def test_private_pictures_use_the_tree_without_guessing(self):
+        page = self.open()
+        requested = []
+
+        def picture(route):
+            requested.append(route.request.url.split('/contents/')[1].split('?')[0])
+            route.fulfill(body=b'picture', content_type='image/png', headers={'Access-Control-Allow-Origin': '*'})
+
+        page.route('https://api.github.com/repos/fixture/brain/contents/**', picture)
+        result = page.evaluate("""async () => {
+            const {GitHubStore} = await import('./store.js');
+            const {brainItems} = await import('./github.js');
+            sessionStorage.setItem('cairn.session', JSON.stringify({token: 'fixture', login: 'fixture'}));
+            const blobs = ['notes/post.md', 'shots/root.png', 'notes/beside.png', 'both.png', 'notes/both.png'];
+            const tree = {tree: blobs.map(p => ({type: 'blob', path: 'brain/' + p}))};
+            const index = brainItems(tree, 'fixture', 'brain');
+            const repo = {owner: 'fixture', name: 'brain', branch: 'main', isPrivate: true};
+            const store = new GitHubStore(repo, index);
+            const counts = [];
+            for (const target of ['shots/root.png', './beside.png', 'both.png', '/both.png', 'missing.png', 'both.png']) {
+                counts.push((await store.assetUrls(target, 'notes/post.md')).length);
+            }
+            const partial = brainItems({...tree, truncated: true}, 'fixture', 'brain');
+            const fallback = await new GitHubStore(repo, partial).assetUrls('unknown.png', 'notes/post.md');
+            return {counts, fallback: fallback.length};
+        }""")
+        self.assertEqual(result, {'counts': [1, 1, 1, 1, 0, 1], 'fallback': 1})
+        self.assertEqual(requested, ['brain/shots/root.png', 'brain/notes/beside.png', 'brain/notes/both.png',
+                                     'brain/both.png', 'brain/notes/unknown.png'])
+
     def test_github_input_parsing(self):
         page = self.open()
         results = page.evaluate(

@@ -758,7 +758,7 @@ async function boot() {
     const cacheKey = login && parsed?.repo ? brainKey(login, `${parsed.owner}/${parsed.repo}`) : "";
     const cached = cacheKey ? await readBrain(cacheKey) : null;
     if (cached?.files) {
-      const loaded = { root: cached.root, files: cached.files.map((file) => ({ ...file, mtime: 0 })), etag: cached.etag, cached: true };
+      const loaded = { root: cached.root, files: cached.files.map((file) => ({ ...file, mtime: 0 })), assetPaths: cached.assetPaths, etag: cached.etag, cached: true };
       return start(new GitHubStore(cached.repo, loaded, { writable: cached.writable, cacheKey }));
     }
     // A big vault takes a few seconds over a phone connection: say so instead of a blank page.

@@ -493,7 +493,9 @@ export class GitHubStore {
     this.writable = Boolean(writable);
     // The sha of the version we last saw for each file: GitHub refuses a save based on an older one.
     this.shas = new Map(this.files.map((file) => [file.path, file.sha || null]));
-    this.treeEtag = loaded.etag || "";
+    this.assetPaths = loaded.assetPaths ? new Set(loaded.assetPaths) : null;
+    // An older device copy has notes but no asset index. Keep its notes and refresh its tree.
+    this.treeEtag = loaded.cached && loaded.assetPaths === undefined ? "" : loaded.etag || "";
     this.fromCache = Boolean(loaded.cached);
     this.cacheKey = cacheKey;
     if (cacheKey && !this.fromCache) this.persist();
@@ -505,7 +507,7 @@ export class GitHubStore {
     clearTimeout(this.persistTimer);
     this.persistTimer = setTimeout(() => {
       const files = this.files.map(({ path, text }) => ({ path, text, sha: this.shas.get(path) || null }));
-      saveBrain(this.cacheKey, { repo: this.repo, root: this.root, files, etag: this.treeEtag, writable: this.writable, savedAt: Date.now() });
+      saveBrain(this.cacheKey, { repo: this.repo, root: this.root, files, assetPaths: this.assetPaths && [...this.assetPaths], etag: this.treeEtag, writable: this.writable, savedAt: Date.now() });
     }, 1000);
   }
 
@@ -544,6 +546,7 @@ export class GitHubStore {
       this.shas.delete(path);
       paths.push(path);
     }
+    this.assetPaths = tree.assetPaths ? new Set(tree.assetPaths) : null;
     this.treeEtag = tree.etag;
     this.persist();
     return { revision: revision + 1, epoch: "github", paths, catchUp: first };
@@ -608,14 +611,14 @@ export class GitHubStore {
     return { files, git: { available: false, github: true } };
   }
 
-  // Public repos serve files from raw.githubusercontent.com; private ones need a token, so those
-  // attachments show as a chip instead.
+  // Prefer the note's folder when both paths exist; a leading slash explicitly means the vault root.
   async assetUrls(target, from = "") {
     const { owner, name, branch } = this.repo;
     const clean = target.trim().replaceAll("\\", "/").replace(/^\.\//, "");
     const folder = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : "";
-    const options = [...new Set([folder ? `${folder}/${clean}` : null, clean].filter(Boolean))].filter((path) => !path.split("/").includes(".."));
-    if (this.repo.isPrivate) return this.privateAsset(options);
+    const candidates = clean.startsWith("/") ? [clean.replace(/^\/+/, "")] : [folder && `${folder}/${clean}`, clean];
+    const options = [...new Set(candidates.filter((path) => path && !path.split("/").includes("..")))];
+    if (this.repo.isPrivate) return this.privateAsset(this.assetPaths ? options.filter((p) => this.assetPaths.has(p)) : options);
     return options.map((path) => `https://raw.githubusercontent.com/${owner}/${name}/${encodeURIComponent(branch || "main")}/${this.root}${path}`.replace(/ /g, "%20"));
   }
 
@@ -629,6 +632,7 @@ export class GitHubStore {
       }
       const url = await this.assets.get(path);
       if (url) return [url];
+      this.assets.delete(path); // a transient read failure must not hide a picture for the whole visit
     }
     return [];
   }

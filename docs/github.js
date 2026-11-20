@@ -162,9 +162,9 @@ const encodePath = (path) => path.split("/").map(encodeURIComponent).join("/");
 export async function loadBrainFiles(owner, repo, branch) {
   // Never cached: after an edit the tree must show the new shas.
   const response = await request(treeUrl(owner, repo, branch), { cache: "no-store" });
-  const { root, items } = brainItems(await response.json(), owner, repo);
+  const { root, items, assetPaths } = brainItems(await response.json(), owner, repo);
   const files = await blobFiles(owner, repo, branch, root, items);
-  return { root, files: files.filter(Boolean), etag: response.headers.get("etag") || "" };
+  return { root, assetPaths, files: files.filter(Boolean), etag: response.headers.get("etag") || "" };
 }
 
 const treeUrl = (owner, repo, branch) => `${API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
@@ -179,10 +179,13 @@ export function brainItems(tree, owner, repo, root) {
   if (root === undefined) throw new GitHubError(`${owner}/${repo} has no brain/ folder or notes yet.`);
   const hidden = (path) => path.split("/").some((part) => part.startsWith(".") && part !== ".brain");
   const notes = blobs.filter((item) => item.path.startsWith(root) && /\.(md|canvas)$/i.test(item.path) && !hidden(item.path));
-  if (notes.length <= MAX_FILES) return { root, items: notes };
+  // Only a complete tree can rule out a candidate. Paths cost no content requests.
+  const assetPaths = tree.truncated ? null : paths.filter((p) => p.startsWith(root) && !/\.(md|canvas)$/i.test(p))
+    .map((p) => p.slice(root.length));
+  if (notes.length <= MAX_FILES) return { root, assetPaths, items: notes };
   // A git tree is alphabetical, so a plain cut would drop sessions/ and tasks/ before an archive folder.
   const kept = (item) => KEEP_FIRST.some((folder) => item.path.startsWith(root + folder));
-  return { root, items: [...notes.filter(kept), ...notes.filter((item) => !kept(item))].slice(0, MAX_FILES) };
+  return { root, assetPaths, items: [...notes.filter(kept), ...notes.filter((item) => !kept(item))].slice(0, MAX_FILES) };
 }
 
 // Live sync: the brain's note blobs, or null when the tree is unchanged since `etag`. Signed in, a 304
@@ -196,8 +199,8 @@ export async function brainTreeIfChanged(repo, root, etag = "") {
   }
   if (response.status === 304) return null;
   if (!response.ok) throw new GitHubError(`GitHub answered ${response.status}.`);
-  const { items } = brainItems(await response.json(), repo.owner, repo.name, root);
-  return { etag: response.headers.get("etag") || "", items };
+  const { items, assetPaths } = brainItems(await response.json(), repo.owner, repo.name, root);
+  return { etag: response.headers.get("etag") || "", items, assetPaths };
 }
 
 // Texts of tree items: [{ path (relative to the brain), text, mtime, sha } | null].
