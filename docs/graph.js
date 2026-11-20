@@ -146,9 +146,83 @@ function inRanges(ranges, start, end) {
   return ranges.some(([a, b]) => start < b && end > a);
 }
 
-function mentionRegex(names) {
-  const sorted = [...names].sort((a, b) => b.length - a.length);
-  return new RegExp(`(?<![\\p{L}\\p{N}_])(${sorted.map(escapeRegex).join("|")})(?![\\p{L}\\p{N}_])`, "giu");
+// Finding thousands of names in every note: one regular expression with a branch per name froze the Map
+// for seconds in Chrome and for minutes in Safari on a brain of 4,000 notes, because each place in the text
+// tried every name. A letter tree walks a place once, whatever the number of names.
+const WORD_RE = /[\p{L}\p{N}_]/u;
+const wordCache = new Map();
+function isWordChar(char) {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  if (code < 128) return (code > 47 && code < 58) || (code > 64 && code < 91) || (code > 96 && code < 123) || code === 95;
+  let known = wordCache.get(char);
+  if (known === undefined) {
+    known = WORD_RE.test(char);
+    wordCache.set(char, known);
+  }
+  return known;
+}
+// The whole character that ends before `index` / starts at `index` (two units for the rare ones outside the basic plane).
+const charBefore = (text, index) => {
+  if (index <= 0) return "";
+  const low = text.charCodeAt(index - 1);
+  return low >= 0xdc00 && low <= 0xdfff && index > 1 ? text.slice(index - 2, index) : text[index - 1];
+};
+const charAt = (text, index) => (index >= text.length ? "" : String.fromCodePoint(text.codePointAt(index)));
+
+// Lower case with every character kept at its place, so a position in it is a position in the text.
+function lowerInPlace(text) {
+  const lower = text.toLowerCase();
+  if (lower.length === text.length) return lower;
+  let out = "";
+  for (const unit of text.split("")) {
+    const small = unit.toLowerCase();
+    out += small.length === 1 ? small : unit;
+  }
+  return out;
+}
+
+const END = "";
+function nameTree(names) {
+  const root = new Map();
+  for (const name of names) {
+    let node = root;
+    for (let i = 0; i < name.length; i += 1) {
+      let next = node.get(name[i]);
+      if (!next) node.set(name[i], (next = new Map()));
+      node = next;
+    }
+    node.set(END, true);
+  }
+  return root;
+}
+
+// Every place a name stands as a whole word or phrase, left to right, the longest name first, none
+// overlapping: [{ index, length }] with positions in `body`.
+function findNames(body, tree) {
+  const lower = lowerInPlace(body);
+  const found = [];
+  let index = 0;
+  while (index < lower.length) {
+    let node = tree.get(lower[index]);
+    if (!node || isWordChar(charBefore(body, index))) {
+      index += 1;
+      continue;
+    }
+    let length = 0;
+    for (let at = index + 1; ; at += 1) {
+      if (node.has(END) && !isWordChar(charAt(body, at))) length = at - index;
+      node = at < lower.length ? node.get(lower[at]) : null;
+      if (!node) break;
+    }
+    if (length) {
+      found.push({ index, length });
+      index += length;
+    } else {
+      index += 1;
+    }
+  }
+  return found;
 }
 
 // Notes that mention another note's title (or file name) in plain text without any link between them.
@@ -171,24 +245,27 @@ export function unlinkedMentions(notes, graph) {
   const sameWord = (text) => /\s/.test(text.trim()) || spelling.get(text.toLowerCase())?.has(text);
   const names = [...owners.entries()].filter(([, paths]) => paths.size === 1).map(([key]) => key);
   if (!names.length) return [];
-  const regex = mentionRegex(names);
+  const tree = nameTree(names);
   const out = [];
   for (const note of notes) {
+    const places = findNames(note.body, tree);
+    if (!places.length) continue;
     const ranges = maskedRanges(note.body);
     const found = new Map();
-    for (const match of note.body.matchAll(regex)) {
-      if (inRanges(ranges, match.index, match.index + match[0].length) || !sameWord(match[0])) continue;
-      const target = [...owners.get(match[0].toLowerCase())][0];
-      if (target === note.path || adj.get(note.path)?.has(target)) continue;
+    for (const place of places) {
+      const phrase = note.body.slice(place.index, place.index + place.length);
+      if (inRanges(ranges, place.index, place.index + place.length) || !sameWord(phrase)) continue;
+      const target = [...(owners.get(phrase.toLowerCase()) || [])][0];
+      if (!target || target === note.path || adj.get(note.path)?.has(target)) continue;
       const hit = found.get(target);
       if (hit) {
         hit.count += 1;
         continue;
       }
-      const start = Math.max(0, match.index - 40);
-      const end = Math.min(note.body.length, match.index + match[0].length + 40);
+      const start = Math.max(0, place.index - 40);
+      const end = Math.min(note.body.length, place.index + place.length + 40);
       const context = `${start > 0 ? "…" : ""}${note.body.slice(start, end).replace(/\s+/g, " ").trim()}${end < note.body.length ? "…" : ""}`;
-      found.set(target, { from: note.path, to: target, phrase: match[0], count: 1, context });
+      found.set(target, { from: note.path, to: target, phrase, count: 1, context });
     }
     out.push(...found.values());
   }

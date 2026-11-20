@@ -3,6 +3,12 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 80 (2026-11-20): Map opens on a big brain
+
+- Map and a note's Unlinked mentions no longer freeze on a large brain. On 4,000 notes the search for mentions took 5 seconds in Chrome and did not finish in Safari on a phone; it takes half a second in both now, with the same results ([#64](https://github.com/juw12/cairn/pull/64))
+- Home: the first line of an update is no longer the name of its picture when the note starts with one ([#64](https://github.com/juw12/cairn/pull/64))
+- Home: a note named for a time of day that has not come yet no longer sits on top of Latest updates. It keeps its day and shows no time ([#64](https://github.com/juw12/cairn/pull/64))
+
 ## Build 79 (2026-11-20): A Home that shows what matters
 
 - Home leads with what waits for you: sessions that stopped on an error, GitHub minutes running low, the newest tasks marked needs-me and decisions that wait for a yes or no ([#62](https://github.com/juw12/cairn/pull/62))
