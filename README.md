@@ -278,13 +278,22 @@ stand by and take over within five minutes of it stopping.
   every branch, every tag, the whole history) of every repo of the accounts the GitHub CLI is signed in to, in
   `FOLDER/owner/name.git`, so that GitHub is not the only place your work exists. A locked account, a deleted
   repo or a force-push then costs nothing: `git clone FOLDER/owner/name.git` gives the work back, and
-  `git --git-dir FOLDER/owner/name.git push --all NEW-URL` (then `--tags`) puts it on another host. The folder
-  is remembered per computer, later runs (`cairn vibe github copy`) fetch only the repos pushed to since, and
-  the watcher does that once a day. A repo that is gone from GitHub keeps its copy. `--account NAME` copies one
-  account only. A note per computer in `github-usage/copy/` says how many repos it holds and how fresh. The
-  sign-in goes to git for one command at a time and is never written into the copy. Not in a copy, because
-  they are not in git: issues, releases, wikis, Actions settings and secrets, and Git LFS files. Cairn does not
-  replace GitHub as the place others find your work or your devices sync through; it makes losing it survivable.
+  `git --git-dir FOLDER/owner/name.git push --all NEW-URL` (then `--tags`) puts it on another host. Beside each
+  mirror, `FOLDER/owner/name.extras/` holds what is not in git: issues and pull requests with their comments
+  (`issues.json`, `comments.json`, `review-comments.json`), releases and the files attached to them
+  (`releases.json`, `releases/TAG/FILE`), the wiki (`wiki.git`), what the repo page says (`repo.json`) and the
+  Actions variables with the names of the Actions secrets (`actions.json`). Git LFS files are fetched into the
+  mirror. One thing nobody can copy: the value of an Actions secret, which GitHub never gives back, so only its
+  name is kept. The folder is remembered per computer, later runs (`cairn vibe github copy`) fetch only what
+  changed since (and look at every repo's extras once a week), and the watcher does that once a day. A repo
+  that is gone from GitHub keeps its copy. `--account NAME` copies one account only. The sign-in goes to git and
+  to GitHub for one request at a time and is never written into the copy.
+  One disk is one accident away from none. `cairn vibe github copy everywhere` asks every other computer whose
+  watcher reads the same brain to keep its own copy, in `github-copy` in its home folder, once it has the room
+  and the GitHub CLI is signed in there (`everywhere off` stops asking). A note per computer in
+  `github-usage/copy/` says how many repos it holds, how big and how fresh, and the command says whether this
+  computer's copy is the only one. Cairn does not replace GitHub as the place others find your work or your
+  devices sync through; it makes losing it survivable.
 - **On the page:** sessions are grouped by day (click a day to fold it) and the outcome chips (shipped, no code
   change, no git) double as the legend and as filters. Day totals are clock time too.
 - **Time vibing** is clock time with at least one session working: two agents running side by side for an hour count
@@ -603,7 +612,8 @@ cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ a
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
 cairn vibe device                        # the name this computer puts on its sessions (--adopt names older ones)
-cairn vibe github copy D:/github-copy    # a full copy of every repo of your GitHub accounts on this computer
+cairn vibe github copy D:/github-copy    # a full copy of every repo of your GitHub accounts on this computer, with issues, releases and wikis
+cairn vibe github copy everywhere        # ask your other computers to keep their own copy too (everywhere off stops asking)
 cairn precedent brief "goal"             # a brief from your own history (learn, queue, next, log, install)
 cairn autopilot add "goal"               # your agent carries it to done (on, off, status, set)
 cairn telegram setup <bot token>         # a daily status report in Telegram (show, send, status, off)

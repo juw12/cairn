@@ -390,9 +390,12 @@ def _vibe_github_move(brain: Brain, args, account: str) -> int:
 
 
 def _vibe_github_copy(brain: Brain, args, account: str) -> int:
-    """`cairn vibe github copy FOLDER`: keep a full copy (a git mirror) of every repo of the accounts the
-    GitHub CLI is signed in to, in FOLDER on this computer. The folder is remembered, so later runs need
-    none; `--account NAME` copies one account only. Only repos pushed to since the last run are fetched."""
+    """`cairn vibe github copy FOLDER`: keep a full copy of every repo of the accounts the GitHub CLI is
+    signed in to, in FOLDER on this computer: a git mirror of each, and beside it what is not in git
+    (issues, pull requests, releases and their files, the wiki, the names of the Actions secrets). The
+    folder is remembered, so later runs need none; `--account NAME` copies one account only. Only what
+    changed since the last run is fetched. `cairn vibe github copy everywhere` asks every other computer
+    that reads this brain to keep its own copy too, and `everywhere off` stops asking."""
     from pathlib import Path
 
     from . import github_copy, github_usage
@@ -400,6 +403,21 @@ def _vibe_github_copy(brain: Brain, args, account: str) -> int:
 
     chosen = github_copy.settings()
     named = " ".join(args.text[1:]).strip()
+    if named.lower() in ("everywhere", "everywhere off"):
+        if not chosen:
+            print("Make this computer's copy first: cairn vibe github copy FOLDER", file=sys.stderr)
+            return 2
+        try:
+            github_copy.set_everywhere(brain, named.lower() == "everywhere")
+        except (ConflictError, OSError) as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        if named.lower() == "everywhere":
+            print(f"Every other computer whose Cairn watcher reads this brain now keeps its own copy, in {github_copy.HOME_NAME} in its home folder.")
+            print(github_copy.summary(Path(chosen["folder"]), github_copy.load_state(Path(chosen["folder"])), github_copy.other_copies(brain)))
+        else:
+            print("No other computer is asked for a copy now. The ones that already keep one go on keeping it.")
+        return 0
     if not named and not chosen:
         print("Usage: cairn vibe github copy FOLDER [--account NAME]   (the folder is remembered: later runs need none)", file=sys.stderr)
         return 2
@@ -413,12 +431,14 @@ def _vibe_github_copy(brain: Brain, args, account: str) -> int:
     except (github_copy.CopyError, ValueError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+    others = None
     try:
         github_copy.write_note(brain, folder, state)
+        others = github_copy.other_copies(brain)
     except (ConflictError, OSError):
         pass  # the copy is made; its note is written again by the next run
-    print(github_copy.summary(folder, state))
-    return 1 if state["problems"] or github_copy.counts(state)["failed"] else 0
+    print(github_copy.summary(folder, state, others))
+    return 1 if state["problems"] or github_copy.counts(state)["failed"] or github_copy.extras_counts(state)["failed"] else 0
 
 
 def _vibe_github_push(args) -> int:
