@@ -490,6 +490,20 @@ class DashPageTests(unittest.TestCase):
         self.assertNotIn("start_url", manifest)  # the icon reopens dash.html?repo=..., not Cairn's home
         self.assertIn("dash.webmanifest", (docs / "sw.js").read_text(encoding="utf-8"))
 
+    def test_page_has_its_own_icon_and_no_way_into_cairn_from_the_bar(self):
+        docs = Path(__file__).resolve().parent.parent / "docs"
+        page = (docs / "dash.html").read_text(encoding="utf-8")
+        self.assertNotIn("icons/icon", page)  # not Cairn's stones
+        self.assertNotIn("icons/apple-touch-icon.png", page)
+        self.assertNotIn('href="./"', page)  # the bar holds the tabs only, no link to Cairn's home
+        self.assertIn('<link rel="apple-touch-icon" href="icons/dash-apple-touch-icon.png">', page)
+        manifest = json.loads((docs / "dash.webmanifest").read_text(encoding="utf-8"))
+        named = ["icons/dash.svg", "icons/dash-apple-touch-icon.png"] + [icon["src"] for icon in manifest["icons"]]
+        for name in named:
+            self.assertTrue(name.startswith("icons/dash"), name)
+            self.assertTrue((docs / name).is_file(), name)
+        self.assertIn('"icons/dash.svg"', (docs / "sw.js").read_text(encoding="utf-8"))  # kept for offline
+
     def test_home_screen_app_can_sign_in_without_safari_storage(self):
         script = (Path(__file__).resolve().parent.parent / "docs" / "dash.js").read_text(encoding="utf-8")
         self.assertIn("data-paste", script)  # paste the sign-in link inside the home-screen app

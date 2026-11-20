@@ -2,6 +2,14 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 78,
+      "date": "2026-11-20",
+      "title": "Dashboards has its own icon",
+      "changes": [
+        "Dashboards on phone: the page has its own icon (four tiles on paper) on the Home Screen, in the tab and in its bar, so it no longer looks like Cairn. The mark in the bar is no longer a link to Cairn's home. Dashboards are still set up and signed in from Cairn as before (#60)"
+      ]
+    },
+    {
       "build": 77,
       "date": "2026-11-20",
       "title": "Your totals across computers",
