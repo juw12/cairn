@@ -25,6 +25,7 @@ import datetime as dt
 import json
 import os
 import shutil
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,9 @@ PAGES = 200  # the most pages of one list that are read (100 rows each)
 QUIET_SECONDS = 900  # how long a download may say nothing: an office proxy reads a big file whole before passing it on
 CHUNK = 1 << 20
 FILES_AT_ONCE = 4  # release files of one repo fetched together
+SLOW_SECONDS = 30  # a connection that brings less than SLOW_BYTES in this long is left for a new one
+SLOW_BYTES = 6 << 20
+RECONNECTS = 5  # how often one file may change connection
 ABOUT = ("description", "homepage", "topics", "private", "visibility", "default_branch", "archived", "fork", "has_issues", "has_wiki", "has_pages", "created_at")
 
 STAMPS = """
@@ -172,19 +176,50 @@ def safe_name(text: str) -> str:
 
 def download(url: str, path: Path, token: str) -> None:
     """One release file. The sign-in goes to GitHub only: it is not passed on to the file store GitHub
-    sends the request to."""
-    request = urllib.request.Request(url, headers={"Accept": "application/octet-stream", "User-Agent": "cairn"})
-    request.add_unredirected_header("Authorization", f"Bearer {token}")
+    sends the request to. A connection that crawls is left for a new one, which carries on from the
+    same byte: through an office proxy some ran at a tenth of the speed of the rest, for as long as
+    they were kept."""
     part = path.with_name(path.name + ".part")  # a download that stops half way is never taken for the file
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with urllib.request.urlopen(request, timeout=QUIET_SECONDS, context=publish.ssl_context()) as response, open(part, "wb") as out:
-            shutil.copyfileobj(response, out, CHUNK)
+        with open(part, "wb") as out:
+            for left in range(RECONNECTS, -1, -1):
+                if _receive(url, token, out, patient=not left):  # the last connection is kept however slow
+                    break
     except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
         part.unlink(missing_ok=True)
         reason = getattr(error, "reason", "") or getattr(error, "code", "") or type(error).__name__
         raise ExtrasError(f"could not download {path.name} ({reason})") from None
     os.replace(part, path)
+
+
+def _receive(url: str, token: str, out, patient: bool) -> bool:
+    """Write what one connection brings after what `out` holds already. False when it was left for
+    being slow, with what it did bring kept."""
+    have = out.tell()
+    request = urllib.request.Request(url, headers={"Accept": "application/octet-stream", "User-Agent": "cairn"})
+    request.add_unredirected_header("Authorization", f"Bearer {token}")
+    if have:
+        request.add_header("Range", f"bytes={have}-")
+    try:
+        response = urllib.request.urlopen(request, timeout=QUIET_SECONDS, context=publish.ssl_context())
+    except urllib.error.HTTPError as error:
+        if have and error.code == 416:  # nothing after what is held: it was whole already
+            return True
+        raise
+    with response:
+        if have and response.status != 206:  # the whole file again, not the rest of it
+            out.seek(0)
+            out.truncate()
+        since, got = time.monotonic(), 0
+        while block := response.read1(CHUNK):
+            out.write(block)
+            got += len(block)
+            if not patient and time.monotonic() - since >= SLOW_SECONDS:
+                if got < SLOW_BYTES:
+                    return False
+                since, got = time.monotonic(), 0
+    return True
 
 
 def copy_talk(target: Path, repo: dict, http) -> int:

@@ -555,6 +555,52 @@ class TestExtras(CopyCase):
                 github_extras.download(f"http://127.0.0.1:{server.server_port + 1}/asset", target.with_name("other.exe"), TOKEN)
         self.assertEqual([path.name for path in target.parent.iterdir()], ["engine.exe"])  # nothing half made is left
 
+    def test_a_connection_that_crawls_is_left_and_a_new_one_carries_on_from_the_same_byte(self):
+        whole = bytes(range(40))
+        asked: list[tuple[str, str | None]] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                first = self.path not in [path for path, _ in asked]
+                wanted = self.headers.get("Range")
+                asked.append((self.path, wanted))
+                rest = whole[int(wanted[6:-1]):] if wanted and self.path == "/resumes" else whole
+                self.send_response(206 if len(rest) < len(whole) else 200)
+                self.send_header("Content-Length", str(len(rest)))
+                self.end_headers()
+                try:
+                    for byte in rest:
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        if first:
+                            time.sleep(0.05)  # the first connection for a file crawls
+                except OSError:
+                    pass  # the reader left
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        folder = Path(self.tmp.name) / "down"
+        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}), \
+                mock.patch.object(github_extras, "SLOW_SECONDS", 0.3), mock.patch.object(github_extras, "SLOW_BYTES", 30):
+            for name in ("resumes", "starts-over"):  # a store that gives the rest, and one that only gives the whole
+                github_extras.download(f"http://127.0.0.1:{server.server_port}/{name}", folder / name, TOKEN)
+                self.assertEqual((folder / name).read_bytes(), whole)
+        (first, none), (second, rest) = [item for item in asked if item[0] == "/resumes"]
+        self.assertIsNone(none)
+        self.assertRegex(rest, r"^bytes=[1-9]\d?-$")  # asked for the rest only
+        self.assertEqual(len([item for item in asked if item[0] == "/starts-over"]), 2)
+        with mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}), \
+                mock.patch.object(github_extras, "SLOW_SECONDS", 0.3), mock.patch.object(github_extras, "SLOW_BYTES", 30), \
+                mock.patch.object(github_extras, "RECONNECTS", 0):
+            asked.clear()
+            github_extras.download(f"http://127.0.0.1:{server.server_port}/patient", folder / "patient", TOKEN)
+        self.assertEqual(((folder / "patient").read_bytes(), len(asked)), (whole, 1))  # the last connection is kept, however slow
+
 
 class TestEveryComputer(CopyCase):
     """One disk is one accident away from none: the brain can ask every computer for its own copy."""
