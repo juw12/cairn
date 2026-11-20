@@ -356,7 +356,8 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
     While a session is live, this computer's load is noted in machines/ unless `vibeWatchLaptop` is off.
     The month's GitHub Actions minutes are noted in github-usage/ about once an hour unless
     `vibeWatchGithub` is off; without it the figure on the Vibe page (and the phone) never moves.
-    `vibeWatchGithubAccounts` names other accounts the GitHub CLI is signed in to; each gets its own meter."""
+    `vibeWatchGithubAccounts` names other accounts the GitHub CLI is signed in to; each gets its own meter.
+    With `vibeWatchGithub` on, a copy of the repos made with `cairn vibe github copy` is kept up to date daily."""
     everywhere = config.get("vibeWatchEverywhere")
     if everywhere is None:
         everywhere = (Path(root) / ".obsidian").is_dir()
@@ -368,6 +369,7 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
         "laptop": bool(config.get("vibeWatchLaptop", True)),
         "github": bool(config.get("vibeWatchGithub", True)),
         "github_accounts": _account_names(config.get("vibeWatchGithubAccounts")),
+        "repo_copy": bool(config.get("vibeWatchGithub", True)),
     }
 
 
