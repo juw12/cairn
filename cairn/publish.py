@@ -8,6 +8,11 @@ removed again, and files you added to the public repo by hand are never touched.
 
 Links to notes that stay private are turned into plain text, so the public brain has no dangling
 links and no private file names in link targets. The format is described in PROOF.md.
+
+The same commit carries a web page of those notes in ``docs/`` (site.py: one page per note, a search
+box, a sitemap), and GitHub Pages is switched on for that folder. So the public brain can be read and
+searched by anyone at ``https://OWNER.github.io/REPO/`` and found through Google or Bing, with no
+sign-in and no GitHub API limit. A repo that already keeps something else in ``docs/`` is left alone.
 """
 
 from __future__ import annotations
@@ -31,6 +36,9 @@ API = "https://api.github.com"
 BRAIN_TOPIC = "cairn-brain"
 ROOT = "brain/"
 MANIFEST = ROOT + ".cairn-published.json"
+SITE_ROOT = "docs/"  # the public brain as a web page; GitHub Pages can serve this folder
+SITE_MANIFEST = SITE_ROOT + ".cairn-site.json"
+PAGES_HINT = "To put it online, turn on GitHub Pages once: the repo's Settings > Pages > Branch {branch}, folder /docs."
 SKIP_DIRS = {".git", ".obsidian", ".trash", ".cairn", "node_modules"}
 _WIKI_RE = re.compile(r"(!?)\[\[([^\]\n]+)\]\]")
 
@@ -232,17 +240,105 @@ def _check(status: int, data, what: str) -> None:
         raise PublishError(f"GitHub refused to {what} ({status}{': ' + message if message else ''}).")
 
 
-def _readme(owner: str) -> str:
+def _readme(owner: str, web: str = "") -> str:
     return (
         f"# @{owner}'s public brain\n\n"
         "Published from a private [Cairn](https://github.com/juw12/cairn) brain. Only notes marked "
         "`publish: true` appear here; everything else stays private.\n\n"
-        f"Open it in Cairn: https://juw12.github.io/cairn/?u={owner}\n"
+        + (f"Read and search it on the web: {web}\n\n" if web else "")
+        + f"Open it in Cairn: https://juw12.github.io/cairn/?u={owner}\n"
     )
 
 
-def publish_to_github(source: Path, repo: str, http, today: str, dry_run: bool = False) -> dict:
-    """Publish `source` to the GitHub repo `owner/name` (created if missing) in one commit."""
+def pages_address(owner: str, name: str) -> str:
+    """Where GitHub Pages serves a repo that has no domain of its own."""
+    host = f"{owner.lower()}.github.io"
+    return f"https://{host}/" if name.lower() == host else f"https://{host}/{name}/"
+
+
+def _pages(http, owner: str, name: str, branch: str) -> dict:
+    """What GitHub Pages does with this repo. `url` is where docs/ is served, or would be once Pages is on.
+
+    state: "docs" (Pages serves docs/), "root" (Pages serves the whole branch, so docs/ is a sub-folder),
+    "off" (no Pages yet) or "other" (built by a workflow or from another branch: docs/ is not what it shows).
+    """
+    default = pages_address(owner, name)
+    status, data = http("GET", f"/repos/{owner}/{name}/pages")
+    if status != 200 or not isinstance(data, dict):
+        return {"url": default, "state": "off"}
+    address = (data.get("html_url") or default).rstrip("/") + "/"
+    served = data.get("source") or {}
+    if data.get("build_type") == "workflow" or served.get("branch") != branch:
+        return {"url": address + SITE_ROOT, "state": "other"}
+    if served.get("path") == "/docs":
+        return {"url": address, "state": "docs"}
+    return {"url": address + SITE_ROOT, "state": "root"}
+
+
+def _site_title(http, owner: str) -> str:
+    """The name on the owner's GitHub profile, or @owner."""
+    status, user = http("GET", f"/users/{owner}")
+    name = user.get("name") if status == 200 and isinstance(user, dict) else ""
+    return name.strip() if isinstance(name, str) and name.strip() else f"@{owner}"
+
+
+def _blob_json(http, owner: str, name: str, sha: str) -> dict:
+    status, blob = http("GET", f"/repos/{owner}/{name}/git/blobs/{sha}")
+    if status >= 300:
+        return {}
+    try:
+        data = json.loads(base64.b64decode(blob["content"]).decode("utf-8"))
+    except (ValueError, KeyError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _plan_site(public: dict[str, str], remote: dict[str, str], http, owner: str, name: str, branch: str) -> dict:
+    """The web page of the public notes as changes under docs/: {"write", "delete", "url", "state"}.
+
+    docs/ is only ever written when it is empty or already ours (it has our manifest), so a repo whose
+    docs/ holds something else, a web app for instance, keeps it.
+    """
+    from . import site
+
+    if SITE_MANIFEST not in remote and any(path.startswith(SITE_ROOT) for path in remote):
+        return {"write": {}, "delete": [], "url": "", "state": "taken"}
+    pages = _pages(http, owner, name, branch)
+    wanted = {SITE_ROOT + path: text for path, text in site.files(public, _site_title(http, owner), pages["url"]).items()}
+    wanted[SITE_MANIFEST] = site.manifest_text(path.removeprefix(SITE_ROOT) for path in wanted)
+    previous = _blob_json(http, owner, name, remote[SITE_MANIFEST]).get("files", []) if SITE_MANIFEST in remote else []
+    writes = {path: text for path, text in wanted.items() if remote.get(path) != git_blob_sha(text)}
+    deletes = sorted(
+        SITE_ROOT + path for path in previous
+        if isinstance(path, str) and SITE_ROOT + path not in wanted and SITE_ROOT + path in remote
+    )
+    return {"write": writes, "delete": deletes, "url": pages["url"], "state": pages["state"]}
+
+
+def _open_site(http, owner: str, name: str, branch: str, web: dict, info: dict) -> dict:
+    """Make sure the web page is being served and say where: {"url", "live", "note"}."""
+    repo = f"{owner}/{name}"
+    if web["state"] == "taken":
+        return {"url": "", "live": False, "note": f"No web page: {repo} keeps other files in docs/, and Cairn leaves them alone."}
+    if web["state"] in ("docs", "root"):
+        return {"url": web["url"], "live": True, "note": ""}
+    if web["state"] == "other":
+        return {"url": web["url"], "live": False, "note": f"The web page is in docs/, but GitHub Pages in {repo} is set up to show something else."}
+    # Pages is off. Only the owner (or an admin) may switch it on; a collaborator's sign-in is refused.
+    status, _ = http("POST", f"/repos/{owner}/{name}/pages", {"source": {"branch": branch, "path": "/docs"}})
+    if status >= 300:
+        return {"url": web["url"], "live": False, "note": "The web page is in docs/. " + PAGES_HINT.format(branch=branch)}
+    if not info.get("homepage"):
+        http("PATCH", f"/repos/{owner}/{name}", {"homepage": web["url"]})  # the link beside the repo's description
+    return {"url": web["url"], "live": True, "note": "GitHub Pages was switched on; the first build takes about a minute."}
+
+
+def publish_to_github(source: Path, repo: str, http, today: str, dry_run: bool = False, site: bool = True) -> dict:
+    """Publish `source` to the GitHub repo `owner/name` (created if missing) in one commit.
+
+    With `site` (the default) the commit also holds the notes as a web page in docs/, and GitHub Pages is
+    switched on for it when this sign-in may do that. report["site"] says where the page is and if it is live.
+    """
     owner, _, name = repo.partition("/")
     if not owner or not name:
         raise PublishError("Use --to OWNER/REPO, for example --to juw12/brain")
@@ -289,10 +385,26 @@ def publish_to_github(source: Path, repo: str, http, today: str, dry_run: bool =
     manifest = manifest_text(changes["manifest"])
     if remote.get(MANIFEST) != git_blob_sha(manifest):
         changes["write"][MANIFEST] = manifest
+    web = _plan_site(public, remote, http, owner, name, branch) if site else None
+    link = ""
+    if web:
+        changes["write"].update(web["write"])
+        changes["delete"] = sorted(changes["delete"] + web["delete"])
+        # The README names the page when it is online, or about to be: this sign-in may switch Pages on.
+        may_open = created or bool((info.get("permissions") or {}).get("admin"))
+        link = web["url"] if web["state"] in ("docs", "root") or (web["state"] == "off" and may_open) else ""
     if created or "README.md" not in remote:
-        changes["write"]["README.md"] = _readme(owner)
+        changes["write"]["README.md"] = _readme(owner, link)
+    elif link and remote["README.md"] == git_blob_sha(_readme(owner)):
+        changes["write"]["README.md"] = _readme(owner, link)  # still the README Cairn wrote: add the link
     report = {"repo": repo, "created": created, "write": sorted(changes["write"]), "delete": changes["delete"], "commit": None}
-    if dry_run or not (changes["write"] or changes["delete"]):
+    if dry_run:
+        if web:
+            report["site"] = {"url": web["url"], "live": web["state"] in ("docs", "root"), "note": ""}
+        return report
+    if not (changes["write"] or changes["delete"]):
+        if web:
+            report["site"] = _open_site(http, owner, name, branch, web, info)
         return report
 
     entries = [{"path": path, "mode": "100644", "type": "blob", "content": text} for path, text in changes["write"].items()]
@@ -306,6 +418,8 @@ def publish_to_github(source: Path, repo: str, http, today: str, dry_run: bool =
     status, data = http("PATCH", f"/repos/{owner}/{name}/git/refs/heads/{branch}", {"sha": commit["sha"]})
     _check(status, data, f"move {branch}")
     report["commit"] = commit["sha"]
+    if web:
+        report["site"] = _open_site(http, owner, name, branch, web, info)
     return report
 
 

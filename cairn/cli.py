@@ -212,7 +212,7 @@ def cmd_publish(brain: Brain, args) -> int:
             from . import site
 
             folder = Path(args.site).expanduser()
-            report = site.build(source, folder, args.title or "")
+            report = site.build(source, folder, args.title or "", args.url or "")
             for path in report["write"]:
                 print(f"  wrote: {path}")
             for path in report["delete"]:
@@ -220,6 +220,8 @@ def cmd_publish(brain: Brain, args) -> int:
             count = report["notes"]
             print(f"Public page ready: {folder / 'index.html'} ({count} public note{'s' if count != 1 else ''}).")
             print("Open that file to see it, or put the folder on any web host to share it.")
+            if not args.url:
+                print("Add --url with the address it will have (e.g. https://you.github.io/page/) and a sitemap.xml is written for Google and Bing.")
             return 0
         if args.folder:
             report = publish.publish_to_folder(source, Path(args.folder).expanduser())
@@ -228,7 +230,7 @@ def cmd_publish(brain: Brain, args) -> int:
                 print("Where to? Example: cairn publish --to YOUR-NAME/brain  (or --site FOLDER for a page you host anywhere)", file=sys.stderr)
                 return 2
             http = publish.make_http(publish.find_token())
-            report = publish.publish_to_github(source, args.to, http, _today(), dry_run=args.dry_run)
+            report = publish.publish_to_github(source, args.to, http, _today(), dry_run=args.dry_run, site=not args.no_site)
     except publish.PublishError as error:
         print(f"Publish stopped: {error}", file=sys.stderr)
         return 1
@@ -243,6 +245,12 @@ def cmd_publish(brain: Brain, args) -> int:
         print("Nothing to publish: the public brain is up to date.")
     elif report.get("commit"):
         print(f"Published to https://github.com/{report['repo']} ({report['commit'][:7]})")
+    web = report.get("site")
+    if web and web["url"]:
+        state = "online" if web["live"] else "would be at" if args.dry_run else "not online yet"
+        print(f"Web page, with search ({state}): {web['url']}")
+    if web and web["note"]:
+        print(f"  {web['note']}")
     return 0
 
 
@@ -864,13 +872,17 @@ def build_parser() -> argparse.ArgumentParser:
         "publish",
         help="copy notes marked publish: true to your public brain repo",
         description="Copy every note whose frontmatter says publish: true to brain/ in a public GitHub repo, in one "
-        "commit, and tag it cairn-brain. Nothing else leaves your brain. Links to private notes become plain text.",
+        "commit, and tag it cairn-brain. Nothing else leaves your brain. Links to private notes become plain text. "
+        "The same commit puts those notes in docs/ as a web page with a search box and a sitemap, served by "
+        "GitHub Pages at https://OWNER.github.io/REPO/ (--no-site leaves that out).",
     )
     publish_parser.add_argument("--to", metavar="OWNER/REPO", help="public repo (created if missing), e.g. you/brain")
     publish_parser.add_argument("--source", help="folder to publish from (default: the brain; can be an Obsidian vault)")
     publish_parser.add_argument("--folder", help="write into this local clone instead of using the GitHub API")
     publish_parser.add_argument("--site", metavar="FOLDER", help="build a public web page (plain HTML, no GitHub needed) into this folder")
     publish_parser.add_argument("--title", help="--site: the name shown at the top of the page, e.g. your name")
+    publish_parser.add_argument("--url", metavar="ADDRESS", help="--site: the web address the folder will have; adds a sitemap.xml and each page's own address for search engines")
+    publish_parser.add_argument("--no-site", action="store_true", help="--to: publish the notes only, without the web page in docs/")
     publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     vibe_parser = sub.add_parser(
         "vibe",

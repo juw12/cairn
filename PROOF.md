@@ -92,6 +92,9 @@ python -m cairn publish --to YOUR-NAME/brain --source "path/to/vault"
 - Links to notes that stay private become plain text; embeds of unpublished files are dropped.
 - `brain/.cairn-published.json` remembers what was published. Un-publish a note and the next run
   removes it. Files you add to the public repo by hand are never touched.
+- The same commit holds the notes as a web page in `docs/` (one page per note, a search box, a
+  `sitemap.xml`), and GitHub Pages is switched on for that folder: `https://YOUR-NAME.github.io/brain/`.
+  A `docs/` folder that holds something else is left alone. `--no-site` leaves the page out.
 - `--dry-run` shows the plan; `--folder PATH` writes into a local clone instead of using the API.
 
 ## 6. Limits of v0.1

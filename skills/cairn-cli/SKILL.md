@@ -52,7 +52,8 @@ cairn context --stdout                    # print the one-page brief without wri
 cairn init                                # create the brain folder layout; never overwrites
 cairn context                             # write CONTEXT.md: doing now, up next, decisions in force, open questions
 cairn publish --dry-run                   # show which notes marked "publish: true" would go to the public brain
-cairn publish --to owner/repo             # copy those notes to the public repo in one commit
+cairn publish --to owner/repo             # copy those notes to the public repo in one commit, with a web page of them (search box, sitemap) at https://owner.github.io/repo/
+cairn publish --site folder --url https://example.org/   # the same web page as plain files, for any web host
 cairn obsidian <vault folder>             # import an Obsidian vault and keep it in sync both ways (--dry-run to preview)
 cairn serve --port 4777                   # open the app in the browser (the default command)
 ```
