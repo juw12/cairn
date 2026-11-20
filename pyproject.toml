@@ -29,7 +29,7 @@ Source = "https://github.com/juw12/cairn"
 cairn = "cairn.cli:main"
 
 [tool.setuptools]
-packages = ["cairn", "cairn.web"]
+packages = ["cairn", "cairn.web", "cairn.memory_skill"]
 
 [tool.setuptools.package-dir]
 cairn = "cairn"
@@ -37,3 +37,4 @@ cairn = "cairn"
 
 [tool.setuptools.package-data]
 "cairn.web" = ["*.html", "*.js", "*.css", "*.json", "*.webmanifest", "icons/*", "media/*"]
+"cairn.memory_skill" = ["*.md"]

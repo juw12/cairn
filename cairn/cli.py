@@ -538,6 +538,9 @@ def cmd_serve(brain: Brain, args) -> int:
 
     if not brain.dir.exists():
         brain.init()
+    from . import connect
+
+    connect.auto_connect(brain)  # a new chat in the user's AI app starts with this brain as its memory
     serve(brain, port=args.port, open_browser=not args.no_browser)
     return 0
 
@@ -911,6 +914,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mcp_parser.add_argument("--read-only", action="store_true", help="leave out the tools that write")
     mcp_parser.add_argument("--print-config", action="store_true", help="print the config to paste into MCP clients, then exit")
+    connect_parser = sub.add_parser(
+        "connect",
+        help="make this brain the memory of the AI apps on this computer (Vector by itself; others by name)",
+        description="Puts the cairn-memory skill where the app reads skills, so a new chat searches the brain "
+        "before answering and saves what must be remembered. Cairn does this for Vector each time it opens. "
+        "Apps: vector, claude, opencode, codex (none named: every one that is installed).",
+    )
+    connect_parser.add_argument("apps", nargs="*", metavar="app", help="vector, claude, opencode, codex")
+    connect_parser.add_argument("--status", action="store_true", help="show what is connected; change nothing")
+    connect_parser.add_argument("--remove", action="store_true", help="take the skill out again (only where Cairn put it)")
+    connect_parser.add_argument("--write-folder", metavar="FOLDER", default=None,
+                                help="this computer saves memory only in this folder of the brain, e.g. devices/laptop ('' to undo)")
+    connect_parser.add_argument("--on", action="store_true", help="connect Vector by itself when Cairn opens (the default)")
+    connect_parser.add_argument("--off", action="store_true", help="stop connecting by itself")
     precedent_parser = sub.add_parser(
         "precedent",
         help="give a goal once; get what you also asked for after similar goals (your own history)",
@@ -938,6 +955,37 @@ def build_parser() -> argparse.ArgumentParser:
     feedback_parser.add_argument("--from", dest="source", help="who said it")
     feedback_parser.add_argument("--about", help="session or note it is about (default: the latest session)")
     return parser
+
+
+def cmd_connect(brain: Brain, args) -> int:
+    from . import connect
+
+    try:
+        if args.on or args.off:
+            connect.set_auto(args.on)
+            print("Cairn connects Vector by itself when it opens." if args.on
+                  else "Cairn no longer connects an AI app by itself. `cairn connect` still does it when asked.")
+            if not args.apps and args.write_folder is None and not args.remove:
+                return 0
+        if args.write_folder is not None:
+            folder = connect.set_write_folder(brain, args.write_folder)
+            print(f"On this computer, memory is written only in {folder}/ of this brain." if folder
+                  else "On this computer, memory goes in the brain's usual folders.")
+        if args.status:
+            rows = connect.status(brain)
+        elif args.remove:
+            rows = connect.disconnect(args.apps)
+        else:
+            if not brain.dir.is_dir():
+                print(f"No brain at {brain.dir}. Run `cairn init` first.", file=sys.stderr)
+                return 1
+            rows = connect.connect(brain, args.apps)
+    except (connect.ConnectError, OSError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    for row in rows:
+        print(connect.describe(row))
+    return 0
 
 
 def cmd_mcp(brain: Brain, args) -> int:
@@ -1082,6 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
         "vibe": cmd_vibe,
         "feedback": cmd_feedback,
         "mcp": cmd_mcp,
+        "connect": cmd_connect,
         "precedent": cmd_precedent,
         "autopilot": cmd_autopilot,
         "serve": cmd_serve,
