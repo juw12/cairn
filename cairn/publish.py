@@ -13,6 +13,7 @@ The same commit carries a web page of those notes in ``docs/`` (site.py: one pag
 box, a sitemap), and GitHub Pages is switched on for that folder. So the public brain can be read and
 searched by anyone at ``https://OWNER.github.io/REPO/`` and found through Google or Bing, with no
 sign-in and no GitHub API limit. A repo that already keeps something else in ``docs/`` is left alone.
+After a commit the report names the pages that changed, so announce.py can tell the search engines.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -333,6 +335,25 @@ def _open_site(http, owner: str, name: str, branch: str, web: dict, info: dict) 
     return {"url": web["url"], "live": True, "note": "GitHub Pages was switched on; the first build takes about a minute."}
 
 
+def _changes_online(web: dict) -> dict:
+    """What announce.py needs after a commit: the addresses of the pages that changed, the feed when it
+    changed, and one changed file to watch for (GitHub Pages puts a commit online about a minute later)."""
+    from . import site
+
+    def address(path: str) -> str:
+        relative = path.removeprefix(SITE_ROOT)
+        return web["url"] + ("" if relative == "index.html" else urllib.parse.quote(relative))
+
+    pages = sorted(path for path in web["write"] if path.endswith(".html"))
+    feed = SITE_ROOT + site.FEED
+    watched = feed if feed in web["write"] else pages[0] if pages else ""
+    return {
+        "changed": [address(path) for path in pages],
+        "feed": address(feed) if feed in web["write"] else "",
+        "check": {"url": address(watched), "sha": git_blob_sha(web["write"][watched])} if watched else None,
+    }
+
+
 def publish_to_github(source: Path, repo: str, http, today: str, dry_run: bool = False, site: bool = True) -> dict:
     """Publish `source` to the GitHub repo `owner/name` (created if missing) in one commit.
 
@@ -420,6 +441,8 @@ def publish_to_github(source: Path, repo: str, http, today: str, dry_run: bool =
     report["commit"] = commit["sha"]
     if web:
         report["site"] = _open_site(http, owner, name, branch, web, info)
+        if report["site"]["live"]:
+            report["site"].update(_changes_online(web))
     return report
 
 

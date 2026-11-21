@@ -189,6 +189,26 @@ class PublishTests(unittest.TestCase):
         self.assertTrue(again["site"]["live"])
         self.assertNotIn(("POST", "/repos/me/brain/pages"), github.calls[calls:])
 
+    def test_the_report_names_the_pages_that_changed_so_search_engines_can_be_told(self):
+        github = FakeGitHub(pages={"html_url": "https://me.github.io/brain/", "source": {"branch": "main", "path": "/docs"}, "build_type": "legacy"})
+        first = publish.publish_to_github(self.source, "me/brain", github, "2026-11-07")["site"]
+        self.assertEqual(
+            first["changed"],
+            ["https://me.github.io/brain/Other%20public.html", "https://me.github.io/brain/", "https://me.github.io/brain/notes/built-x.html"],
+        )
+        self.assertEqual(first["feed"], "")  # these notes carry no date, so there is no feed to speak of
+        self.assertEqual(first["check"]["url"], "https://me.github.io/brain/Other%20public.html")
+        self.assertEqual(first["check"]["sha"], publish.git_blob_sha(github.files["docs/Other public.html"]))
+        # One note changes and gets a date: its page, the first page and the feed are named, the other page is not.
+        (self.source / "Other public.md").write_text(OTHER.replace("publish: true", "publish: true\ndate: 2026-11-08"), encoding="utf-8")
+        second = publish.publish_to_github(self.source, "me/brain", github, "2026-11-08")["site"]
+        self.assertEqual(second["changed"], ["https://me.github.io/brain/Other%20public.html", "https://me.github.io/brain/"])
+        self.assertEqual(second["feed"], "https://me.github.io/brain/feed.xml")
+        self.assertEqual(second["check"], {"url": "https://me.github.io/brain/feed.xml", "sha": publish.git_blob_sha(github.files["docs/feed.xml"])})
+        # Nothing changed: nothing to tell.
+        third = publish.publish_to_github(self.source, "me/brain", github, "2026-11-08")["site"]
+        self.assertNotIn("changed", third)
+
     def test_a_collaborator_publishes_the_page_and_is_told_how_the_owner_puts_it_online(self):
         github = FakeGitHub(admin=False)
         report = publish.publish_to_github(self.source, "me/brain", github, "2026-11-07")
@@ -223,7 +243,11 @@ class PublishTests(unittest.TestCase):
     def test_pages_set_up_another_way_is_reported_and_no_site_leaves_docs_out(self):
         root = FakeGitHub(pages={"html_url": "https://me.example/", "source": {"branch": "main", "path": "/"}, "build_type": "legacy"})
         report = publish.publish_to_github(self.source, "me/brain", root, "2026-11-07")
-        self.assertEqual(report["site"], {"url": "https://me.example/docs/", "live": True, "note": ""})
+        self.assertEqual(
+            {key: report["site"][key] for key in ("url", "live", "note")},
+            {"url": "https://me.example/docs/", "live": True, "note": ""},
+        )
+        self.assertIn("https://me.example/docs/notes/built-x.html", report["site"]["changed"])
         self.assertIn('href="https://me.example/docs/"', root.files["docs/index.html"])
         workflow = FakeGitHub(pages={"html_url": "https://me.github.io/brain/", "source": {"branch": "main", "path": "/"}, "build_type": "workflow"})
         report = publish.publish_to_github(self.source, "me/brain", workflow, "2026-11-07")

@@ -251,6 +251,13 @@ def cmd_publish(brain: Brain, args) -> int:
         print(f"Web page, with search ({state}): {web['url']}")
     if web and web["note"]:
         print(f"  {web['note']}")
+    if web and web.get("live") and not args.dry_run and not args.no_announce and (web.get("changed") or web.get("feed")):
+        from . import announce
+
+        print("  Waiting for GitHub to put the changed pages online (about a minute), then telling search engines...", flush=True)
+        line = announce.summary(announce.after_publish(web))
+        if line:
+            print(f"  {line}")
     return 0
 
 
@@ -929,6 +936,7 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--title", help="--site: the name shown at the top of the page, e.g. your name")
     publish_parser.add_argument("--url", metavar="ADDRESS", help="--site: the web address the folder will have; adds a sitemap.xml and each page's own address for search engines")
     publish_parser.add_argument("--no-site", action="store_true", help="--to: publish the notes only, without the web page in docs/")
+    publish_parser.add_argument("--no-announce", action="store_true", help="--to: do not tell search engines (IndexNow, Google's feed hub) which pages changed")
     publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     vibe_parser = sub.add_parser(
         "vibe",

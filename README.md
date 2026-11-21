@@ -547,6 +547,12 @@ Cairn, a GitHub account or a sign-in to read it:
   the pages read the same.
 - **Found by Google and Bing.** Every note is its own plain HTML page with a title, a description and its
   own address, and `sitemap.xml` lists them all with the day each last changed.
+- **Search engines are told, not waited for.** After a publish, once GitHub has the pages online (about a
+  minute), Cairn sends the addresses that changed to IndexNow (Bing, Yandex, Naver, Seznam) and tells the
+  hub Google reads feeds through that `feed.xml`, an Atom feed of your notes, has changed. No account is
+  needed: the page carries its own IndexNow key file. Only addresses of pages that are already public are
+  sent. `--no-announce` on the command line, or `"announcePublic": false` in the desktop app's config,
+  turns it off. When a page shows up in a search engine is still that search engine's decision.
 - Only the owner of a repo can switch GitHub Pages on. If you publish as a collaborator, Cairn says so
   and names the one setting (repo Settings → Pages → Branch `main`, folder `/docs`); the next publish by
   the owner does it by itself.
@@ -846,7 +852,7 @@ Cairn doesn't replace them. It's the thin layer that keeps a project's ideas, de
 ## Privacy and security
 
 * No Cairn account and no telemetry. Fonts (SIL OFL) and icons are bundled.
-* The only external requests are to `api.github.com` and `raw.githubusercontent.com`, and only when you look someone up, open a published brain or sign in. A local brain never leaves your machine.
+* The only external requests are to `api.github.com` and `raw.githubusercontent.com`, and only when you look someone up, open a published brain or sign in. A local brain never leaves your machine. Publishing your public brain also tells search engines the addresses of its public pages (`api.indexnow.org` and the feed hub `pubsubhubbub.appspot.com`), unless you turn that off.
 * Signing in is optional. Your token is kept in this tab only (`sessionStorage`) unless you tick *Remember on this device*; it is sent only to `api.github.com` (tested), and *Sign out* deletes it. With the optional Worker, the device-flow token passes through your own Worker once on its way back to the browser.
 * The local server binds to `127.0.0.1` only, checks the `Host` header and requires a custom header on every API call, so other websites can't reach it.
 * Phone access is off until you pair a phone. It then adds a listener on port 47778 of your local network that answers only to paired devices (single-use QR code, then a device cookie) and has none of the desktop controls. It is plain HTTP, so use it on your own Wi-Fi or Tailscale, not on public Wi-Fi.
