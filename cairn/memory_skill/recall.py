@@ -6,6 +6,8 @@
     recall.py read "path, slug or title"
     recall.py recent [--days 7]
     recall.py brief                              one page: open tasks, decisions, ideas, latest log
+    recall.py handoffs [--all]                   what the user's other computers left for this one
+    recall.py handoffs "a few words"             one of those conversations in full
 """
 
 from __future__ import annotations
@@ -52,6 +54,9 @@ def main(argv: list[str] | None = None) -> int:
     recent = commands.add_parser("recent")
     recent.add_argument("--days", type=int, default=7)
     commands.add_parser("brief")
+    handoffs = commands.add_parser("handoffs")
+    handoffs.add_argument("thread", nargs="?", default="")
+    handoffs.add_argument("--all", action="store_true")
     options = parser.parse_args(argv)
 
     brain = common.open_brain()
@@ -66,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
         print(common.call(brain, "read_note", {"path": options.note}))
     elif options.command == "recent":
         print(common.call(brain, "recent", {"days": options.days}))
+    elif options.command == "handoffs":
+        print(common.call(brain, "handoffs", {"thread": options.thread, "all": options.all}))
     else:
         print(common.call(brain, "context", {}))
     return 0

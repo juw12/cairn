@@ -26,6 +26,8 @@ Run the two scripts with this Python, the one Cairn runs on:
        recall.py brief
 
 3. Never say "I don't know that" about one of the user's projects, devices or preferences before searching.
+4. Look at what the user's other computers left for this one: `recall.py handoffs`. Tell the user what is
+   waiting. `recall.py handoffs "a few words"` shows one conversation in full.
 
 A short question that needs no memory (a sum, a definition) needs none of this.
 
@@ -51,6 +53,25 @@ preference, a lesson or a handoff that another chat or device will need. Say wha
 - Facts only. No passwords, keys, tokens or bank details: `remember.py` refuses text that looks like one.
 - After each save the script prints a check: the file on this computer, and whether the brain's copy on its
   git remote is up to date. Report a failed check; do not call it saved.
+
+## Other computers
+
+The brain is shared by the user's computers, and they leave each other messages in it (Cairn shows them on
+Today under "Between computers").
+
+    recall.py handoffs [--all]
+    remember.py answer "a few words of the conversation" --says picked-up
+    remember.py answer "a few words of the conversation" --says done --text "What was done, with the numbers."
+    remember.py handoff "Short title" --to "computer name" --body "What it must know, check or do."
+
+- When you start on something another computer left: `--says picked-up`. When it is finished: `--says done`
+  with the result in `--text`, because the other computer reads that, not this chat. A question back is
+  `--says note --text "..."`. `--says closed` ends the conversation for every computer.
+- When a chat ends with something only another computer can do or check (another system, a login or a
+  device it has, a test on its hardware), leave it with `remember.py handoff` as well as telling the user.
+  `--to` takes a computer's name or a few words of it, several times for several, or `all`.
+- These messages are the one thing written outside this computer's own folder: each is a new file in
+  `handoffs/` that nobody edits afterwards.
 
 ## Limits
 

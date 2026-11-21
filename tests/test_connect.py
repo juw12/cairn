@@ -252,6 +252,43 @@ class SkillScriptsTests(ConnectCase):
                          sorted(["SKILL.md", "recall.py", "remember.py", "common.py", "config.json", connect.MARKER]))
         self.assertEqual(self.connect("vector"), {"vector": "unchanged"})
 
+    def test_the_scripts_carry_a_conversation_with_another_computer(self):
+        self.connect("vector")
+        sessions = self.brain.dir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / "2026-11-20-on-the-other.md").write_text(
+            '---\ntitle: On the other\ntype: session\nstatus: done\nmachine: "Other Laptop 9,1"\nstarted: 2026-11-20T10:00\n---\n', encoding="utf-8")
+        # the other computer has left this one something
+        from cairn import handoff
+        handoff.send(self.brain, "Check the installer on this system", "Run it once and read the log.", to=["all"], sender="Other Laptop 9,1")
+
+        waiting = self.run_script("recall.py", "handoffs")
+        self.assertEqual(waiting.returncode, 0, waiting.stderr)
+        self.assertIn("For this computer", waiting.stdout)
+        self.assertIn("Check the installer on this system", waiting.stdout)
+        whole = self.run_script("recall.py", "handoffs", "installer")
+        self.assertIn("Run it once and read the log.", whole.stdout)
+
+        taken = self.run_script("remember.py", "answer", "installer", "--says", "picked-up")
+        self.assertEqual(taken.returncode, 0, taken.stderr)
+        self.assertIn("Picked up: brain/handoffs/", taken.stdout)
+        done = self.run_script("remember.py", "answer", "installer", "--says", "done", "--text", "Installed. The log is clean.")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("Check the installer on this system", self.run_script("recall.py", "handoffs").stdout)
+
+        left = self.run_script("remember.py", "handoff", "The release is untested on Windows", "--to", "other", "--body", "Start it once.")
+        self.assertEqual(left.returncode, 0, left.stderr)
+        self.assertIn("Left for Other Laptop 9,1: brain/handoffs/", left.stdout)
+        self.assertIn("This computer is waiting for", self.run_script("recall.py", "handoffs").stdout)
+        self.assertEqual(len(list((self.brain.dir / "handoffs").glob("*.md"))), 4)
+
+        secret = self.run_script("remember.py", "handoff", "Login", "--to", "other", "--body", "password: hunter2-hunter2")
+        self.assertNotEqual(secret.returncode, 0)
+        self.assertEqual(len(list((self.brain.dir / "handoffs").glob("*.md"))), 4)
+        guide = (self.vector_skill / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("recall.py handoffs", guide)
+        self.assertIn("remember.py handoff", guide)
+
     def test_a_secret_is_refused(self):
         self.connect("vector")
         refused = self.run_script("remember.py", "note", "Login", "--body", "password: hunter2-hunter2")

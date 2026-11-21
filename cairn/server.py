@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, github_move, github_push, machine, mcp, precedent, vibe
+from . import __version__, autopilot, chat, core, github_move, github_push, machine, mcp, precedent, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -254,6 +254,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             mtime = self.brain.write(self._query_path(), str(body.get("text", "")), body.get("mtime"))
             self.changes.record(self._query_path(), self._client())
+            if self.live_sync is not None and self._query_path().startswith(core.HANDOFF_FOLDER + "/"):
+                self.live_sync.wake()  # a message for another computer leaves now, not at the next round
             self._send_json({"path": self._query_path(), "mtime": mtime})
         except PathError as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
@@ -440,6 +442,7 @@ def make_server(brain: Brain, port: int = 4777, host: str = "127.0.0.1", desktop
     handler.sync_lock = threading.Lock()
     handler.desktop = desktop
     handler.autopilot = None
+    handler.live_sync = None
     handler.changes = ChangeFeed()
     handler.web_dir = find_web_dir().resolve()
     server = ThreadingHTTPServer((host, port), handler)
@@ -466,8 +469,12 @@ def switch_brain(server: ThreadingHTTPServer, brain: Brain) -> None:
 
 
 def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:
+    from . import livesync
+
     server = make_server(brain, port)
     worker = attach_autopilot(server, brain)
+    live = livesync.LiveSync(server.RequestHandlerClass, log=lambda text: print(text, flush=True)).start()
+    server.RequestHandlerClass.live_sync = live
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"Cairn {__version__} · {brain.project_name} · brain: {brain.dir}")
     print(f"Open {url}  (Ctrl+C to stop)")
@@ -478,5 +485,6 @@ def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
+        live.stop()
         worker.shutdown()
         server.server_close()

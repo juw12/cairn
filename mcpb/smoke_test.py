@@ -61,7 +61,12 @@ def main(argv):
             print(f"version mismatch: server {server['version']} != manifest {manifest['version']}", file=sys.stderr)
             return 1
         if expect is not None and len(tools) != expect:
-            print(f"expected {expect} tools", file=sys.stderr)
+            print(
+                f"expected {expect} tools, the bundle has {len(tools)}: {', '.join(sorted(tools))}. "
+                "If tools were added or removed on purpose, change the number after --expect-tools "
+                "in .github/workflows/publish-mcp.yml.",
+                file=sys.stderr,
+            )
             return 1
         return 0
 

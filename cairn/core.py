@@ -1022,18 +1022,22 @@ def vibe_stats(notes: list[dict], today: str, days: int = 14) -> dict:
 
 # ---------------------------------------------------------------- handoffs (a conversation between computers)
 #
-# One brain is shared by several computers. A handoff is a message one of them leaves for the others: what it
-# found, what is left hanging, what only another computer can do. Every message is its own file in handoffs/,
-# written once by the computer that says it and never edited, so two computers never write the same file and
-# git has nothing to merge. An answer ("picked up", "done", or just a note) is one more file that names the
-# first message in `thread`. Where a conversation stands is worked out from its files, here.
+# One brain is shared by several computers (and a phone). A handoff is a message one of them leaves for the
+# others: what it found, what is left hanging, what only another one can do. Every message is its own file in
+# handoffs/, written once by the device that says it and never edited, so two devices never write the same
+# file and git has nothing to merge. An answer ("picked up", "done", "closed", or just a note) is one more
+# file that names the first message in `thread`. Where a conversation stands is worked out from its files, here.
+#
+# Clocks: `created` is the writer's own clock, as on every note. `sent` is the same moment in UTC, so two
+# devices in different time zones agree on it, and `after` names the last message the writer had seen, so an
+# answer never reads before what it answers even when a clock is wrong.
 
 HANDOFF_TYPE = "handoff"
 HANDOFF_FOLDER = "handoffs"
-HANDOFF_SAYS = ("note", "picked-up", "done")
+HANDOFF_SAYS = ("note", "picked-up", "done", "closed")
 HANDOFF_EVERYONE = "all"
 # Two messages stamped the same second read in the order they make sense: taken on, talked about, finished.
-_HANDOFF_SAME_SECOND = {"picked-up": 0, "note": 1, "done": 2}
+_HANDOFF_SAME_SECOND = {"picked-up": 0, "note": 1, "done": 2, "closed": 3}
 _HANDOFF_SLUG_FROM = 24
 _HANDOFF_SLUG_TITLE = 44
 
@@ -1061,48 +1065,69 @@ def is_handoff(note: dict) -> bool:
     return note["meta"].get("type") == HANDOFF_TYPE
 
 
-def _handoff_thread_id(note: dict) -> str:
-    raw = note["meta"].get("thread")
+def _handoff_link(raw) -> str:
+    """The file a `thread` or `after` property names: "[[slug]]", "slug", "handoffs/slug.md" all mean slug."""
     name = raw.strip() if isinstance(raw, str) else ""
     if name.startswith("[[") and name.endswith("]]"):
         name = name[2:-2].split("|")[0].strip()
     name = name.rsplit("/", 1)[-1]
-    name = _MD_SUFFIX_RE.sub("", name)
-    return name or note["slug"]
+    return _MD_SUFFIX_RE.sub("", name)
+
+
+def _handoff_order(head: dict, others: list[dict]) -> list[dict]:
+    """The first message, then the rest: earliest first, and never before the message it names in `after`."""
+    known = {head["slug"]} | {m["slug"] for m in others}
+    pending = sorted(others, key=lambda m: (m["when"], _HANDOFF_SAME_SECOND[m["says"]], m["path"]))
+    placed, seen = [head], {head["slug"]}
+    while pending:
+        ready = next(
+            (i for i, m in enumerate(pending) if m["after"] not in known or m["after"] == m["slug"] or m["after"] in seen),
+            None,
+        )
+        if ready is None:  # messages that name each other in a ring: as the clocks have them
+            placed.extend(pending)
+            break
+        message = pending.pop(ready)
+        placed.append(message)
+        seen.add(message["slug"])
+    return placed
 
 
 def handoff_threads(notes: list[dict]) -> list[dict]:
     """The conversations between computers, open ones first, then the one that moved last.
 
-    Each: {id, title, path, from, to, everyone, messages: [{path, title, from, says, at}],
+    Each: {id, title, path, from, to, everyone, messages: [{path, title, from, says, at, sent}],
     parts: [{device, state: waiting | picked-up | done, at}], open, last}.
     `to` names the computers it is for; none (or "all") means every computer. A named computer's part is done
-    when it says `done`; the conversation is closed when every named computer has, or when the computer that
-    started it says `done` itself.
+    when it says `done`. The conversation is closed when every named computer has, when the computer that
+    started it says `done` itself, or when anyone says `closed`.
     """
     groups: dict[str, list[dict]] = {}
     for note in notes:
         if not is_handoff(note):
             continue
         meta = note["meta"]
-        says = meta.get("says") if meta.get("says") in HANDOFF_SAYS else "note"
+        at = meta.get("created") if isinstance(meta.get("created"), str) else ""
+        sent = meta.get("sent") if isinstance(meta.get("sent"), str) else ""
         message = {
             "path": note["path"],
             "slug": note["slug"],
             "title": note["title"],
             "from": " ".join(str(meta.get("from") if isinstance(meta.get("from"), str) else "").split()),
-            "says": says,
-            "at": meta.get("created") if isinstance(meta.get("created"), str) else "",
+            "says": meta.get("says") if meta.get("says") in HANDOFF_SAYS else "note",
+            "at": at,
+            "sent": sent,
+            "when": sent or at,
+            "after": _handoff_link(meta.get("after")),
             "to": _handoff_names(meta.get("to")),
         }
-        groups.setdefault(_handoff_thread_id(note), []).append(message)
+        groups.setdefault(_handoff_link(meta.get("thread")) or note["slug"], []).append(message)
 
     threads = []
-    for thread_id, messages in groups.items():
-        messages.sort(key=lambda m: (m["at"], _HANDOFF_SAME_SECOND[m["says"]], m["path"]))
-        head = next((m for m in messages if m["slug"] == thread_id), messages[0])
-        messages.remove(head)  # the first message leads, whatever the clocks of the computers say
-        messages.insert(0, head)
+    for thread_id, found in groups.items():
+        found.sort(key=lambda m: (m["when"], m["path"]))
+        head = next((m for m in found if m["slug"] == thread_id), found[0])
+        messages = _handoff_order(head, [m for m in found if m is not head])
         sender = device_key(head["from"])
         named = [name for name in head["to"] if device_key(name) != sender]
         everyone = not head["to"] or any(device_key(name) == HANDOFF_EVERYONE for name in head["to"])
@@ -1112,6 +1137,9 @@ def handoff_threads(notes: list[dict]) -> list[dict]:
         said: dict[str, dict] = {}
         for message in messages:
             if message["says"] == "note":
+                continue
+            if message["says"] == "closed":
+                closed = True
                 continue
             key = device_key(message["from"])
             if key == sender:
@@ -1133,10 +1161,10 @@ def handoff_threads(notes: list[dict]) -> list[dict]:
             "from": head["from"],
             "to": named,
             "everyone": everyone,
-            "messages": [{key: m[key] for key in ("path", "title", "from", "says", "at")} for m in messages],
+            "messages": [{key: m[key] for key in ("path", "title", "from", "says", "at", "sent")} for m in messages],
             "parts": parts,
             "open": not closed and (everyone or not named or bool(waiting_on_named)),
-            "last": max(m["at"] for m in messages),
+            "last": max(m["when"] for m in messages),
         })
     threads.sort(key=lambda t: t["id"])
     threads.sort(key=lambda t: t["last"], reverse=True)
@@ -1173,21 +1201,27 @@ def handoff_inbox(threads: list[dict], device: str) -> dict:
 
 
 def handoff_message(sender: str, title: str, body: str, stamp: str, existing_paths: list[str],
-                    to: list[str] | None = None, thread: str = "", says: str = "note") -> dict:
-    """{path, text} of a new message. `stamp` is "2026-11-20T23:41:07" (the seconds keep two messages of
-    one minute in order). A first message names who it is for in `to` (none: every computer); an answer
-    names the first message's file in `thread` and what it says."""
+                    to: list[str] | None = None, thread: str = "", says: str = "note",
+                    sent: str = "", after: str = "") -> dict:
+    """{path, text} of a new message. `stamp` is the writer's clock, "2026-11-20T23:41:07"; `sent` the same
+    moment in UTC, "2026-11-20T16:41:07Z". A first message names who it is for in `to` (none: every
+    computer). An answer names the first message's file in `thread`, what it says, and in `after` the last
+    message its writer had seen."""
     sender = " ".join(str(sender).split())
     title = " ".join(str(title).split())
     meta: dict = {"title": title or "Untitled", "type": HANDOFF_TYPE, "from": sender}
     if thread:
         meta["thread"] = f"[[{thread}]]"
         meta["says"] = says if says in HANDOFF_SAYS else "note"
+        if after and after != thread:
+            meta["after"] = f"[[{after}]]"
     else:
         names = _handoff_names(to or [])
         meta["to"] = [HANDOFF_EVERYONE] if not names or any(device_key(n) == HANDOFF_EVERYONE for n in names) else names
     meta["tags"] = [HANDOFF_TYPE]
     meta["created"] = stamp
+    if sent:
+        meta["sent"] = sent
     prefix = f"{stamp[:10]}-{stamp[11:16].replace(':', '')}"
     who = slugify(sender)[:_HANDOFF_SLUG_FROM].strip("-") if sender else "someone"
     what = slugify(title)[:_HANDOFF_SLUG_TITLE].strip("-")
