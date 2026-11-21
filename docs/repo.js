@@ -1005,8 +1005,10 @@ function lookTab(entry, target) {
 
   const readme = here.files.filter((file) => README_RE.test(file.name)).sort((a, b) => Number(/\.md$/i.test(b.name)) - Number(/\.md$/i.test(a.name)))[0];
   let about = "";
+  let readmeDoc = null;
   if (readme) {
     const doc = loadDoc(entry, readme.path, { at: folder });
+    readmeDoc = doc;
     const body = doc.state === "loading"
       ? `<p class="muted">Loading ${esc(readme.name)}…</p>`
       : doc.state === "done"
@@ -1017,11 +1019,15 @@ function lookTab(entry, target) {
     about = `<section class="repo-sec"><h2>${esc(readme.name)}</h2>${body}</section>`;
   }
 
-  if (!media && !folders && !about) {
+  const versions = versionsSection(entry, folder, readmeDoc, () => redraw(entry));
+  if (!versions && !media && !folders && !about) {
     return `<div class="empty-state">${icon("folder")}<h3>Nothing to look at here</h3><p>No pictures, videos or README in this folder. <a href="${esc(link(entry, "files", folder))}" data-repo-go>See its ${plural(here.files.length, "file")}</a>.</p></div>`;
   }
-  return `${media}${folders}${about}`;
+  return `${versions}${media}${folders}${about}`;
 }
+
+// The Windows, Mac, iPhone and Android versions of the repo or the app folder being looked at.
+import { versionsSection } from "./platforms.js";
 
 function filesTab(entry, target) {
   const folder = target.path;
