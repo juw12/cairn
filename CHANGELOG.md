@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 92 (2026-11-21): A repo opens with its Windows, Mac, iPhone and Android versions
+
+- The Look tab of a repo starts with Versions: four lines, Windows, Mac, iPhone and Android, each with the file to download or the words "not published". GitHub shows a release as a list of files; this answers whether the project can be had on your computer and your phone (#PR)
+- Windows, Mac and Android are read from the releases, the newest release that has a file for them, with its size and age. A download the README links counts too, such as an install script kept on the project's own site (#PR)
+- iPhone is the project's own web app on the home screen: the repo holds a web manifest that opens as its own app and its page has an apple-touch-icon. The line links the live app and says how to add it; when one of the two is missing it says which (#PR)
+- A version that an older release still carries while newer releases dropped it is marked as left behind, with the release that passed it (#PR)
+- In a repo of many apps each app's folder shows its own four, from the releases whose tag starts with the folder's name. The repo's own page says how many apps the releases belong to instead of mixing them (#PR)
+- One look costs one more GitHub call, kept for five minutes. Not in this build: whether a version starts was not looked at, only whether it is published
+
 ## Build 91 (2026-11-21): Your AI app remembers from the cloud when the brain is not on the computer
 
 - The memory Cairn gives your AI app no longer depends on the brain's folder being on the computer. A brain that is pushed to GitHub is read from there when the folder is missing: a new computer, a wiped disk, a folder that was moved. The chat is told in the first line that the answer comes from GitHub

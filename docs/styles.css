@@ -2069,6 +2069,20 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .repo-chips { margin-top: 12px; }
 .repo-tabs { margin: 0 0 20px; }
 .repo-note { margin: 0 0 12px; font-size: 12.5px; }
+/* Versions (platforms.js): the Windows, Mac, iPhone and Android versions of a repo or an app folder */
+.repo-versions { margin: 0 0 28px; }
+.repo-versions > h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin: 0 0 10px; font: 400 24px/1.2 var(--display); }
+.repo-versions > h2 .muted { font: 400 12.5px/1.2 var(--font); }
+.repo-versions > p { margin: 0; font-size: 13px; }
+.repo-versions ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.repo-version { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); font-size: 13px; }
+.repo-version strong { display: inline-flex; align-items: center; gap: 6px; font-size: 14.5px; }
+.repo-version.there strong .icon { color: var(--journal-ink); }
+.repo-version.missing, .repo-version.unknown { background: transparent; border-style: dashed; }
+.repo-version.missing strong, .repo-version.unknown strong { color: var(--muted); }
+.repo-version-files { overflow-wrap: anywhere; }
+.repo-version-files a { color: var(--accent-ink); }
+.repo-version .muted { font-size: 12px; }
 .repo .add { color: var(--journal-ink); }
 .repo .del { color: var(--danger); }
 .repo-sec { margin: 0 0 32px; }

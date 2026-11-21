@@ -132,6 +132,8 @@ class RepoPageTests(unittest.TestCase):
                 return json_reply(route, {"tree": tree, "truncated": False})
             if rest == ["commits"]:
                 return json_reply(route, COMMITS)
+            if rest == ["releases"]:
+                return json_reply(route, [])  # the Versions block asks; tests/test_platforms.py covers what it shows
             if rest[0] == "commits":
                 return json_reply(route, COMMIT_DETAIL)
             if rest[0] == "contents":
