@@ -45,6 +45,11 @@ jobs:
           test -s "$HOME/Applications/Cairn.app/Contents/Resources/Cairn.icns"
           plutil -lint "$HOME/Applications/Cairn.app/Contents/Info.plist"
 
+      - name: Probe (temporary) a plain menu-bar icon
+        run: |
+          sw_vers
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" -u scripts/mac_statusitem_probe.py || true
+
       - name: Start hidden, as after an update, and look
         run: |
           python="$HOME/Library/Application Support/Cairn/venv/bin/python"
