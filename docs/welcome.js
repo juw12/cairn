@@ -81,7 +81,7 @@ export function showWelcome(remembered) {
         <div><strong>Made for AI too</strong>One click writes a context brief any assistant can read.</div>
         <div><strong>Private</strong>No account, no server, no tracking. MIT licensed.</div>
       </div>
-      <p class="welcome-foot"><a href="${REPO_URL}" target="_blank" rel="noopener">Source on GitHub</a> · <a href="https://juw12.github.io/p/cairn/" target="_blank" rel="noopener">About Cairn</a></p>
+      <p class="welcome-foot"><a href="${REPO_URL}" data-github target="_blank" rel="noopener">Source on GitHub</a> · <a href="https://juw12.github.io/p/cairn/" target="_blank" rel="noopener">About Cairn</a></p>
     </div>`;
   welcome.hidden = false;
   $("#explore-form", welcome).onsubmit = (event) => {
