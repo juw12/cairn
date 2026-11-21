@@ -3,6 +3,11 @@
     python scripts/mac_check.py              # the app is listed as Cairn, has a menu-bar icon, its page answers
     python scripts/mac_check.py --window     # and its window is on the screen
     python scripts/mac_check.py --no-window  # and its window is hidden (started with --hidden, or closed)
+    python scripts/mac_check.py --menu-bar   # before Cairn is opened: how many icons the menu bar has now
+    python scripts/mac_check.py --menu-bar-had 3 ...   # that number, for macOS 26 (see below)
+
+Up to macOS 15 a menu-bar icon is a small window of the app itself. From macOS 26 every menu-bar icon belongs
+to Control Center, so Cairn's is found by counting: the menu bar has one icon more than before Cairn started.
 
 Reads what macOS itself says (the list of running apps and of windows), so it needs no permission.
 """
@@ -50,13 +55,19 @@ def windows(pid: int) -> list[dict]:
     return found
 
 
+def menu_bar_icons() -> int:
+    """How many icons the menu bar shows now, whoever owns them."""
+    shown = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+    return sum(1 for window in shown if window.get("kCGWindowLayer") == MENU_BAR_LAYER)
+
+
 def page_title() -> str:
     with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=5) as reply:
         page = reply.read().decode("utf-8", "replace")
     return page.split("<title>")[1].split("</title>")[0] if "<title>" in page else ""
 
 
-def look(want_window: bool | None) -> list[str]:
+def look(want_window: bool | None, menu_bar_had: int | None = None) -> list[str]:
     """What is wrong, as sentences; empty when all is as it should be."""
     entry = app_entry()
     if not entry.get("pid"):
@@ -67,7 +78,9 @@ def look(want_window: bool | None) -> list[str]:
     if not entry.get("bundle", "").endswith("Cairn.app"):
         wrong.append(f"it runs from {entry.get('bundle')!r}, not from Cairn.app")
     listed = windows(entry["pid"])
-    if not any(w["layer"] == MENU_BAR_LAYER and w["onscreen"] for w in listed):
+    own_icon = any(w["layer"] == MENU_BAR_LAYER and w["onscreen"] for w in listed)
+    one_more = menu_bar_had is not None and menu_bar_icons() > menu_bar_had
+    if not own_icon and not one_more:
         wrong.append("no menu-bar icon")
     shown = [w for w in listed if w["layer"] == 0 and w["onscreen"] and w["width"] >= 380 and w["height"] >= 400]
     if want_window is True and not shown:
@@ -84,12 +97,16 @@ def look(want_window: bool | None) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    if "--menu-bar" in argv:
+        print(menu_bar_icons())
+        return 0
     want_window = True if "--window" in argv else False if "--no-window" in argv else None
+    menu_bar_had = int(argv[argv.index("--menu-bar-had") + 1]) if "--menu-bar-had" in argv else None
     deadline = time.time() + 90
-    wrong = look(want_window)
+    wrong = look(want_window, menu_bar_had)
     while wrong and time.time() < deadline:  # the first start makes a brain and loads the window libraries
         time.sleep(3)
-        wrong = look(want_window)
+        wrong = look(want_window, menu_bar_had)
     for line in wrong:
         print("WRONG:", line)
     if wrong:

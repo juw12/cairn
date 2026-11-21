@@ -47,18 +47,22 @@ jobs:
 
       - name: Start hidden, as after an update, and look
         run: |
+          python="$HOME/Library/Application Support/Cairn/venv/bin/python"
+          before=$("$python" scripts/mac_check.py --menu-bar)
+          echo "MENU_BAR_HAD=$before" >> "$GITHUB_ENV"
+          echo "the menu bar has $before icons before Cairn starts"
           open -g "$HOME/Applications/Cairn.app" --args --hidden
-          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/mac_check.py --no-window
+          "$python" scripts/mac_check.py --no-window --menu-bar-had "$before"
 
       - name: Open Cairn again, as a click in the Dock does, and look for the window
         run: |
           open "$HOME/Applications/Cairn.app"
-          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/mac_check.py --window
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/mac_check.py --window --menu-bar-had "$MENU_BAR_HAD"
 
       - name: Run the installer again over a running Cairn (an update)
         run: |
           CAIRN_REPO="$GITHUB_WORKSPACE" CAIRN_BRANCH=mac-check bash docs/mac-install.sh
-          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/mac_check.py --window
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/mac_check.py --window --menu-bar-had "$MENU_BAR_HAD"
 
       - name: What Cairn wrote in its log
         if: always()
