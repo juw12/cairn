@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Recall from the Cairn brain. Read-only: nothing here can change a note.
+"""Recall from the Cairn brain. Read-only: nothing here can change a note. (`handoffs` first fetches the
+other computers' notes where the brain syncs by itself; `--offline` skips that.)
 
     recall.py rules                              standing decisions (read these first)
     recall.py search "words" [--type T] [--limit 10]
     recall.py read "path, slug or title"
     recall.py recent [--days 7]
     recall.py brief                              one page: open tasks, decisions, ideas, latest log
-    recall.py handoffs [--all]                   what the user's other computers left for this one
+    recall.py handoffs [--all] [--offline]       what the user's other computers left for this one
     recall.py handoffs "a few words"             one of those conversations in full
 
 Add --cloud to read the newest copy on GitHub instead of the folder on this computer. Without a folder on
@@ -60,6 +61,13 @@ def from_this_computer(options) -> str:
     if options.command == "recent":
         return common.call(brain, "recent", {"days": options.days})
     if options.command == "handoffs":
+        # What another computer left a minute ago should be here before it is read, also when Cairn is closed.
+        # Only where the brain is set up to sync by itself (git config cairn.sync); nothing else is touched.
+        from cairn import handoff
+
+        note = "" if options.offline else handoff.refresh(brain)
+        if note:
+            print(note, file=sys.stderr)
         return common.call(brain, "handoffs", {"thread": options.thread, "all": options.all})
     return common.call(brain, "context", {})
 
@@ -102,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     handoffs = commands.add_parser("handoffs")
     handoffs.add_argument("thread", nargs="?", default="")
     handoffs.add_argument("--all", action="store_true")
+    handoffs.add_argument("--offline", action="store_true")
     for command in commands.choices.values():
         command.add_argument("--cloud", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     options = parser.parse_args(argv)

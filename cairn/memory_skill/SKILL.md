@@ -27,7 +27,9 @@ Run the two scripts with this Python, the one Cairn runs on:
 
 3. Never say "I don't know that" about one of the user's projects, devices or preferences before searching.
 4. Look at what the user's other computers left for this one: `recall.py handoffs`. Tell the user what is
-   waiting. `recall.py handoffs "a few words"` shows one conversation in full.
+   waiting. `recall.py handoffs "a few words"` shows one conversation in full. It fetches the newest
+   messages first and `remember.py handoff` and `answer` send at once, also while the Cairn app is closed,
+   where the brain is set up to sync by itself; each command says what it did.
 
 A short question that needs no memory (a sum, a definition) needs none of this.
 

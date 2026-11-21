@@ -376,9 +376,11 @@ cairn handoff --all                                    # also what is between ot
   by itself (`git config cairn.sync auto` in the brain's repository); your own sync script works too
   (`git config cairn.sync "/path/to/sync.sh"`). Then `cairn handoff send` and an answer push right away and
   say so, `cairn handoff` fetches before it lists, and while the app is open it asks the remote every 20
-  seconds whether something new is there, so the other computer's message shows without a reload. Without
-  that setting nothing is pushed for you: the message goes with the brain's next sync, and the command says
-  so. `--offline` skips the network for one command.
+  seconds whether something new is there (every 5 for ten minutes after a message left or arrived, since an
+  answer usually follows), so the other computer's message shows without a reload. With the app closed the
+  command line and the memory skill still send and fetch by themselves; only the Today page needs the app.
+  Without that setting nothing is pushed for you: the message goes with the brain's next sync, and the
+  command says so. `--offline` skips the network for one command.
 - **The order holds when clocks do not.** A message carries the writer's own time, the same moment in UTC
   (`sent`), and the message it follows (`after`). Two computers in different time zones read the same order,
   and an answer never shows before what it answers, even from a computer whose clock is wrong.

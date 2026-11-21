@@ -2,6 +2,11 @@
 
     python mcpb/smoke_test.py <bundle.mcpb> [--expect-tools N]
 
+The bundle must serve exactly the tools the code beside this script defines (cairn/mcp.py). That list is the
+one source: a tool added or removed in the code needs no number changed anywhere. `--expect-tools N` is a
+floor (N tools or more), kept so a caller that still passes a number written long ago does not stop a publish
+that is fine; a bundle with fewer tools than N still fails.
+
 Standard library only. user_config values are filled from their defaults, or a fresh temp folder for
 directory settings, so the test needs no setup.
 """
@@ -19,9 +24,27 @@ def substitute(value, mapping):
     return re.sub(r"\$\{([^}]+)\}", lambda m: mapping.get(m.group(1), m.group(0)), value)
 
 
-def main(argv):
+def tools_of_this_checkout():
+    """The names of the tools cairn/mcp.py beside this script defines, or None when this script was copied
+    somewhere without the code (then only the floor is checked)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if not os.path.isfile(os.path.join(root, "cairn", "mcp.py")):
+        return None
+    sys.path.insert(0, root)
+    try:
+        from cairn import mcp
+    except Exception as error:  # noqa: BLE001 - say why and go on with the floor
+        print(f"could not read the tools from {root}: {error}", file=sys.stderr)
+        return None
+    finally:
+        sys.path.remove(root)
+    return [tool["name"] for tool in mcp.TOOLS]
+
+
+def main(argv, expected=None):
     bundle = argv[0]
-    expect = int(argv[argv.index("--expect-tools") + 1]) if "--expect-tools" in argv else None
+    floor = int(argv[argv.index("--expect-tools") + 1]) if "--expect-tools" in argv else None
+    expected = tools_of_this_checkout() if expected is None else expected
     with tempfile.TemporaryDirectory() as unpack_dir, tempfile.TemporaryDirectory() as work_dir:
         with zipfile.ZipFile(bundle) as archive:
             archive.extractall(unpack_dir)
@@ -60,13 +83,17 @@ def main(argv):
         if server.get("version") and server["version"] != manifest["version"]:
             print(f"version mismatch: server {server['version']} != manifest {manifest['version']}", file=sys.stderr)
             return 1
-        if expect is not None and len(tools) != expect:
+        if expected is not None and sorted(tools) != sorted(expected):
+            missing = sorted(set(expected) - set(tools))
+            extra = sorted(set(tools) - set(expected))
             print(
-                f"expected {expect} tools, the bundle has {len(tools)}: {', '.join(sorted(tools))}. "
-                "If tools were added or removed on purpose, change the number after --expect-tools "
-                "in .github/workflows/publish-mcp.yml.",
+                "the bundle does not serve the tools of this code (cairn/mcp.py): "
+                f"missing {', '.join(missing) or 'none'}; not in the code {', '.join(extra) or 'none'}",
                 file=sys.stderr,
             )
+            return 1
+        if floor is not None and len(tools) < floor:
+            print(f"expected {floor} tools or more, the bundle has {len(tools)}: {', '.join(sorted(tools))}", file=sys.stderr)
             return 1
         return 0
 

@@ -1,6 +1,7 @@
 """Live sync: while the app is open, what one computer says to another does not wait for the next round.
 
-Every few seconds, for the brain the app is serving:
+Every 20 seconds, and every 5 for ten minutes after a message between computers was sent or arrived (an
+answer usually follows soon), for the brain the app is serving:
 
   * a message for another computer was written here and has not left yet: sync now;
   * the remote has something this computer has not fetched (one small question to the remote): sync now;
@@ -17,11 +18,17 @@ from __future__ import annotations
 import threading
 import time
 
+from . import core
 from .brain import SyncError
 
 EVERY_SECONDS = 20
+# A conversation is going (a message left or arrived): look this often for this long, so an answer shows
+# about as fast as the two syncs it takes to carry it.
+TALKING_EVERY_SECONDS = 5
+TALKING_FOR_SECONDS = 600
 AFTER_A_FAILURE_SECONDS = 300  # a sync that failed (offline, two edits of one note) is not hammered
 CLIENT = "livesync"  # the name its changes carry in the feed; no page has it, so every page hears them
+HANDOFFS = core.HANDOFF_FOLDER + "/"
 
 
 class LiveSync:
@@ -35,6 +42,7 @@ class LiveSync:
         self._brain = None
         self._head = ""
         self._not_before = 0.0
+        self._talking_until = 0.0
 
     def start(self) -> "LiveSync":
         self.thread = threading.Thread(target=self._run, name="cairn-livesync", daemon=True)
@@ -48,11 +56,19 @@ class LiveSync:
     def wake(self) -> None:
         """Do the next round now (a message for another computer was just saved)."""
         self._not_before = 0.0
+        self._talking()
         self._wake.set()
+
+    def _talking(self) -> None:
+        self._talking_until = time.monotonic() + TALKING_FOR_SECONDS
+
+    def wait_seconds(self) -> float:
+        """How long until the next round: short while a conversation is going."""
+        return min(self.every, TALKING_EVERY_SECONDS) if time.monotonic() < self._talking_until else self.every
 
     def _run(self) -> None:
         while not self.stopping.is_set():
-            self._wake.wait(self.every)
+            self._wake.wait(self.wait_seconds())
             self._wake.clear()
             if self.stopping.is_set():
                 break
@@ -65,6 +81,8 @@ class LiveSync:
         paths = brain.changed_between(before, after)
         for path in paths:
             self.handler.changes.record(path, CLIENT)
+        if any(path.startswith(HANDOFFS) for path in paths):
+            self._talking()
         return len(paths)
 
     def tick(self) -> str:
@@ -81,7 +99,10 @@ class LiveSync:
             self._head = head
         if not brain.sync_mode() or time.monotonic() < self._not_before:
             return did
-        if not (brain.handoffs_unsent() or brain.remote_moved()):
+        unsent = brain.handoffs_unsent()
+        if unsent:
+            self._talking()
+        if not (unsent or brain.remote_moved()):
             return did
         try:
             result = brain.sync_now()
