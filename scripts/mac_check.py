@@ -6,6 +6,7 @@
 
 Reads what macOS itself says (the list of running apps and of windows), so it needs no permission.
 """
+import re
 import subprocess
 import sys
 import time
@@ -20,17 +21,18 @@ MENU_BAR_LAYER = 25
 
 def app_entry() -> dict:
     listing = subprocess.run(["lsappinfo", "list"], capture_output=True, text=True).stdout
-    for block in listing.split("\n\n"):
+    for block in re.split(r"\n\s*\n", listing):
         if f'bundleID="{BUNDLE_ID}"' not in block:
             continue
-        entry = {"name": block.split('"')[1]}
-        for line in block.splitlines():
-            line = line.strip()
-            if line.startswith("pid = "):
-                entry["pid"] = int(line.split()[2])
-            if line.startswith("bundle path="):
-                entry["bundle"] = line.split('"')[1]
-        return entry
+        name = re.search(r'"([^"]*)"', block)
+        pid = re.search(r"\bpid = (\d+)", block)
+        bundle = re.search(r'bundle path="([^"]*)"', block)
+        return {
+            "name": name.group(1) if name else "",
+            "pid": int(pid.group(1)) if pid else 0,
+            "bundle": bundle.group(1) if bundle else "",
+            "said": block.strip(),
+        }
     return {}
 
 
@@ -90,6 +92,8 @@ def main(argv: list[str]) -> int:
         wrong = look(want_window)
     for line in wrong:
         print("WRONG:", line)
+    if wrong:
+        print("macOS said about the app:", app_entry().get("said", "nothing"), sep="\n")
     if not wrong:
         state = {True: ", window on the screen", False: ", window hidden", None: ""}[want_window]
         print(f"OK: Cairn runs from Cairn.app, menu-bar icon there, page answers{state}")
