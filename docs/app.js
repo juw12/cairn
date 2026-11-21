@@ -33,6 +33,7 @@ import { movePanel, openPanel, resetLayout, togglePanel, wirePanels } from "./vi
 import { pickChartDay, setChartMetric, setChartRange, showNeeds, wireHome } from "./home.js";
 import { renameDevice, sayHandoff, sendHandoff, toggleHandoff, toggleHandoffForm, toggleSettled } from "./handoffs.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
+import { diaryView, setDiaryDevice, showAllDiaryTasks, toggleDiaryDay } from "./diaryview.js";
 import { wireRepo } from "./repo.js";
 import { initDatabases } from "./database.js";
 import { emit as emitPluginEvent, handlePluginChange, handlePluginClick, handlePluginSubmit, initPlugins, isPluginView, pluginViews, pluginsView, renderPluginView, wirePlugins } from "./plugins.js";
@@ -55,6 +56,7 @@ function counts() {
     decisions: by("decision", ["proposed"]) || "",
     notes: state.notes.length,
     journal: by("journal"),
+    diary: "",
     map: "",
     code: state.todos ? state.todos.length : "",
     projects: "",
@@ -202,7 +204,7 @@ export function setView(view, { push = true } = {}) {
 }
 
 export function renderView() {
-  const renderers = { home, chat: chatView, glow: glowView, ideas, board, decisions, notes: notesView, journal: journalView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, projects: projectsView };
+  const renderers = { home, chat: chatView, glow: glowView, ideas, board, decisions, notes: notesView, journal: journalView, diary: diaryView, map: mapView, canvas: canvasView, code: codeView, context: contextView, obsidian: obsidianView, plugins: pluginsView, people: peopleView, proof: proofView, vibe: vibeView, autopilot: autopilotView, projects: projectsView };
   const view = $("#view");
   // Background loads (e.g. the discover list) re-render the view; keep whatever the person is typing
   // in any field of the view, and keep it focused.
@@ -383,6 +385,9 @@ function wireGlobal() {
       "vibe-copy-hook": copyAgentHook,
       "vibe-filter": () => setVibeFilter(actionEl.dataset.source),
     "vibe-device": () => setVibeDevice(actionEl.dataset.device),
+      "diary-device": () => setDiaryDevice(actionEl.dataset.device),
+      "diary-day": () => toggleDiaryDay(actionEl.dataset.day),
+      "diary-all": showAllDiaryTasks,
       "vibe-more": () => showMoreSessions(actionEl.dataset.all === "1"),
       "vibe-outcome": () => setVibeOutcome(actionEl.dataset.outcome),
       "vibe-overview": () => setOverviewOutcome(actionEl.dataset.outcome),

@@ -2702,3 +2702,54 @@ details.rc-section > summary .muted { margin-left: 4px; }
   .recap-thumb { width: 56px; height: 40px; }
   .home-day { padding: 10px 12px; }
 }
+
+/* Diary: one row a day for every computer that shares the brain, and the log behind each day. */
+.diary-stats { margin-top: 14px; }
+.diary-stats .stat-label .diary-stars { margin-left: 4px; }
+.diary-stars { color: var(--accent); letter-spacing: 1px; font-size: 12px; white-space: nowrap; }
+.diary-stars .off { color: var(--line-strong, var(--line)); }
+.diary-sum { margin: 0 0 12px; max-width: 760px; }
+.diary-table-wrap { overflow-x: auto; }
+.diary-table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.diary-table th, .diary-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
+.diary-table thead th { font-size: 12px; font-weight: 500; color: var(--muted); }
+.diary-table tbody th { font-weight: 500; }
+.diary-row.open > th, .diary-row.open > td { border-bottom-color: transparent; }
+.diary-day-btn { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 500; cursor: pointer; }
+.diary-day-btn:hover span { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.diary-day-btn .icon { width: 14px; height: 14px; color: var(--muted); transform: rotate(-90deg); transition: transform .12s; }
+.diary-day-btn .icon.open { transform: none; }
+.diary-detail > td { padding: 0 0 16px; white-space: normal; }
+/* width 0 + min-width 100%: a long task title inside never widens the table, it is cut short instead. */
+.diary-detail-body { box-sizing: border-box; width: 0; min-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.diary-device h3, .diary-log h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.diary-device h3 .vd-here { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.diary-device p { margin: 0; text-wrap: pretty; }
+.diary-hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; align-items: end; height: 44px; max-width: 520px; margin-top: 10px; }
+.dh-bar { position: relative; height: 100%; border-radius: 2px; background: var(--sunken); overflow: hidden; }
+.dh-bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--h, 0%); background: var(--accent); }
+.diary-hours-scale { display: flex; justify-content: space-between; max-width: 520px; margin-top: 3px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.diary-log .row-item { padding: 7px 0; }
+.diary-log .row-item:last-child { border-bottom: 0; }
+.diary-log .dot { background: var(--muted); }
+.diary-log .dot.s-shipped, .diary-log .dot.s-done { background: var(--session, var(--accent)); }
+.diary-log .dot.s-live { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.diary-clock { flex: none; width: 40px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.diary-detail-body > .btn { justify-self: start; }
+@media (max-width: 760px) {
+  .diary-table .dc-load, .diary-table .dc-tokens { display: none; }
+  .diary-detail-body { padding: 12px; }
+  .diary-log .row-item { flex-wrap: wrap; row-gap: 2px; }
+  .diary-log .row-item .title { flex-basis: calc(100% - 70px); }
+  .diary-log .row-item .meta { margin-left: 67px; white-space: normal; }
+}
+@media (max-width: 480px) {
+  .diary-table .dc-agent { display: none; }
+  .diary-table { font-size: 13px; }
+  .diary-table th, .diary-table td { padding-right: 8px; }
+  .diary-table .dc-score .diary-stars { display: block; font-size: 10px; }
+  .diary-day-btn { gap: 3px; }
+}
+@media (max-width: 360px) {
+  .diary-day-btn .muted { display: none; }
+}

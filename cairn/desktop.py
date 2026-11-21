@@ -361,7 +361,8 @@ def vibe_watch_options(config: Config, root: Path) -> dict:
     inside one project only takes that project's sessions (the CLI default). Vector sessions are left
     to the assistant's own reports unless turned on: process detection can only guess. The closing
     reply of a finished OpenCode turn is copied into its note only when `vibeWatchReplies` is on.
-    While a session is live, this computer's load is noted in machines/ unless `vibeWatchLaptop` is off.
+    While a session is live, this computer's load is noted in machines/ unless `vibeWatchLaptop` is off;
+    the same switch covers the day's use (screen time, processor, memory) the Diary page reads.
     The month's GitHub Actions minutes are noted in github-usage/ about once an hour unless
     `vibeWatchGithub` is off; without it the figure on the Vibe page (and the phone) never moves.
     `vibeWatchGithubAccounts` names other accounts the GitHub CLI is signed in to; each gets its own meter.

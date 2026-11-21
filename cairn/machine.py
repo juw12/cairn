@@ -508,6 +508,21 @@ def snapshot() -> dict | None:
         return None
 
 
+def load_now() -> dict | None:
+    """Only how busy the processors and how full the memory are right now: {cpu_pct, ram_pct, level}.
+    Cheap enough for every watcher pass (no process list, no specs). None where it cannot be read."""
+    try:
+        with _lock:
+            memory = _memory()
+            if memory is None:
+                return None
+            cpu_pct = _cpu_percent(time.monotonic())
+            level, _ = load_level(cpu_pct, memory["ram_pct"], memory["commit_pct"])
+            return {"cpu_pct": cpu_pct, "ram_pct": memory["ram_pct"], "level": level}
+    except Exception:  # a reading is a nicety: it must never take the watcher down
+        return None
+
+
 def snapshot_soon() -> dict | None:
     """`snapshot` for the live page, which must never wait on it.
 

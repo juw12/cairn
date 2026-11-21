@@ -953,7 +953,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--last-reply", action="store_true", help="watch: also copy the closing reply of a finished OpenCode turn into its note (one short line), so you can read how it ended from your phone; off by default because notes sync")
     vibe_parser.add_argument("--no-opencode", action="store_true", help="watch: skip OpenCode")
     vibe_parser.add_argument("--no-vector", action="store_true", help="watch: skip Vector detection")
-    vibe_parser.add_argument("--no-laptop", action="store_true", help="watch: do not note this computer's load in machines/")
+    vibe_parser.add_argument("--no-laptop", action="store_true", help="watch: do not note this computer's load and its day's use (screen time, CPU, memory) in machines/")
     vibe_parser.add_argument("--no-github", action="store_true", help="watch: do not note the month's GitHub Actions minutes in github-usage/")
     vibe_parser.add_argument("--no-copy", action="store_true", help="watch: do not keep this computer's copy of your repos up to date (see github copy)")
     vibe_parser.add_argument("--github-account", action="append", metavar="NAME", help="watch: also note the Actions minutes of this other account the GitHub CLI is signed in to, in github-usage/NAME/ (repeat for more)")

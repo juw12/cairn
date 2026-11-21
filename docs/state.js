@@ -16,6 +16,7 @@ export const VIEWS = [
   { id: "decisions", label: "Decisions", icon: "decision", group: "Think & do" },
   { id: "notes", label: "Notes", icon: "note", group: "Remember" },
   { id: "journal", label: "Journal", icon: "journal", group: "Remember" },
+  { id: "diary", label: "Diary", icon: "history", group: "Remember" },
   { id: "map", label: "Map", icon: "map", group: "Remember" },
   { id: "canvas", label: "Canvas", icon: "canvas", group: "Remember" },
   { id: "code", label: "Code inbox", icon: "code", group: "Project" },
@@ -36,7 +37,7 @@ export const VIEWS = [
 // those, so they stay one click away without taking a place in the menu.
 export const HUBS = [
   { id: "today", label: "Today", icon: "home", views: ["home", "board", "ideas", "decisions"], count: "board" },
-  { id: "journal", label: "Journal", icon: "journal", views: ["journal"] },
+  { id: "journal", label: "Journal", icon: "journal", views: ["journal", "diary"] },
   { id: "chat", label: "Chat", icon: "chat", views: ["chat", "glow", "autopilot"] },
   { id: "map", label: "Map", icon: "map", views: ["map", "canvas"] },
   { id: "build", label: "Build", icon: "code", views: ["vibe", "projects"], count: "vibe" },

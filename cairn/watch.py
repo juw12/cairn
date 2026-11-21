@@ -37,7 +37,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import core, github_copy, github_usage, machine, vibe
+from . import activity, core, github_copy, github_usage, machine, vibe
 from .brain import Brain, ConflictError
 
 IDLE_MINUTES = 30
@@ -57,6 +57,7 @@ BATCH_RUNS = 20  # this many one-prompt runs in one folder in one day is a scrip
 REPLY_CHARS = 280
 MACHINE_FOLDER = "machines"
 HISTORY_KEY = "opencode_history"  # watch state: computer -> when its whole OpenCode history was read
+ACTIVITY_KEY = "activity"  # watch state: this computer's use, day by day, between two writes of its note
 MACHINE_NOTE_MINUTES = 15  # an unchanged reading is written again after this long, so a reader can tell it is current
 MACHINE_MOVE_POINTS = 10  # CPU or memory moving this many points is worth a new note
 
@@ -959,6 +960,47 @@ def sync_machine(brain: Brain, reading: dict | None = None) -> bool:
         return False
 
 
+# ------------------------------------------------------------ this computer's day
+
+
+def sync_activity(brain: Brain, now: dt.datetime | None = None, idle="read", load="read", name: str | None = None) -> bool:
+    """Add this look to the day's use of this computer (screen time, processor, memory) and, about twice
+    an hour, write it to machines/<computer>-activity.md for the Diary page. True when the note was written.
+    Unlike the load note this runs with no session live: a day at the computer without an assistant counts too."""
+    now = dt.datetime.now() if now is None else now
+    name = machine.device_name() if name is None else name
+    path = activity.note_path(name, MACHINE_FOLDER)
+    state = _load_state(brain)
+    log = state.get(ACTIVITY_KEY)
+    existing = None
+    try:
+        if not isinstance(log, dict) and brain.resolve(path).exists():
+            existing = brain.read(path)  # the state file was lost: carry on from what the note has
+            log = {"days": activity.seed_days(existing["text"])}
+    except OSError:
+        pass
+    log = activity.add_look(log, now, activity.idle_seconds() if idle == "read" else idle,
+                            machine.load_now() if load == "read" else load)
+    written = False
+    if activity.note_due(log, now):
+        try:
+            if existing is None and brain.resolve(path).exists():
+                existing = brain.read(path)
+            text = activity.note_text(name, log["days"], existing["text"] if existing else "", now)
+            if existing:
+                brain.write(path, text, existing["mtime"])
+            else:
+                brain.write(path, text)
+            log["written"] = now.isoformat(timespec="seconds")
+            written = True
+        except (ConflictError, OSError):  # edited or synced under us: the next pass writes it
+            pass
+    state = _load_state(brain)
+    state[ACTIVITY_KEY] = log
+    _save_state(brain, state)
+    return written
+
+
 # ------------------------------------------------------------ the loop
 
 
@@ -1007,6 +1049,8 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
         messages.append(f"Sessions: {silent} ended after {REPORTED_IDLE_MINUTES // 60} h without a step")
     if laptop and sync_machine(brain):
         messages.append("Laptop: load noted in machines/")
+    if laptop and sync_activity(brain):
+        messages.append("Laptop: the day's use noted in machines/")
     if github and github_usage.sync(brain):
         messages.append(f"GitHub: Actions minutes noted in {github_usage.FOLDER}/")
     # Other accounts are asked for by name, so they are noted even where the main one is left to another computer.

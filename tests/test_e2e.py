@@ -16,12 +16,12 @@ except ImportError:  # pragma: no cover
         raise
     sync_playwright = None
 
-VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "map", "canvas", "code", "vibe", "autopilot", "context", "plugins", "people", "proof"]
+VIEWS = ["home", "ideas", "board", "decisions", "notes", "journal", "diary", "map", "canvas", "code", "vibe", "autopilot", "context", "plugins", "people", "proof"]
 
 # The sidebar has one entry per hub; a hub with several pages shows them as tabs (docs/state.js HUBS).
 HUBS = {
     "today": ["home", "board", "ideas", "decisions"],
-    "journal": ["journal"],
+    "journal": ["journal", "diary"],
     "chat": ["chat", "glow", "autopilot"],
     "map": ["map", "canvas"],
     "build": ["vibe", "projects"],
@@ -109,6 +109,39 @@ DEVICES_SEED = """() => {
     add(`machines/${slug}.md`, { title, type: "note", tags: "[machine]", machine_at: at, machine_cpu: cpu, machine_cores: 8, machine_ram_gb: 16, load: "light", load_cpu: 12, load_ram: 40 }, "Written by the watcher.");
   machine("asus-expertbook", "ASUS EXPERTBOOK", ago(3), "Intel Core Ultra 7");
   machine("macbook-pro", "MacBook Pro", ago(45), "Intel Core i7");
+  s.notes = s.files.map((f) => window.cairn.core.noteFromFile(f.path, f.text, f.mtime));
+  window.cairn.rerender();
+}"""
+
+# Two computers that share one brain: each with sessions, the watcher's note of its use, and (for today)
+# a day report. A name with a comma in it has to survive.
+DIARY_SEED = """() => {
+  const s = window.cairn.state;
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const today = stamp(new Date());
+  const yesterday = stamp(new Date(Date.now() - 86400000));
+  const add = (path, meta, body) => {
+    const head = Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join("\\n");
+    s.files.push({ path, text: `---\\n${head}\\n---\\n\\n${body}\\n`, mtime: Date.now() });
+  };
+  const session = (slug, machine, day, extra) =>
+    add(`sessions/${day}-${slug}.md`, { title: slug, type: "session", agent: "Vector", machine, started: `${day}T00:01`, ...extra }, "## Log");
+  session("pc-shipped", "ACME Roadrunner 14", today, { status: "shipped", ended: `${today}T00:02`, minutes: 50, tokens_in: 4000, tokens_out: 1000 });
+  session("pc-live", "ACME Roadrunner 14", today, { status: "live" });
+  session("mac-done", "MacBook Pro 15,4", today, { status: "done", ended: `${today}T00:02`, minutes: 20, tokens: 700 });
+  session("mac-old", "MacBook Pro 15,4", yesterday, { status: "shipped", ended: `${yesterday}T00:02`, minutes: 5 });
+  for (let n = 0; n < 14; n += 1) session(`pc-batch-${pad(n)}`, "ACME Roadrunner 14", yesterday, { status: "shipped", ended: `${yesterday}T00:02`, minutes: 3 });
+  const hours = Array.from({ length: 24 }, (_, h) => (h === 9 || h === 10 ? 60 : 0)).join(" ");
+  const activity = (slug, machine, lines) =>
+    add(`machines/${slug}-activity.md`, { title: `${machine} activity`, type: "note", tags: "[activity]", machine, activity_at: `${today}T00:02` }, lines.join("\\n"));
+  activity("acme-roadrunner-14", "ACME Roadrunner 14", [
+    `- ${today} | screen 120 | awake 200 | cpu 30 | cpu_peak 90 | ram 60 | ram_peak 75 | heavy 4 | first 08:55 | last 11:00 | hours ${hours}`,
+    `- ${yesterday} | screen 240 | awake 300 | cpu 20 | cpu_peak 50 | ram 55 | ram_peak 60 | heavy 0 | first 09:00 | last 13:00 | hours ${hours}`,
+  ]);
+  activity("macbook-pro-15-4", "MacBook Pro 15,4", [`- ${today} | screen 45 | awake 50 | cpu 12 | cpu_peak 40 | ram 70 | ram_peak 71 | heavy 0 | first 07:58 | last 08:45 | hours ${hours}`]);
+  add(`Productivity Diary/${today}.md`, { title: `"Productivity Diary - ${today}"`, type: "note", date: today, tags: "[diary, productivity]", ai_tokens: 99000,
+    devices: `\\n  - "ACME Roadrunner 14 | screen 150 | cpu 33 | cpu_peak 95 | ram 62 | ram_peak 80 | source tracker"` }, "# The day");
   s.notes = s.files.map((f) => window.cairn.core.noteFromFile(f.path, f.text, f.mtime));
   window.cairn.rerender();
 }"""
@@ -380,7 +413,7 @@ class EndToEndTests(unittest.TestCase):
                 expected = {"view": view, "hubs": [] if hub in HIDDEN_HUBS else [hub], "tabs": tabs, "tab": view if tabs else None}
                 self.assertEqual(self.nav_state(page), expected)
                 self.assertTrue(page.inner_text("#view").strip(), view)
-        self.assertEqual(sum(len(views) for views in {**HUBS, **HIDDEN_HUBS}.values()), 19)
+        self.assertEqual(sum(len(views) for views in {**HUBS, **HIDDEN_HUBS}.values()), 20)
         self.assertEqual(self.errors, [])
 
     def test_a_sidebar_entry_reopens_the_tab_used_last(self):
@@ -1240,6 +1273,80 @@ class EndToEndTests(unittest.TestCase):
         self.assertIsNone(page.evaluate("() => localStorage.getItem('cairn.vibeDevice')"))
         self.assertEqual(page.locator(".vibe-device-note").count(), 0)
         self.assertEqual(page.evaluate("() => document.documentElement.scrollWidth - innerWidth"), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_diary_shows_each_day_for_every_computer(self):
+        page = self.open()
+        self.go(page, "diary")
+        page.wait_for_selector(".empty-state")  # the sample brain has no sessions: nothing to show, and no row of zeros
+        self.assertEqual(page.locator(".diary-table").count(), 0)
+        page.evaluate(DIARY_SEED)
+        page.wait_for_selector(".diary-table")
+        self.assertEqual(self.nav_state(page)["tabs"], ["journal", "diary"])
+
+        chips = lambda: page.eval_on_selector_all(
+            ".diary-devices .chip",
+            "els => els.map((e) => [e.dataset.device ?? null, e.querySelector('b')?.textContent ?? '', e.getAttribute('aria-pressed')])",
+        )
+        # Both computers are found from the notes alone: most days first, then by name.
+        self.assertEqual(chips(), [[None, "", "true"], ["ACME Roadrunner 14", "2", "false"], ["MacBook Pro 15,4", "2", "false"]])
+        self.assertEqual(page.locator(".diary-row").count(), 30)
+        self.assertEqual(page.locator(".diary-row.rest").count(), 28)
+        self.assertNotIn("0.0", page.inner_text(".diary-table"))  # a day with nothing in it is a rest day, never a zero
+
+        # Today, both computers: the report's 150 min for the PC (more than the watcher's 120) plus the Mac's 45.
+        today = page.locator(".diary-row").first
+        cells = today.locator("td").all_inner_texts()
+        self.assertEqual(cells[1], "3h 15m")
+        self.assertEqual(cells[2].split(), ["2", "of", "3"])
+        self.assertEqual(cells[3], "1h 10m")
+        self.assertRegex(cells[0], r"^\d+\.\d ")
+        self.assertGreaterEqual(today.locator(".diary-stars").get_attribute("aria-label")[0], "1")
+        self.assertIn("3h 15m", page.inner_text(".diary-stats"))
+
+        # A day opens: one block per computer, the hours it was used, and the tasks of that day.
+        today.locator(".diary-day-btn").click()
+        page.wait_for_selector(".diary-detail")
+        self.assertEqual(page.locator(".diary-detail .diary-device h3").count(), 2)
+        self.assertEqual(page.locator(".diary-detail .diary-hours").count(), 2)
+        self.assertEqual(page.locator(".diary-log .row-item").count(), 3)
+        self.assertIn("MacBook Pro 15,4", page.inner_text(".diary-log"))
+        self.assertEqual(page.locator('.diary-detail [data-open^="Productivity Diary/"]').count(), 1)
+
+        # A day with more tasks than fit shows the last twelve and offers the rest.
+        page.locator(".diary-row").nth(1).locator(".diary-day-btn").click()
+        page.wait_for_function("() => document.querySelectorAll('.diary-log .row-item').length === 12")
+        page.click('[data-action="diary-all"]')
+        page.wait_for_function("() => document.querySelectorAll('.diary-log .row-item').length === 15")
+
+        # One computer on its own.
+        mac = '.diary-devices .chip[data-device="MacBook Pro 15,4"]'
+        page.click(mac)
+        page.wait_for_function("(sel) => document.querySelector(sel).getAttribute('aria-pressed') === 'true'", arg=mac)
+        cells = page.locator(".diary-row").first.locator("td").all_inner_texts()
+        self.assertEqual((cells[1], cells[2].split(), cells[3]), ("45m", ["1", "of", "1"], "20m"))
+        self.assertEqual(page.evaluate("() => localStorage.getItem('cairn.diaryDevice')"), '"MacBook Pro 15,4"')
+        page.click(".diary-devices .chip:not([data-device])")
+        page.wait_for_function("() => localStorage.getItem('cairn.diaryDevice') === null")
+
+        # A task of the log opens its session note.
+        page.locator(".diary-row").first.locator(".diary-day-btn").click()
+        page.locator(".diary-log .row-item").first.click()
+        page.wait_for_function("() => (window.cairn.state.open || '').startsWith('sessions/')")
+        self.assertEqual(self.errors, [])
+
+    def test_diary_on_a_phone_in_dark_mode(self):
+        page = self.open(viewport=(390, 844), theme="dark")
+        page.evaluate("location.hash = '#/diary'")  # the sidebar is a drawer at this width
+        page.wait_for_function("() => window.cairn.state.view === 'diary'")
+        page.evaluate(DIARY_SEED)
+        page.wait_for_selector(".diary-table")
+        page.locator(".diary-row").first.locator(".diary-day-btn").click()
+        page.wait_for_selector(".diary-detail")
+        overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+        self.assertLessEqual(overflow, 0)
+        self.assertFalse(page.is_visible(".diary-table th.dc-load"))  # the load columns leave; the open day still has them
+        self.assertIn("processor", page.inner_text(".diary-detail"))
         self.assertEqual(self.errors, [])
 
     def test_vibe_view_on_a_phone_in_dark_mode(self):

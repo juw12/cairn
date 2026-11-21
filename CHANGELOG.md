@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 95 (2026-11-21): A diary of each day, for every computer
+
+- Journal has a second tab, Diary: one row per day for the last 30 days with a score out of 100 and its stars, the time at the screen, the tasks asked of the assistants and how many finished, the assistants' working time, the processor and memory in use and the tokens
+- The score is worked out in the page from three parts: 35 for the screen time against 8 hours, 40 for the finished tasks against 200 and 25 for the assistants' time against 100 hours. A day with no screen time, no tasks and no tokens says Rest day instead of a zero
+- Each computer that syncs with the brain is found by itself, from the machine named on the session notes and from the notes in machines/. A row of chips picks all computers or one; nothing lists the computers by hand
+- A day opens to show each computer on its own: the hours it was in use, its load, and the log of the tasks asked that day, each one opening its session note
+- cairn vibe watch now notes the day's use of the computer it runs on in machines/<name>-activity.md, about every 30 minutes: minutes at the screen (a key or the mouse within the last 2 minutes), minutes awake, processor and memory average and peak, and the minutes in each hour. Windows and macOS; 120 days are kept; --no-laptop turns it off with the load note
+- Not in this build: a computer's screen time and load start on the day its own Cairn has this build. Its earlier days show the tasks only. A phone has no watcher, so it has no row
+
 ## Build 94 (2026-11-21): Video tiles show the video in Safari
 
 - Repo pages: in Safari (so on an iPhone) the picture on a video’s tile was black since build 92. Safari says a frame is ready before it has one to give. A black picture is now taken again, a quarter of a second apart for up to three seconds, and a video that stays black gets no picture instead of a black one ([#84](https://github.com/juw12/cairn/pull/84))
