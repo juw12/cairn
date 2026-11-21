@@ -75,6 +75,7 @@ cairn publish --site folder --url https://example.org/   # the same web page as 
 cairn obsidian <vault folder>             # import an Obsidian vault and keep it in sync both ways (--dry-run to preview)
 cairn connect --status                    # which AI apps on this computer use this brain as their memory (changes nothing)
 cairn connect claude                      # put the cairn-memory skill in one app: vector, claude, opencode, codex (--remove takes it out)
+cairn connect vector --cloud owner/repo   # the same on a computer that has no folder of the brain: the skill reads and saves on GitHub
 cairn serve --port 4777                   # open the app in the browser (the default command)
 ```
 

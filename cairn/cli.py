@@ -984,6 +984,8 @@ def build_parser() -> argparse.ArgumentParser:
     connect_parser.add_argument("--remove", action="store_true", help="take the skill out again (only where Cairn put it)")
     connect_parser.add_argument("--write-folder", metavar="FOLDER", default=None,
                                 help="this computer saves memory only in this folder of the brain, e.g. devices/laptop ('' to undo)")
+    connect_parser.add_argument("--cloud", metavar="OWNER/REPO", default="",
+                                help="the brain is on GitHub and this computer has no folder of it: read and save there")
     connect_parser.add_argument("--on", action="store_true", help="connect Vector by itself when Cairn opens (the default)")
     connect_parser.add_argument("--off", action="store_true", help="stop connecting by itself")
     precedent_parser = sub.add_parser(
@@ -1046,6 +1048,8 @@ def cmd_connect(brain: Brain, args) -> int:
                   else "Cairn no longer connects an AI app by itself. `cairn connect` still does it when asked.")
             if not args.apps and args.write_folder is None and not args.remove:
                 return 0
+        if args.cloud:
+            brain = connect.RemoteBrain(args.cloud)
         if args.write_folder is not None:
             folder = connect.set_write_folder(brain, args.write_folder)
             print(f"On this computer, memory is written only in {folder}/ of this brain." if folder
@@ -1055,8 +1059,9 @@ def cmd_connect(brain: Brain, args) -> int:
         elif args.remove:
             rows = connect.disconnect(args.apps)
         else:
-            if not brain.dir.is_dir():
-                print(f"No brain at {brain.dir}. Run `cairn init` first.", file=sys.stderr)
+            if not args.cloud and not brain.dir.is_dir():
+                print(f"No brain at {brain.dir}. Run `cairn init` first, or name one on GitHub: "
+                      "cairn connect --cloud owner/repo", file=sys.stderr)
                 return 1
             rows = connect.connect(brain, args.apps)
     except (connect.ConnectError, OSError) as error:

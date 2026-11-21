@@ -5,7 +5,7 @@ description: The user's long-term memory is their Cairn brain, a folder of Markd
 
 # Cairn memory
 
-A new chat starts with no memory. The user's memory is the Cairn brain at `{{BRAIN}}`: plain Markdown notes
+A new chat starts with no memory. The user's memory is the Cairn brain {{BRAIN}}: plain Markdown notes
 (ideas, tasks, decisions, notes, a journal, past work sessions) that the Cairn app shows and syncs.
 Cairn put this skill here by itself and keeps it up to date; edits to these files are replaced.
 
@@ -72,6 +72,22 @@ Today under "Between computers").
   `--to` takes a computer's name or a few words of it, several times for several, or `all`.
 - These messages are the one thing written outside this computer's own folder: each is a new file in
   `handoffs/` that nobody edits afterwards.
+
+## When the brain is not on this computer
+
+A brain that is pushed to GitHub does not need its folder here. If the folder is missing (a new computer, a
+deleted or moved folder) both scripts work on GitHub by themselves and say so in their first line: they fetch
+the notes' text once (seconds to a minute), then only what changed, and `remember.py` makes the note on GitHub.
+The same rules apply. Add `--cloud` to do that on purpose, for the newest notes when Cairn here has not synced:
+
+    recall.py search "words" --cloud
+    remember.py note "Title" --body "..." --cloud
+
+The messages between computers are the one thing that needs the folder: without it, `recall.py handoffs` says
+so, and their files can still be read (`recall.py search "handoff"`, `recall.py read "handoffs/..."`).
+
+This needs a GitHub sign-in on the computer (`gh auth login`, or the one git already uses). If a script says it
+has none, tell the user that one command; do not ask them for a token in the chat.
 
 ## Limits
 
