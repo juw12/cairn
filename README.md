@@ -466,6 +466,13 @@ cairn autopilot set engine=command command="claude -p"
 The queue is plain tasks tagged `#queue` in `brain/tasks/`, so it shows on the Board and in Obsidian too. Cairn
 itself still never calls a model: it starts the agent CLI you already use, with your own login. The worker is off
 until you turn it on, and its state and logs live in `~/.cairn/autopilot` (`CAIRN_HOME` moves both).
+
+**Cairn Pro.** Cairn is free; the Autopilot is the one paid part. The first goal on a computer is free. After that,
+new goals need a [Cairn Pro](https://buy.polar.sh/polar_cl_Lolm6R62rsxDP4DcmBvM9Uv3rPklvmS7p7ZlD4V2Uwf) licence key
+(USD 8 a month or USD 60 a year): paste it on the Autopilot page or run `cairn pro activate <key>`. Goals already
+handed over keep running. The key is checked with Polar about once a day and keeps working for 14 days away from the
+network; only the key and Polar's yes or no are kept, in `~/.cairn/pro.json`.
+
 Moving from the standalone precedent skill or Precedent Agent app:
 `cairn precedent init --import-skill <skill folder> --queue-file <Queue.md> --agent-app <app folder>` (safe to re-run).
 
@@ -694,6 +701,7 @@ cairn vibe github copy D:/github-copy    # a full copy of every repo of your Git
 cairn vibe github copy everywhere        # ask your other computers to keep their own copy too (everywhere off stops asking)
 cairn precedent brief "goal"             # a brief from your own history (learn, queue, next, log, install)
 cairn autopilot add "goal"               # your agent carries it to done (on, off, status, set)
+cairn pro activate <key>                 # Cairn Pro: more than the one free autopilot goal (status, remove)
 cairn telegram setup <bot token>         # a daily status report in Telegram (show, send, status, off)
 cairn serve --port 4777                  # the app (default command)
 ```

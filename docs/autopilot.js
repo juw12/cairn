@@ -168,6 +168,21 @@ export async function saveSettings(form) {
   toast("Settings saved.");
 }
 
+// Cairn Pro: the first goal is free, later ones need a licence key (cairn/pro.py checks it with Polar).
+export async function activatePro(form) {
+  const key = form.elements.key.value.trim();
+  if (!key) return;
+  await act("pro-activate", { key });
+  toast("Cairn Pro is on. Hand over as many goals as you like.");
+}
+
+export async function removePro() {
+  const sure = await ask({ title: "Remove the key from this computer?", text: "New goals stop here until a key is entered again. Your subscription is not cancelled; that is done on Polar.", confirm: "Remove", noInput: true, danger: true });
+  if (!sure) return;
+  await act("pro-remove");
+  toast("Key removed from this computer.");
+}
+
 // ============================================================ live updates
 
 function stopPolling() {
@@ -249,6 +264,7 @@ export function wireAutopilot() {
     "#ap-goal-form": startGoal,
     "#ap-queue-form": addQueueItem,
     "#ap-settings-form": saveSettings,
+    "#ap-pro-form": activatePro,
   };
   for (const [selector, handler] of Object.entries(forms)) {
     $(selector)?.addEventListener("submit", (event) => {
@@ -395,6 +411,28 @@ function queueBlock() {
   </section>`;
 }
 
+// Shown under the goal form until a key is in: what is free, what Cairn Pro costs, where the key goes.
+function proOffer(pro) {
+  if (!pro || pro.active) return "";
+  const lead = pro.trial_left
+    ? "Your first goal is free. After that, new goals need Cairn Pro"
+    : "<strong>Your free goal is used.</strong> New goals need Cairn Pro";
+  return `<div class="ap-pro">
+    <p class="muted small">${lead} (${esc(pro.price)}). Goals already handed over keep running, and the rest of Cairn stays free.</p>
+    <form id="ap-pro-form" class="vibe-log-form">
+      <a class="btn sm${pro.trial_left ? "" : " primary"}" href="${esc(pro.checkout)}" target="_blank" rel="noopener">Get Cairn Pro</a>
+      <input class="input" name="key" id="ap-pro-key" placeholder="Have a key? Paste it here" aria-label="Cairn Pro licence key" autocomplete="off" spellcheck="false">
+      <button class="btn sm" type="submit">${icon("check", "sm")} Activate</button>
+    </form>
+  </div>`;
+}
+
+function proStatus(pro) {
+  if (!pro?.active) return "";
+  return `<p class="muted small">Cairn Pro is on: key ${esc(pro.key)}, last checked ${esc(pro.checked)}.
+    <button type="button" class="link-button" data-action="ap-pro-remove">Remove the key from this computer</button></p>`;
+}
+
 function settingsBlock(s) {
   const field = (name, label, value, type = "text", hint = "") => `<label class="field"><span>${label}</span>
     <input class="input" type="${type}" name="${name}" value="${esc(String(value ?? ""))}" ${type === "number" ? 'min="0"' : ""}>${hint ? `<span class="muted small">${hint}</span>` : ""}</label>`;
@@ -417,6 +455,7 @@ function settingsBlock(s) {
       <div><button class="btn sm primary" type="submit">${icon("save", "sm")} Save settings</button></div>
     </form>
     <p class="muted small">State and logs: <code>${esc(ap().data?.state_dir || "~/.cairn/autopilot")}</code></p>
+    ${proStatus(ap().data?.pro)}
   </div>`;
 }
 
@@ -491,6 +530,7 @@ export function autopilotView() {
         <button class="btn primary" type="submit">${icon("play", "sm")} Hand it over</button>
       </div>
     </form>
+    ${proOffer(data?.pro)}
     ${brief}`,
           summary: "what should get done, and where",
         },

@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, core, github_move, github_push, machine, mcp, precedent, vibe
+from . import __version__, autopilot, chat, core, github_move, github_push, machine, mcp, precedent, pro, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -362,7 +362,7 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             job_id = str(body.get("id", ""))
             if action == "goal":
-                return self._send_json(autopilot.create_job(str(body.get("goal", "")), str(body.get("workdir", ""))))
+                return self._send_json(autopilot.new_goal(str(body.get("goal", "")), str(body.get("workdir", ""))))
             if action == "comment":
                 job = autopilot.add_comment(job_id, str(body.get("text", "")))
                 return self._send_json(job) if job else self._error(HTTPStatus.NOT_FOUND, "no such job")
@@ -379,6 +379,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True})
             if action == "settings":
                 return self._send_json(autopilot.update_settings(body))
+            if action == "pro-activate":
+                return self._send_json(pro.activate(str(body.get("key", ""))))
+            if action == "pro-remove":
+                return self._send_json(pro.remove())
             if action == "queue":
                 note = precedent.queue_add(self.brain, str(body.get("text", "")), bool(body.get("auto")), bool(body.get("needsMe")))
                 return self._send_json(note)

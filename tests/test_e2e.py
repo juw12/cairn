@@ -2653,6 +2653,41 @@ class EndToEndTests(unittest.TestCase):
         page.wait_for_selector("#ap-settings-form")
         self.assertEqual(self.errors, [])
 
+    def test_autopilot_offers_cairn_pro_until_a_key_is_in(self):
+        page = self.open()
+        page.evaluate(PC_STUB)
+        page.evaluate("""() => {
+          const s = window.cairn.state;
+          const plain = s.store.autopilot;
+          window.proState = { active: false, trial_left: false, key: "", checked: "", price: "USD 8 a month or USD 60 a year", checkout: "https://buy.polar.sh/test" };
+          window.proCalls = [];
+          s.store.autopilot = async () => ({ ...(await plain()), pro: window.proState });
+          s.store.autopilotAction = async (action, body) => {
+            window.proCalls.push([action, body]);
+            if (action === "pro-activate") window.proState = { ...window.proState, active: true, key: "...4321", checked: "2026-11-21" };
+            if (action === "pro-remove") window.proState = { ...window.proState, active: false, key: "" };
+            return window.proState;
+          };
+        }""")
+        self.go(page, "autopilot")
+        page.wait_for_selector("#ap-pro-form")
+        self.assertIn("Your free goal is used", page.inner_text(".ap-pro"))
+        self.assertIn("USD 8 a month", page.inner_text(".ap-pro"))
+        self.assertEqual(page.get_attribute(".ap-pro a.btn", "href"), "https://buy.polar.sh/test")
+        page.fill("#ap-pro-key", "CAIRN-TEST-4321")
+        page.click('#ap-pro-form button[type="submit"]')
+        page.wait_for_function("() => !document.querySelector('#ap-pro-form')")
+        self.assertEqual(page.evaluate("window.proCalls"), [["pro-activate", {"key": "CAIRN-TEST-4321"}]])
+        # With a key the offer is gone; Settings says so and can take the key off this computer.
+        page.click('.vp-toggle[data-page="autopilot"][data-panel="settings"]')
+        page.wait_for_selector('[data-action="ap-pro-remove"]')
+        self.assertIn("...4321", page.inner_text(".ap-settings"))
+        page.click('[data-action="ap-pro-remove"]')
+        page.click('.modal button[type="submit"]')
+        page.wait_for_selector("#ap-pro-form")
+        self.assertEqual(page.evaluate("window.proCalls[1][0]"), "pro-remove")
+        self.assertEqual(self.errors, [])
+
     def test_proof_view_of_someone_elses_brain_checks_itself(self):
         page = self.open("?brain=juw12/cairn#/proof", wait=".claim")
         page.wait_for_selector(".lvl-summary", timeout=15000)

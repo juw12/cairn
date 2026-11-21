@@ -1744,6 +1744,9 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .ap-goal-form textarea { height: auto; min-height: 58px; padding: 9px 10px; resize: vertical; font: inherit; line-height: 1.5; }
 .ap-goal-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .ap-goal-row .input { flex: 1 1 260px; min-width: 0; }
+.ap-pro { margin-top: 12px; }
+.ap-pro p { margin: 0 0 8px; }
+.ap-pro .vibe-log-form { flex-wrap: wrap; align-items: center; }
 .ap-brief { margin-top: 14px; }
 .ap-brief summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
 .ap-figures .value.warn { color: var(--danger); }

@@ -28,7 +28,7 @@ import { maybeStartTour, startTour } from "./tour.js";
 import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
-import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
+import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, removePro, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
 import { movePanel, openPanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
 import { pickChartDay, setChartMetric, setChartRange, showNeeds, wireHome } from "./home.js";
 import { renameDevice, sayHandoff, sendHandoff, toggleHandoff, toggleHandoffForm, toggleSettled } from "./handoffs.js";
@@ -336,7 +336,7 @@ function wireGlobal() {
     const actionEl = target.closest("[data-action]");
     if (!actionEl) return;
     const action = actionEl.dataset.action;
-    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add", "vibe-start", "vibe-end", "vibe-sample", "vibe-gh-move", "ap-toggle", "ap-job", "ap-flag", "ap-q-done"];
+    const mutating = ["new", "journal-today", "spark", "promote", "delete", "save-context", "todo-task", "commit", "load-sample", "spark-random", "obsidian-sync", "obsidian-unlink", "new-claim", "rename", "prop-add", "vibe-start", "vibe-end", "vibe-sample", "vibe-gh-move", "ap-toggle", "ap-job", "ap-flag", "ap-q-done", "ap-pro-remove"];
     if (readOnly() && mutating.includes(action)) {
       toast("This brain is read-only. Ask to join to contribute.");
       return;
@@ -416,6 +416,7 @@ function wireGlobal() {
       "vibe-row": () => toggleRow(actionEl.dataset.path),
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
       "ap-toggle": toggleEnabled,
+      "ap-pro-remove": removePro,
       "ap-job": () => jobAction(actionEl.dataset.op, actionEl.dataset.id),
       "ap-select": () => selectJob(actionEl.dataset.id),
       "ap-brief": () => previewBrief($("#ap-goal-form")),

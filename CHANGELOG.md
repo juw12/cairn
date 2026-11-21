@@ -3,6 +3,14 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 96 (2026-11-21): Cairn Pro: the Autopilot takes more than one goal with a licence key
+
+- The Autopilot is now the paid part of Cairn; everything else stays free. The first goal on a computer is free. After that a new goal needs a Cairn Pro licence key. Goals already handed over keep running ([#85](https://github.com/juw12/cairn/pull/85))
+- Cairn Pro is a subscription on Polar, USD 8 a month or USD 60 a year. The key comes by email after the purchase and goes in the box under the goal form on the Autopilot page, or in cairn pro activate KEY. cairn pro status shows where it stands and cairn pro remove takes the key off this computer ([#85](https://github.com/juw12/cairn/pull/85))
+- The key is checked with Polar once a day. When Polar cannot be reached, a key that was good stays good for 14 days, and a proxy error page or a timeout is not read as a bad key ([#85](https://github.com/juw12/cairn/pull/85))
+- Only the key and whether it is good are kept, in ~/.cairn/pro.json on this computer. Nothing about the buyer is stored, and the page sees only the last four characters of the key ([#85](https://github.com/juw12/cairn/pull/85))
+- Not in this build: the source is open, so the check asks for fair play and is not a lock. A comment on a finished goal can still start it again without a key
+
 ## Build 95 (2026-11-21): A diary of each day, for every computer
 
 - Journal has a second tab, Diary: one row per day for the last 30 days with a score out of 100 and its stars, the time at the screen, the tasks asked of the assistants and how many finished, the assistants' working time, the processor and memory in use and the tokens
