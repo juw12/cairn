@@ -1,0 +1,51 @@
+name: Mac probe (temporary)
+on:
+  push:
+    paths:
+      - ".github/workflows/mac-probe.yml"
+      - "scripts/probe/**"
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          git checkout -q -b mac-check
+          CAIRN_REPO="$GITHUB_WORKSPACE" CAIRN_BRANCH=mac-check CAIRN_NO_OPEN=1 bash docs/mac-install.sh > /dev/null
+          sw_vers
+      - name: Baseline
+        run: scripts/probe/count.sh baseline
+      - name: "E1: a plain icon from a bare script"
+        run: |
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/probe/plain.py &
+          scripts/probe/count.sh plain-bare
+          sleep 8
+      - name: "E2: pystray's icon from a bare script"
+        run: |
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/probe/tray.py docs/icons/icon-192.png &
+          scripts/probe/count.sh pystray-bare
+          sleep 8
+      - name: "E3: a plain icon from an app whose program is a shell script"
+        run: |
+          mkdir -p "$RUNNER_TEMP/Probe.app/Contents/MacOS"
+          sed -e 's/io.github.juw12.cairn/io.github.juw12.probe/' -e 's/>Cairn</>Probe</g' "$HOME/Applications/Cairn.app/Contents/Info.plist" > "$RUNNER_TEMP/Probe.app/Contents/Info.plist"
+          printf '#!/bin/bash\nexec "%s" "%s"\n' "$HOME/Library/Application Support/Cairn/venv/bin/python" "$GITHUB_WORKSPACE/scripts/probe/plain.py" > "$RUNNER_TEMP/Probe.app/Contents/MacOS/Probe"
+          chmod +x "$RUNNER_TEMP/Probe.app/Contents/MacOS/Probe"
+          open -g "$RUNNER_TEMP/Probe.app"
+          scripts/probe/count.sh plain-in-app
+          sleep 8
+      - name: "E4: Cairn itself, started without Cairn.app"
+        run: |
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" "$HOME/Library/Application Support/Cairn/app/Cairn.pyw" --hidden &
+          sleep 8
+          scripts/probe/count.sh cairn-bare
+          pkill -f Cairn.pyw || true
+          sleep 8
+      - name: "E5: Cairn.app, opened in front and with its window"
+        run: |
+          open "$HOME/Applications/Cairn.app"
+          sleep 8
+          scripts/probe/count.sh cairn-app-front
+          cat "$HOME/.config/cairn/cairn.log" || true
