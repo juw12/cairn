@@ -5,7 +5,7 @@ the app shows the same list under Version history.
 
 ## Build 93 (2026-11-21): Video tiles show the video in Safari
 
-- Repo pages: in Safari (so on an iPhone) the picture on a video’s tile was black in build 92. Safari says a frame is ready before it has one to give. A black picture is now taken again, a quarter of a second apart for up to three seconds, and a video that stays black gets no picture instead of a black one
+- Repo pages: in Safari (so on an iPhone) the picture on a video’s tile was black in build 92. Safari says a frame is ready before it has one to give. A black picture is now taken again, a quarter of a second apart for up to three seconds, and a video that stays black gets no picture instead of a black one ([#84](https://github.com/juw12/cairn/pull/84))
 
 ## Build 92 (2026-11-21): Issues, pull requests, releases and branches inside Cairn
 
