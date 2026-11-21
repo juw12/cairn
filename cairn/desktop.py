@@ -1255,13 +1255,7 @@ class DesktopApp:
         self.window.events.shown += self.set_icon
         reopen_from_dock(self.show_window)
         self.tray = self.build_tray()
-        if sys.platform == "darwin":
-            # pystray shows its icon from a thread of its own. macOS wants that done on the main thread,
-            # which is this one; since macOS 26 an icon shown from another thread never appears.
-            self.tray.run_detached(setup=lambda icon: None)
-            self.tray.visible = True
-        else:
-            self.tray.run_detached()
+        self.tray.run_detached()
         for loop in (self.watch_show_requests, self.sync_loop, self.update_loop, self.vibe_watch_loop, self.phone_loop):
             threading.Thread(target=loop, daemon=True).start()
         from . import relay

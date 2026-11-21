@@ -11,6 +11,7 @@ on:
       - "docs/mac-install.sh"
       - "scripts/mac_icon.py"
       - "scripts/mac_check.py"
+      - "mac/**"
       - "cairn/desktop.py"
       - "Cairn.pyw"
       - ".github/workflows/mac.yml"
@@ -19,6 +20,7 @@ on:
       - "docs/mac-install.sh"
       - "scripts/mac_icon.py"
       - "scripts/mac_check.py"
+      - "mac/**"
       - "cairn/desktop.py"
       - "Cairn.pyw"
       - ".github/workflows/mac.yml"
@@ -42,6 +44,8 @@ jobs:
           git checkout -q -b mac-check
           CAIRN_REPO="$GITHUB_WORKSPACE" CAIRN_BRANCH=mac-check CAIRN_NO_OPEN=1 bash docs/mac-install.sh
           test -x "$HOME/Applications/Cairn.app/Contents/MacOS/Cairn"
+          file "$HOME/Applications/Cairn.app/Contents/MacOS/Cairn" | grep -q "Mach-O" || { echo "Cairn.app is started by a script, not by mac/cairn-launcher"; exit 1; }
+          codesign --verify "$HOME/Applications/Cairn.app"
           test -s "$HOME/Applications/Cairn.app/Contents/Resources/Cairn.icns"
           plutil -lint "$HOME/Applications/Cairn.app/Contents/Info.plist"
 

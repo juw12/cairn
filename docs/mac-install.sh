@@ -77,6 +77,7 @@ say "OK: $("$PYTHON" --version)"
 step "Cairn"
 # A running Cairn keeps its port; it is opened again at the end.
 pkill -f "$APP/Cairn.pyw" >/dev/null 2>&1 || true
+pkill -f "$BUNDLE/Contents/MacOS/Cairn" >/dev/null 2>&1 || true
 if has_git && [ -d "$APP/.git" ]; then
   git -C "$APP" pull --ff-only --quiet || stop "could not update Cairn from GitHub."
   say "Updated to the latest version"
@@ -127,18 +128,30 @@ cat >"$BUNDLE/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-# The launcher: Cairn's Python runs the checkout. The paths are written in, so the app can be moved.
-cat >"$BUNDLE/Contents/MacOS/Cairn" <<LAUNCHER
+# The app's program. mac/cairn-launcher runs Cairn inside the app's own process, which is what macOS wants
+# before it shows the app's menu-bar icon (macOS 26 shows none for a script that hands over to Python).
+LIBRARY="$("$VENV/bin/python" -c 'import os, sys; print(os.path.join(sys.base_prefix, "lib", "libpython%d.%d.dylib" % sys.version_info[:2]))')"
+if [ -x "$APP/mac/cairn-launcher" ] && [ -f "$LIBRARY" ]; then
+  cp "$APP/mac/cairn-launcher" "$BUNDLE/Contents/MacOS/Cairn"
+  printf '%s\n%s\n%s\n' "$LIBRARY" "$VENV/bin/python" "$APP/Cairn.pyw" >"$BUNDLE/Contents/Resources/cairn-paths.txt"
+else
+  # No such program or library here: a script starts Python instead. Everything works but the menu-bar
+  # icon on macOS 26, where the Dock icon then is the way back to a closed window.
+  cat >"$BUNDLE/Contents/MacOS/Cairn" <<LAUNCHER
 #!/bin/bash
 export CAIRN_APP_BUNDLE="\$(cd "\$(dirname "\$0")/../.." && pwd)"
 export PATH="\$PATH:/usr/local/bin:/opt/homebrew/bin"
 cd "$APP" || exit 1
 exec "$VENV/bin/python" "$APP/Cairn.pyw" "\$@"
 LAUNCHER
+  say "(started by a script: no menu-bar icon on macOS 26)"
+fi
 chmod +x "$BUNDLE/Contents/MacOS/Cairn"
 # The icon, in the shape macOS gives its apps. Without it Cairn still works, with a plain icon.
 "$VENV/bin/python" "$APP/scripts/mac_icon.py" "$APP/docs/icons/icon-512.png" "$BUNDLE/Contents/Resources/Cairn.icns" \
   >/dev/null 2>&1 || say "(the icon could not be made; Cairn works without it)"
+# Signed by this Mac for this Mac ("ad hoc"): no certificate, no cost, and macOS treats the app as one piece.
+codesign --force --sign - "$BUNDLE" >/dev/null 2>&1 || true
 touch "$BUNDLE"
 say "Added Cairn to $(dirname "$BUNDLE")"
 

@@ -389,6 +389,14 @@ class FirstRunTests(unittest.TestCase):
         self.assertIn("CAIRN_APP_BUNDLE", script, "the launcher tells Cairn which app it was started from")
         self.assertIn("scripts/mac_icon.py", script)
         self.assertTrue((root / "scripts" / "mac_icon.py").is_file())
+        program = root / "mac" / "cairn-launcher"
+        self.assertIn("mac/cairn-launcher", script, "Cairn.app's program is the one that runs Cairn inside the app")
+        self.assertTrue(program.is_file(), "the installer copies mac/cairn-launcher into Cairn.app")
+        self.assertIn(program.read_bytes()[:4], (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"), "one file for both chips")
+        source = (root / "mac" / "launcher.c").read_text(encoding="utf-8")
+        for needed in ("Py_BytesMain", "CAIRN_APP_BUNDLE", "__PYVENV_LAUNCHER__", "cairn-paths.txt"):
+            self.assertIn(needed, source)
+        self.assertIn("cairn-paths.txt", script)
         self.assertNotIn("sudo", script, "the Mac installer never asks for a password")
         self.assertNotIn("\r", script, "a script with Windows line endings does not run on a Mac")
         line = "curl -fsSL https://juw12.github.io/cairn/mac-install.sh | bash"
