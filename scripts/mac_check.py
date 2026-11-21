@@ -93,7 +93,15 @@ def main(argv: list[str]) -> int:
     for line in wrong:
         print("WRONG:", line)
     if wrong:
-        print("macOS said about the app:", app_entry().get("said", "nothing"), sep="\n")
+        entry = app_entry()
+        print("macOS said about the app:", entry.get("said", "nothing"), sep="\n")
+        print("its windows:", *windows(entry.get("pid", -1)), sep="\n  ")
+        named = [
+            f'{w.get("kCGWindowOwnerName")} layer {w.get("kCGWindowLayer")} {dict(w["kCGWindowBounds"])}'
+            for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+            if w.get("kCGWindowLayer") not in (0,)
+        ]
+        print("everything on the screen that is not an ordinary window:", *named, sep="\n  ")
     if not wrong:
         state = {True: ", window on the screen", False: ", window hidden", None: ""}[want_window]
         print(f"OK: Cairn runs from Cairn.app, menu-bar icon there, page answers{state}")
