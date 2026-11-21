@@ -14,38 +14,37 @@ jobs:
         run: |
           git checkout -q -b mac-check
           CAIRN_REPO="$GITHUB_WORKSPACE" CAIRN_BRANCH=mac-check CAIRN_NO_OPEN=1 bash docs/mac-install.sh > /dev/null
-          sw_vers
+          clang -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -O2 -o "$RUNNER_TEMP/launcher" mac/launcher.c
+          codesign -dv "$RUNNER_TEMP/launcher" 2>&1 | head -3 || true
       - name: Baseline
         run: scripts/probe/count.sh baseline
-      - name: "E1: a plain icon from a bare script"
+      - name: "E6: a plain icon from an app whose program is a shell script, signed ad hoc"
         run: |
-          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/probe/plain.py &
-          scripts/probe/count.sh plain-bare
+          app="$RUNNER_TEMP/ProbeSigned.app"
+          mkdir -p "$app/Contents/MacOS"
+          sed -e 's/io.github.juw12.cairn/io.github.juw12.probesigned/' -e 's/>Cairn</>ProbeSigned</g' "$HOME/Applications/Cairn.app/Contents/Info.plist" > "$app/Contents/Info.plist"
+          printf '#!/bin/bash\nexec "%s" "%s"\n' "$HOME/Library/Application Support/Cairn/venv/bin/python" "$GITHUB_WORKSPACE/scripts/probe/plain.py" > "$app/Contents/MacOS/ProbeSigned"
+          chmod +x "$app/Contents/MacOS/ProbeSigned"
+          codesign --force --deep -s - "$app" && codesign -dv "$app" 2>&1 | head -3
+          open -g "$app"
+          scripts/probe/count.sh script-signed
           sleep 8
-      - name: "E2: pystray's icon from a bare script"
+      - name: "E7: a plain icon from an app whose program runs Python inside itself"
         run: |
-          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/probe/tray.py docs/icons/icon-192.png &
-          scripts/probe/count.sh pystray-bare
+          app="$RUNNER_TEMP/ProbeInside.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          sed -e 's/io.github.juw12.cairn/io.github.juw12.probeinside/' -e 's/>Cairn</>ProbeInside</g' "$HOME/Applications/Cairn.app/Contents/Info.plist" > "$app/Contents/Info.plist"
+          cp "$RUNNER_TEMP/launcher" "$app/Contents/MacOS/ProbeInside"
+          root="$HOME/Library/Application Support/Cairn"
+          printf '%s\n%s\n%s\n' "$(ls "$root"/python/cpython-3.13-macos-*/lib/libpython3.13.dylib | head -1)" "$root/venv/bin/python" "$GITHUB_WORKSPACE/scripts/probe/plain.py" > "$app/Contents/Resources/cairn-paths.txt"
+          cat "$app/Contents/Resources/cairn-paths.txt"
+          open -g "$app"
+          scripts/probe/count.sh inside-unsigned
           sleep 8
-      - name: "E3: a plain icon from an app whose program is a shell script"
+      - name: "E8: the same, with the whole app signed ad hoc"
         run: |
-          mkdir -p "$RUNNER_TEMP/Probe.app/Contents/MacOS"
-          sed -e 's/io.github.juw12.cairn/io.github.juw12.probe/' -e 's/>Cairn</>Probe</g' "$HOME/Applications/Cairn.app/Contents/Info.plist" > "$RUNNER_TEMP/Probe.app/Contents/Info.plist"
-          printf '#!/bin/bash\nexec "%s" "%s"\n' "$HOME/Library/Application Support/Cairn/venv/bin/python" "$GITHUB_WORKSPACE/scripts/probe/plain.py" > "$RUNNER_TEMP/Probe.app/Contents/MacOS/Probe"
-          chmod +x "$RUNNER_TEMP/Probe.app/Contents/MacOS/Probe"
-          open -g "$RUNNER_TEMP/Probe.app"
-          scripts/probe/count.sh plain-in-app
+          app="$RUNNER_TEMP/ProbeInside.app"
+          codesign --force --deep -s - "$app" && codesign -dv "$app" 2>&1 | head -3
+          open -g "$app"
+          scripts/probe/count.sh inside-signed
           sleep 8
-      - name: "E4: Cairn itself, started without Cairn.app"
-        run: |
-          "$HOME/Library/Application Support/Cairn/venv/bin/python" "$HOME/Library/Application Support/Cairn/app/Cairn.pyw" --hidden &
-          sleep 8
-          scripts/probe/count.sh cairn-bare
-          pkill -f Cairn.pyw || true
-          sleep 8
-      - name: "E5: Cairn.app, opened in front and with its window"
-        run: |
-          open "$HOME/Applications/Cairn.app"
-          sleep 8
-          scripts/probe/count.sh cairn-app-front
-          cat "$HOME/.config/cairn/cairn.log" || true
