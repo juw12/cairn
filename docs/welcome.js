@@ -9,6 +9,19 @@ import { LAST_BRAIN_KEY, REPO_URL } from "./state.js";
 import { copyText } from "./actions.js";
 import { start } from "./app.js";
 
+// The Mac desktop app is installed by one line in Terminal (docs/mac-install.sh makes Cairn.app).
+export const MAC_INSTALL = "curl -fsSL https://juw12.github.io/cairn/mac-install.sh | bash";
+const ON_A_MAC = /Mac/i.test(navigator.platform || "") && !("ontouchend" in document);  // an iPad says Mac too
+
+function desktopButtons() {
+  const windows = `<a class="${ON_A_MAC ? "sub-link" : "btn primary"}" href="Cairn-Setup.cmd" download="Cairn-Setup.cmd">${ON_A_MAC ? "On Windows? Download Cairn-Setup.cmd" : `${icon("arrow")} Download for Windows`}</a>`;
+  const mac = ON_A_MAC
+    ? `<button class="btn primary" data-copy-mac>${icon("terminal")} Copy the line for Terminal</button>`
+    : `<button class="sub-link" data-copy-mac>On a Mac? Copy the line to paste in Terminal</button>`;
+  const linux = `<button class="sub-link" data-copy-cmd>Linux? Copy the two terminal commands</button>`;
+  return ON_A_MAC ? mac + windows + linux : windows + mac + linux;
+}
+
 function exploreTarget(raw) {
   const parsed = gh.parseGithubInput(raw);
   if (!parsed) return null;
@@ -61,9 +74,8 @@ export function showWelcome(remembered) {
         <section class="card choice">
           <span class="badge-icon">${icon("terminal")}</span>
           <h2>Get the desktop app</h2>
-          <p>Its own window, opens your Obsidian vault by itself, syncs with GitHub in one click and updates itself. Windows, no admin needed.</p>
-          <a class="btn primary" href="Cairn-Setup.cmd" download="Cairn-Setup.cmd">${icon("arrow")} Download for Windows</a>
-          <button class="sub-link" data-copy-cmd>Mac or Linux? Copy the two terminal commands</button>
+          <p>Its own window, opens your Obsidian vault by itself, syncs with GitHub in one click and updates itself. Windows and Mac, no admin needed.</p>
+          ${desktopButtons()}
         </section>
       </div>
       ${welcomeAccount()}
@@ -91,6 +103,7 @@ export function showWelcome(remembered) {
     location.href = location.pathname + target;
   };
   welcome.onclick = async (event) => {
+    if (event.target.closest("[data-copy-mac]")) return copyText(MAC_INSTALL, "Copied. Open Terminal, paste it and press Return");
     const copyButton = event.target.closest("[data-copy-cmd]");
     if (copyButton) return copyText(`git clone ${REPO_URL}\npython -m cairn --root ~/your-repo`, "Commands copied");
     const button = event.target.closest("[data-start]");

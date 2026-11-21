@@ -124,11 +124,20 @@ class Config:
 
 # ============================================================ which folder to open
 
+def obsidian_config_dir(platform: str | None = None) -> Path:
+    """Where Obsidian keeps its own settings on this kind of computer."""
+    platform = platform or sys.platform
+    if platform == "win32":
+        return Path(os.environ.get("APPDATA", "")) / "obsidian"
+    if platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "obsidian"
+    return Path.home() / ".config" / "obsidian"
+
+
 def obsidian_vaults(config_file: Path | None = None) -> list[Path]:
     """Vaults Obsidian knows about on this machine, most recently used first."""
     if config_file is None:
-        base = Path(os.environ.get("APPDATA", "")) if sys.platform == "win32" else Path.home() / ".config"
-        config_file = base / "obsidian" / "obsidian.json"
+        config_file = obsidian_config_dir() / "obsidian.json"
     try:
         vaults = json.loads(Path(config_file).read_text(encoding="utf-8")).get("vaults", {})
     except (OSError, ValueError, AttributeError):
@@ -175,6 +184,41 @@ def pythonw_executable() -> str:
     exe = Path(sys.executable)
     windowless = exe.with_name("pythonw.exe")
     return str(windowless if windowless.exists() else exe)
+
+
+def mac_app_bundle() -> Path | None:
+    """Cairn.app, when this copy was started from it (docs/mac-install.sh makes it)."""
+    bundle = os.environ.get("CAIRN_APP_BUNDLE", "")
+    return Path(bundle) if sys.platform == "darwin" and bundle and Path(bundle).is_dir() else None
+
+
+def restart_command(visible: bool) -> list[str]:
+    """How Cairn starts itself again after an update."""
+    bundle = mac_app_bundle()
+    if bundle:  # through Cairn.app, so the Dock keeps showing Cairn and not a bare Python
+        return ["open", "-n", str(bundle), *([] if visible else ["--args", "--hidden"])]
+    return [pythonw_executable(), str(APP_ROOT / "Cairn.pyw"), *([] if visible else ["--hidden"])]
+
+
+def reopen_from_dock(show) -> None:
+    """macOS: a click on Cairn in the Dock (or opening Cairn.app again) brings a closed window back.
+
+    Closing the window only hides it, as on Windows, and macOS then tells the app it was "reopened".
+    pywebview has no answer to that, so one is added to its app delegate.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import objc
+        from webview.platforms.cocoa import BrowserView
+
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, application, has_visible_windows):
+            threading.Thread(target=show, daemon=True).start()
+            return False  # shown here; macOS need not do anything more
+
+        objc.classAddMethods(BrowserView.AppDelegate, [applicationShouldHandleReopen_hasVisibleWindows_])
+    except Exception as error:  # the menu-bar icon still opens the window
+        log(f"a Dock click will not reopen the window: {error}")
 
 
 def autostart_command(launcher: Path | None = None) -> str:
@@ -1158,11 +1202,8 @@ class DesktopApp:
         finally:
             self.instance.release()
         if self.restart_requested:
-            args = [pythonw_executable(), str(APP_ROOT / "Cairn.pyw")]
-            if not self.restart_visible:
-                args.append("--hidden")
             subprocess.Popen(
-                args,
+                restart_command(self.restart_visible),
                 cwd=str(APP_ROOT),
                 creationflags=NO_WINDOW,
             )
@@ -1216,6 +1257,7 @@ class DesktopApp:
         )
         self.window.events.closing += self.on_closing
         self.window.events.shown += self.set_icon
+        reopen_from_dock(self.show_window)
         self.tray = self.build_tray()
         self.tray.run_detached()
         for loop in (self.watch_show_requests, self.sync_loop, self.update_loop, self.vibe_watch_loop, self.phone_loop):

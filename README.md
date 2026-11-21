@@ -148,7 +148,20 @@ Cairn in its own window. After that, everything happens inside the app:
 window around the same web app, see [`android/`](android/README.md)), or open the page in Chrome and choose
 *Install app*. On a phone Cairn opens the brain you keep on GitHub, or pairs with the desktop app by QR code.
 
-**On a Mac** there is no download yet: use the terminal (1) or the browser (2) below.
+**Desktop app for Mac.** Open Terminal and paste this:
+
+```
+curl -fsSL https://juw12.github.io/cairn/mac-install.sh | bash
+```
+
+It runs [`mac-install.sh`](https://juw12.github.io/cairn/mac-install.sh): no admin rights and no password. It gets
+a Python of Cairn's own (your other Pythons are left alone), Cairn and the window libraries, puts **Cairn.app** in
+`~/Applications` and opens it. The app is the same one as on Windows: your notes open by themselves, one Sync
+button, and it updates itself. Closing the window keeps Cairn in the menu bar; a click on its Dock icon brings the
+window back. Because the app is made on your Mac and not downloaded, macOS does not ask whether you trust it. Not
+there yet on a Mac: starting at login, and keeping the Mac awake for a paired phone. Checked on an Intel Mac with
+macOS 15; Apple silicon uses the same script and has not been run yet. To remove it, delete
+`~/Applications/Cairn.app` and `~/Library/Application Support/Cairn` (your notes are in neither).
 
 **1. Local app from the terminal.** Python 3.13+, no dependencies:
 

@@ -359,6 +359,54 @@ class FirstRunTests(unittest.TestCase):
         self.assertEqual(desktop.obsidian_vaults(listing), [newer, older])
         self.assertEqual(desktop.obsidian_vaults(self.tmp / "missing.json"), [])
 
+    def test_obsidian_settings_are_looked_for_where_each_system_keeps_them(self):
+        home = Path.home()
+        self.assertEqual(desktop.obsidian_config_dir("darwin"), home / "Library" / "Application Support" / "obsidian")
+        self.assertEqual(desktop.obsidian_config_dir("linux"), home / ".config" / "obsidian")
+        with mock.patch.dict("os.environ", {"APPDATA": str(self.tmp)}):
+            self.assertEqual(desktop.obsidian_config_dir("win32"), self.tmp / "obsidian")
+
+    def test_a_mac_restarts_through_cairn_app(self):
+        bundle = self.tmp / "Cairn.app"
+        bundle.mkdir()
+        with mock.patch.object(desktop.sys, "platform", "darwin"), mock.patch.dict("os.environ", {"CAIRN_APP_BUNDLE": str(bundle)}):
+            self.assertEqual(desktop.mac_app_bundle(), bundle)
+            self.assertEqual(desktop.restart_command(True), ["open", "-n", str(bundle)])
+            self.assertEqual(desktop.restart_command(False), ["open", "-n", str(bundle), "--args", "--hidden"])
+        with mock.patch.object(desktop.sys, "platform", "darwin"), mock.patch.dict("os.environ", {"CAIRN_APP_BUNDLE": str(self.tmp / "gone.app")}):
+            self.assertIsNone(desktop.mac_app_bundle(), "a bundle that was moved away is not started")
+        with mock.patch.object(desktop.sys, "platform", "win32"), mock.patch.dict("os.environ", {"CAIRN_APP_BUNDLE": str(bundle)}):
+            command = desktop.restart_command(False)
+            self.assertEqual(command[1:], [str(desktop.APP_ROOT / "Cairn.pyw"), "--hidden"])
+            self.assertEqual(desktop.restart_command(True)[1:], [str(desktop.APP_ROOT / "Cairn.pyw")])
+
+    def test_the_mac_installer_is_whole(self):
+        root = desktop.APP_ROOT
+        script = (root / "docs" / "mac-install.sh").read_text(encoding="utf-8")
+        for needed in desktop.DEPENDENCIES:
+            self.assertIn(needed, script, f"the Mac installer leaves out {needed}")
+        self.assertIn("Cairn.pyw", script)
+        self.assertIn("CAIRN_APP_BUNDLE", script, "the launcher tells Cairn which app it was started from")
+        self.assertIn("scripts/mac_icon.py", script)
+        self.assertTrue((root / "scripts" / "mac_icon.py").is_file())
+        program = root / "mac" / "cairn-launcher"
+        self.assertIn("mac/cairn-launcher", script, "Cairn.app's program is the one that runs Cairn inside the app")
+        self.assertTrue(program.is_file(), "the installer copies mac/cairn-launcher into Cairn.app")
+        self.assertIn(program.read_bytes()[:4], (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"), "one file for both chips")
+        source = (root / "mac" / "launcher.c").read_text(encoding="utf-8")
+        for needed in ("Py_BytesMain", "CAIRN_APP_BUNDLE", "__PYVENV_LAUNCHER__", "cairn-paths.txt"):
+            self.assertIn(needed, source)
+        self.assertIn("cairn-paths.txt", script)
+        self.assertNotIn("sudo", script, "the Mac installer never asks for a password")
+        self.assertNotIn("\r", script, "a script with Windows line endings does not run on a Mac")
+        line = "curl -fsSL https://juw12.github.io/cairn/mac-install.sh | bash"
+        self.assertIn(line, script)
+        self.assertIn(line, (root / "README.md").read_text(encoding="utf-8"))
+        self.assertIn(line, (root / "docs" / "welcome.js").read_text(encoding="utf-8"))
+        if shutil.which("bash"):
+            checked = subprocess.run(["bash", "-n", str(root / "docs" / "mac-install.sh")], capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
     def test_default_folder_prefers_last_then_vault_then_documents(self):
         config = desktop.Config(self.tmp / "config.json")
         vault = self.tmp / "vault"
