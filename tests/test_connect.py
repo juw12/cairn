@@ -146,6 +146,18 @@ class ConnectTests(ConnectCase):
         self.assertEqual(connect.set_write_folder(self.brain, "", self.settings), "")
         self.assertEqual(connect.write_folder_for(self.brain, self.settings), "")
 
+    def test_the_scripts_get_a_python_with_a_console(self):
+        # The Windows desktop app runs on pythonw.exe, which has no console to print a search to.
+        folder = self.tmp / "Python313"
+        folder.mkdir()
+        (folder / "pythonw.exe").write_bytes(b"")
+        with mock.patch.object(sys, "executable", str(folder / "pythonw.exe")):
+            self.assertEqual(connect.script_python(), str(folder / "pythonw.exe"))  # no python.exe beside it: keep it
+            (folder / "python.exe").write_bytes(b"")
+            self.assertEqual(connect.script_python(), str(folder / "python.exe"))
+        with mock.patch.object(sys, "executable", str(folder / "python.exe")):
+            self.assertEqual(connect.script_python(), str(folder / "python.exe"))
+
     def test_every_file_the_skill_needs_ships_with_cairn(self):
         for name in ("SKILL.md", *connect.COPIED):
             self.assertTrue((connect.SOURCE / name).is_file(), name)
@@ -210,6 +222,35 @@ class SkillScriptsTests(ConnectCase):
         self.assertEqual(again.returncode, 1)
         self.assertIn("already exists", again.stderr)
         self.assertIn("Check twice.", (self.brain.dir / new[1]).read_text(encoding="utf-8"))
+
+    def test_the_check_reads_the_git_remote_and_the_scripts_leave_no_files_behind(self):
+        def git(*args):
+            subprocess.run(["git", "-C", str(self.brain.root), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                           check=True, capture_output=True)
+
+        remote = self.tmp / "remote.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True, capture_output=True)
+        git("init", "-q", "-b", "main")
+        git("remote", "add", "origin", str(remote))
+        git("add", "-A")
+        git("commit", "-q", "-m", "first")
+        git("push", "-q", "-u", "origin", "main")
+        self.connect("vector")
+
+        saved = self.run_script("remember.py", "note", "Remote check", "--body", "Saved, not sent yet.")
+        self.assertEqual(saved.returncode, 0, saved.stderr)
+        self.assertIn("not committed yet", saved.stdout)
+        self.assertIn(f"Copy on the git remote: {remote}", saved.stdout)
+        self.assertIn("0 commit(s) not sent; 1 changed file(s) waiting", saved.stdout)
+        git("add", "-A")
+        git("commit", "-q", "-m", "second")
+        checked = self.run_script("remember.py", "check")
+        self.assertIn("1 commit(s) not sent; 0 changed file(s) waiting", checked.stdout)
+
+        self.run_script("recall.py", "search", "remote check")
+        self.assertEqual(sorted(path.name for path in self.vector_skill.iterdir()),
+                         sorted(["SKILL.md", "recall.py", "remember.py", "common.py", "config.json", connect.MARKER]))
+        self.assertEqual(self.connect("vector"), {"vector": "unchanged"})
 
     def test_a_secret_is_refused(self):
         self.connect("vector")

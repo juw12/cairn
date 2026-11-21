@@ -667,6 +667,7 @@ cairn list --type task --status doing
 cairn todos                              # TODO/FIXME/HACK comments in the code
 cairn context                            # write brain/CONTEXT.md
 cairn mcp                                # MCP server for Claude, Cursor, Copilot, OpenCode (--print-config, --read-only)
+cairn connect                            # make this brain the memory of the AI apps on this computer (--status, --remove, --off)
 cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ and sync both ways
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
@@ -719,6 +720,31 @@ Read brain/CONTEXT.md before starting. Decisions in brain/decisions/ marked "acc
 ```
 
 `CONTEXT.md` also has a short **Lately** section with the last three days of the journal, so the assistant knows what you were just doing.
+
+### Give your AI app a memory, with nothing to set up
+
+A new chat starts knowing nothing about you. With Cairn on the computer it starts with your brain: Cairn puts a small
+skill, `cairn-memory`, where the AI app reads skills. The skill tells a new chat to search the brain before it answers
+or asks you something you already answered, and to save what the next chat will need. Two scripts in it, `recall.py`
+and `remember.py`, do both through Cairn's own tools. No account, no server, no key.
+
+- **Vector is connected by itself**, each time Cairn opens (`cairn serve` and the desktop app). Nothing to run.
+- **Claude Code, OpenCode and Codex** are connected when you name them, because they also run unattended jobs where
+  "search the brain when a chat starts" would cost every run.
+
+```bash
+cairn connect --status                   # what is connected; changes nothing
+cairn connect claude                     # connect one app by name (vector, claude, opencode, codex)
+cairn connect                            # every one of them that is installed
+cairn connect --write-folder devices/laptop   # this computer saves memory only in that folder of a shared brain
+cairn connect --remove vector            # take it out again
+cairn connect --off                      # stop connecting by itself (--on turns it back on)
+```
+
+What it will not do: make a folder for an app that is not installed, touch a `cairn-memory` skill you wrote yourself,
+or move the skill to another brain just because you opened that brain (only `cairn connect` by hand does that).
+`remember.py` never overwrites a note and refuses text that looks like a password, key or token. The files it puts
+there are replaced when Cairn updates, so change the skill in Cairn, not in the app's folder.
 
 ### Connect your AI assistant (MCP)
 
