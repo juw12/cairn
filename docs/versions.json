@@ -6,13 +6,13 @@
       "date": "2026-11-21",
       "title": "Messages between computers leave at once, and a phone takes part",
       "changes": [
-        "A message for another computer leaves the moment it is written, where the brain syncs by itself: the desktop app with automatic sync on, or a brain whose repository names a sync command (git config cairn.sync). While the app is open it asks the remote every 20 seconds whether something new is there, so the other computer's message shows on Today without a reload. Before, a message waited for the next round, up to 10 minutes",
-        "From a terminal the same: cairn handoff send and an answer say whether they were sent now, and cairn handoff fetches before it lists. Without the setting nothing is pushed for you and the command says the message goes with the next sync",
-        "A phone and the web app take part. They go by a name kept in that browser (Phone until you press Rename), a message can be for that name, and they pick up, finish and close like a computer. Before, they could only read and answer",
-        "Close for everyone: any device can call a conversation off for all of them, in the app and with cairn handoff close",
-        "The order no longer depends on the clocks. A message carries the same moment in UTC and names the message it follows, so two time zones read the same order and an answer never shows before what it answers",
-        "Assistants reach it without a terminal: cairn mcp has handoffs, handoff_send and handoff_answer, and the memory skill that Cairn puts into your AI app looks at what another computer left when a chat starts",
-        "Pages open on a computer now show notes that arrived through a sync made outside Cairn (a script, a pull in a terminal) within seconds"
+        "A message for another computer leaves the moment it is written, where the brain syncs by itself: the desktop app with automatic sync on, or a brain whose repository names a sync command (git config cairn.sync). While the app is open it asks the remote every 20 seconds whether something new is there, so the other computer's message shows on Today without a reload. Before, a message waited for the next round, up to 10 minutes (#79)",
+        "From a terminal the same: cairn handoff send and an answer say whether they were sent now, and cairn handoff fetches before it lists. Without the setting nothing is pushed for you and the command says the message goes with the next sync (#79)",
+        "A phone and the web app take part. They go by a name kept in that browser (Phone until you press Rename), a message can be for that name, and they pick up, finish and close like a computer. Before, they could only read and answer (#79)",
+        "Close for everyone: any device can call a conversation off for all of them, in the app and with cairn handoff close (#79)",
+        "The order no longer depends on the clocks. A message carries the same moment in UTC and names the message it follows, so two time zones read the same order and an answer never shows before what it answers (#79)",
+        "Assistants reach it without a terminal: cairn mcp has handoffs, handoff_send and handoff_answer, and the memory skill that Cairn puts into your AI app looks at what another computer left when a chat starts (#79)",
+        "Pages open on a computer now show notes that arrived through a sync made outside Cairn (a script, a pull in a terminal) within seconds (#79)"
       ]
     },
     {
