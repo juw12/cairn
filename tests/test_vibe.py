@@ -110,6 +110,38 @@ class VibeCliTests(unittest.TestCase):
         self.assertEqual(stats["skills"], {"/refine": 1, "/council": 1})
         self.assertIn("/refine x1", run_cli(self.root, "vibe", "status")[1])
 
+    def test_a_step_without_a_named_session_never_lands_in_another_computers_session(self):
+        """Two computers share the brain. The other one's session is the newest live one; a log here
+        that names no session used to be written into it, and this computer's sync then stopped."""
+        with mock.patch.dict(os.environ, {"CAIRN_DEVICE": "Desk PC"}):
+            run_cli(self.root, "vibe", "start", "Lab run on the desk PC")
+        theirs = next(n for n in self.brain.notes() if n["type"] == "session")
+        before = self.brain.read(theirs["path"])["text"]
+        with mock.patch.dict(os.environ, {"CAIRN_DEVICE": "Laptop"}):
+            for step in (("log", "a step taken on the laptop"), ("skill", "/hone 9/9"), ("end", "--result", "shipped")):
+                code, _, err = run_cli(self.root, "vibe", *step)
+                self.assertEqual(code, 2, step)
+                self.assertIn("No live session on this computer (1 on other computers", err)
+            self.assertEqual(self.brain.read(theirs["path"])["text"], before, "the other computer's note is not touched")
+            run_cli(self.root, "vibe", "start", "Fix on the laptop")
+            self.assertEqual(run_cli(self.root, "vibe", "log", "a step taken on the laptop")[0], 0)
+            by_title = {n["title"]: n for n in self.brain.notes() if n["type"] == "session"}
+            self.assertIn("a step taken on the laptop", by_title["Fix on the laptop"]["body"])
+            self.assertEqual(self.brain.read(theirs["path"])["text"], before)
+            # named, it can still be written to: that is asked for, not an accident
+            self.assertEqual(run_cli(self.root, "vibe", "log", "said from the laptop", "--session", theirs["slug"])[0], 0)
+            self.assertIn("said from the laptop", self.brain.read(theirs["path"])["text"])
+        with mock.patch.dict(os.environ, {"CAIRN_DEVICE": "Desk PC"}):  # and the desk PC still finds its own, older one
+            self.assertEqual(run_cli(self.root, "vibe", "log", "next lab step")[0], 0)
+            self.assertIn("next lab step", self.brain.read(theirs["path"])["text"])
+
+    def test_a_session_that_names_no_computer_is_this_computers(self):
+        self.brain.init()
+        old = {"title": "Before computers were named", "type": "session", "status": "live", "tags": [], "created": "2026-01-02", "started": "2026-01-02T09:00"}
+        self.brain.write("sessions/2026-01-02-before.md", core.serialize_note(old, "## Log\n\n- 09:00 start: Before\n"), None)
+        self.assertEqual(run_cli(self.root, "vibe", "log", "still written to")[0], 0)
+        self.assertIn("still written to", self.brain.read("sessions/2026-01-02-before.md")["text"])
+
     def test_log_without_a_live_session_explains(self):
         code, _, err = run_cli(self.root, "vibe", "log", "hello")
         self.assertEqual(code, 2)

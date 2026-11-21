@@ -97,13 +97,26 @@ def live_sessions(brain: Brain) -> list[dict]:
     return sorted(live, key=lambda n: (str(n["meta"].get("started", "")), n["path"]))
 
 
+def elsewhere(note: dict) -> bool:
+    """True for a session another computer runs (its `machine` names a different one). A note with no
+    `machine` is from before computers were named and counts as this computer's."""
+    owner = str(note["meta"].get("machine", "")).strip()
+    return bool(owner) and owner != machine.device_name()
+
+
 def live_session(brain: Brain, slug: str = "") -> dict | None:
-    """The session to write to: `slug` (or $CAIRN_SESSION) if given, else the newest live one."""
+    """The session to write to: `slug` (or $CAIRN_SESSION) if given, else the newest live one of this computer.
+
+    Never another computer's unless it is named. A brain that several computers share holds their live
+    sessions too, and a line written into one of those is an edit to a note its own computer keeps
+    writing: the two edits meet on the remote, and a computer whose sync leaves other computers' notes
+    alone can then not take the remote's copy until somebody sorts it out by hand."""
     live = live_sessions(brain)
     wanted = (slug or os.environ.get("CAIRN_SESSION", "")).strip().removesuffix(".md").rsplit("/", 1)[-1]
     if wanted:
         return next((n for n in live if n["slug"] == wanted), None)
-    return live[-1] if live else None
+    here = [n for n in live if not elsewhere(n)]
+    return here[-1] if here else None
 
 
 def _reopen(brain: Brain, slug: str) -> dict | None:
@@ -143,6 +156,11 @@ def _require_live(brain: Brain, slug: str = "") -> dict:
         if session:
             return session
         raise VibeError(f"No live session called {wanted!r}. Live now: {', '.join(n['slug'] for n in live_sessions(brain)) or 'none'}")
+    others = len(live_sessions(brain))
+    if others:  # live ones there are, on other computers: say so, instead of writing into one of theirs
+        raise VibeError(
+            f'No live session on this computer ({others} on other computers; name one with --session to write to it). '
+            'Start one with: cairn vibe start "what you are building"')
     raise VibeError('No live session. Start one with: cairn vibe start "what you are building"')
 
 

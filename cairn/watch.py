@@ -655,8 +655,7 @@ def elsewhere(note: dict) -> bool:
     """True for a session another computer wrote (its `machine` names a different one). Two computers can
     share a brain: each watcher ends only its own sessions, since it cannot see the other's apps or database.
     A note with no `machine` is from before computers were named and is treated as this one's."""
-    owner = str(note["meta"].get("machine", "")).strip()
-    return bool(owner) and owner != machine.device_name()
+    return vibe.elsewhere(note)  # the same question `cairn vibe log` asks before it writes
 
 
 def close_missing_opencode(brain: Brain, seen_ids, now_ms: int, idle_minutes: int = IDLE_MINUTES) -> int:
