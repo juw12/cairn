@@ -78,6 +78,8 @@ export const state = {
   tabs: null,
   lastTab: null,
   closedTabs: [],
+  // page: the build of the files this page loaded. newest: a later build the site serves now (0 while none).
+  build: { page: 0, newest: 0 },
 };
 
 export const readOnly = () => Boolean(state.info?.readOnly);

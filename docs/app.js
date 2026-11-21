@@ -181,6 +181,9 @@ export function renderSidebarFoot() {
         ? `<button class="btn sm ghost" data-action="settings">${icon("gear", "sm")} Settings</button>`
         : `<a class="btn sm ghost" href="${REPO_URL}" data-github target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>`}
     </div>
+    ${state.build.newest > state.build.page
+      ? `<button class="btn sm primary foot-update" data-action="update-now" title="Reload Cairn into the newest build. Nothing you typed is lost.">${icon("refresh", "sm")} Update to build ${state.build.newest}</button>`
+      : ""}
     <button class="btn sm ghost foot-versions" data-action="versions" title="Every build and what changed">${icon("history", "sm")} Version history</button>`);
   $("#sidebar-foot").innerHTML = parts.join("");
 }
@@ -440,6 +443,7 @@ function wireGlobal() {
       sync: syncBrain,
       settings: openSettings,
     versions: openVersions,
+    "update-now": () => applyUpdate({ now: true }),
       "switch-brain": switchBrain,
       "obsidian-sync": () => syncObsidian(),
       "obsidian-unlink": unlinkObsidian,
@@ -858,7 +862,10 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
   const hadWorker = Boolean(navigator.serviceWorker.controller);
   let reloading = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (!hadWorker || reloading) return;
+    // A page that was open for the very first install has no old version to leave. It still looks whether a
+    // newer build is out: before, such a page ignored every later update for as long as it stayed open.
+    if (!hadWorker) return void lookForUpdate();
+    if (reloading) return;
     reloading = true;
     applyUpdate();
   });
@@ -900,6 +907,53 @@ function takeUpdateNote() {
   }
 }
 
+// ---- a newer build, found by the page itself
+// A service worker's own update can be slow or silent, most of all in a phone's home-screen app, and it never
+// says anything. So the page also looks for itself: versions.json as the page starts is the build it runs, and
+// the same file later (each time Cairn comes back to the front, and every ten minutes while it stays there) is
+// the newest build the site serves. A newer one is said out loud with an Update now button, the sidebar offers
+// it until it is taken, and it is taken by the usual rule: at once when you were away, otherwise when you pause.
+// The desktop app has its own updater and is left to it.
+let announcedBuild = 0;
+
+async function servedBuild() {
+  try {
+    const response = await fetch("versions.json", { cache: "no-store" });
+    if (!response.ok) return 0;
+    return Number((await response.json()).releases?.[0]?.build) || 0;
+  } catch {
+    return 0; // offline: nothing newer can be known, and nothing is offered
+  }
+}
+
+async function lookForUpdate() {
+  const build = await servedBuild();
+  if (!build) return "unknown";
+  if (!state.build.page) {
+    state.build.page = build;
+    return "current";
+  }
+  if (build <= state.build.page || state.info?.desktop) return "current";
+  state.build.newest = build;
+  if ($("#app") && !$("#app").hidden) renderSidebarFoot();
+  // The worker takes the new files too, so the next start without a network has them.
+  navigator.serviceWorker?.getRegistration?.().then((registration) => registration?.update()).catch(() => {});
+  if (announcedBuild !== build) {
+    announcedBuild = build;
+    toast(`Cairn build ${build} is ready.`, { action: { label: "Update now", run: () => applyUpdate({ now: true }) } });
+  }
+  applyUpdate();
+  return "newer";
+}
+
+lookForUpdate();
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) lookForUpdate();
+});
+setInterval(() => {
+  if (!document.hidden) lookForUpdate();
+}, window.CAIRN_UPDATE_LOOK_MS ?? 10 * 60 * 1000);
+
 function readyForUpdate(restart) {
   if (document.hidden) return true;
   const idleMs = window.CAIRN_UPDATE_IDLE_MS ?? (restart ? 120_000 : 30_000);
@@ -907,9 +961,10 @@ function readyForUpdate(restart) {
   return !document.querySelector(".modal-wrap, .palette-wrap, .tour, .link-suggest");
 }
 
-async function applyUpdate({ restart = false } = {}) {
+// now: you pressed Update now, so there is no waiting for a pause.
+async function applyUpdate({ restart = false, now = false } = {}) {
   clearTimeout(updateTimer);
-  if (!readyForUpdate(restart)) {
+  if (!now && !readyForUpdate(restart)) {
     updateTimer = setTimeout(() => applyUpdate({ restart }), window.CAIRN_UPDATE_RETRY_MS ?? 15_000);
     return "waiting";
   }
@@ -932,5 +987,5 @@ async function applyUpdate({ restart = false } = {}) {
 
 // reload(): the desktop app calls this after a background sync brought in someone else's edits.
 // pairPhone(): the tray's "Pair a phone" opens the QR code.
-window.cairn = { state, core, rerender: () => renderView(), reload: () => reloadBrain(), applyUpdate, pairPhone: () => openPairPhone() };
+window.cairn = { state, core, rerender: () => renderView(), reload: () => reloadBrain(), applyUpdate, lookForUpdate, pairPhone: () => openPairPhone() };
 boot();

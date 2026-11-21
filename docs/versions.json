@@ -2,6 +2,17 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 97,
+      "date": "2026-11-21",
+      "title": "A phone takes a new build at once, and says which build it runs",
+      "changes": [
+        "Cairn now looks for a newer build by itself, each time it comes back to the front and every ten minutes while it stays open. Before, only the browser’s background worker looked, which on a phone’s home-screen app can be slow and never says anything",
+        "A newer build is said out loud (“Cairn build 97 is ready”) with an Update now button, and the menu shows “Update to build 97” until it is taken. Coming back to Cairn after a while takes it at once; while you are busy it waits for a pause, as before",
+        "Version history names the build this page really runs. A page left open since yesterday used to say it was on the newest build while still running the old one. It now says which build it is on and offers the newer one with Update now",
+        "A page that was open during the very first install used to ignore every later update for as long as it stayed open. It no longer does"
+      ]
+    },
+    {
       "build": 96,
       "date": "2026-11-21",
       "title": "Cairn Pro: the Autopilot takes more than one goal with a licence key",
@@ -23,7 +34,7 @@
         "Each computer that syncs with the brain is found by itself, from the machine named on the session notes and from the notes in machines/. A row of chips picks all computers or one; nothing lists the computers by hand",
         "A day opens to show each computer on its own: the hours it was in use, its load, and the log of the tasks asked that day, each one opening its session note",
         "cairn vibe watch now notes the day's use of the computer it runs on in machines/<name>-activity.md, about every 30 minutes: minutes at the screen (a key or the mouse within the last 2 minutes), minutes awake, processor and memory average and peak, and the minutes in each hour. Windows and macOS; 120 days are kept; --no-laptop turns it off with the load note",
-    "The computer is looked at once a minute on a thread of its own, so a pass that takes minutes over a big brain does not lose the time in between",
+        "The computer is looked at once a minute on a thread of its own, so a pass that takes minutes over a big brain does not lose the time in between",
         "Not in this build: a computer's screen time and load start on the day its own Cairn has this build. Its earlier days show the tasks only. A phone has no watcher, so it has no row"
       ]
     },

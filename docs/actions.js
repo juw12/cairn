@@ -416,20 +416,27 @@ export async function openVersions() {
     toast("The version history could not be read.", { error: true });
     return;
   }
-  const current = releases[0];
+  // The build this page runs is the one read when the page started, not the newest in the list: a page that
+  // has been open since yesterday (a phone's home-screen app) runs yesterday's build, and must say so.
+  const current = releases.find((release) => release.build === state.build.page) || releases[0];
+  const newest = releases[0];
   const first = releases[releases.length - 1];
+  const behind = newest.build > current.build
+    ? `<p class="ver-newer"><strong>Build ${newest.build} is out</strong> (${esc(newest.title)}). <button type="button" class="btn sm primary" data-action="update-now">${icon("refresh", "sm")} Update now</button></p>`
+    : "";
   modal(`
     <div class="modal versions" role="dialog" aria-modal="true" aria-labelledby="versions-title">
       <h2 id="versions-title">Version history</h2>
       <p>You are on build ${current.build} from ${versionDate(current.date)}. ${plural(releases.length, "build")} since ${versionDate(first.date)}.</p>
+      ${behind}
       <div class="ver-list">
-        ${releases.map((release, index) => `
-        <details class="ver"${index === 0 ? " open" : ""}>
+        ${releases.map((release) => `
+        <details class="ver"${release === current ? " open" : ""}>
           <summary>
             <span class="ver-build">Build ${release.build}</span>
             <span class="ver-date">${versionDate(release.date)}</span>
             <span class="ver-title">${esc(release.title)}</span>
-            ${index === 0 ? `<span class="pill">This version</span>` : `<span class="ver-count">${plural(release.changes.length, "change")}</span>`}
+            ${release === current ? `<span class="pill">This version</span>` : `<span class="ver-count">${plural(release.changes.length, "change")}</span>`}
           </summary>
           <ul>${release.changes.map((change) => `<li>${versionChange(change)}</li>`).join("")}</ul>
         </details>`).join("")}
