@@ -318,11 +318,12 @@ class Handler(BaseHTTPRequestHandler):
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
 
     def _cloud_sync(self):
-        """POST /api/cloud/sync {repos?}: send the backup to the cloud drive now, in the background. The page
-        follows it through /api/vibe. Only on the computer itself, and only once `cairn cloud setup` has run."""
+        """POST /api/cloud/sync {repos?}: send the backup to the cloud drive now, in the background: the brain,
+        and with repos true the repos that were pushed since too. The page follows it through /api/vibe. Only on
+        the computer itself, and only once `cairn cloud setup` has run."""
         try:
             body = self._body()
-            cloud_backup.start(self.brain, True if body.get("repos") is True else None)
+            cloud_backup.start(self.brain, body.get("repos") is True)
         except (cloud_backup.CloudError, ValueError) as error:
             return self._error(HTTPStatus.BAD_REQUEST, str(error))
         self._send_json(cloud_backup.status())

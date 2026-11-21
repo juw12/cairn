@@ -118,6 +118,22 @@ def stop_window(started: bool) -> None:
         subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True)
     else:
         subprocess.run(["pkill", "-f", f"user-data-dir={profile()}"], capture_output=True)
+    time.sleep(3)
+    trim_profile()
+
+
+# What Chrome keeps to be quick next time, and fetches again when it is gone. Hundreds of MB after a few runs.
+# The sign-in is not in these.
+CACHES = ("Default/Cache", "Default/Code Cache", "Default/GPUCache", "Default/DawnGraphiteCache", "Default/DawnWebGPUCache",
+          "Default/Service Worker/CacheStorage", "Default/Service Worker/ScriptCache", "GrShaderCache", "ShaderCache",
+          "GraphiteDawnCache", "Crashpad", "component_crx_cache", "extensions_crx_cache", "optimization_guide_model_store",
+          "OptGuideOnDeviceModel", "Safe Browsing", "screen_ai", "WasmTtsEngine", "hyphen-data", "ZxcvbnData",
+          "OnDeviceHeadSuggestModel", "BrowserMetrics", "segmentation_platform", "SODA", "SODALanguagePacks")
+
+
+def trim_profile() -> None:
+    for name in CACHES:
+        shutil.rmtree(profile() / name, ignore_errors=True)
 
 
 def the_page(playwright):

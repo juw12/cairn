@@ -414,6 +414,19 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(cloud_terabox.renamed_twin("HOW-TO-RESTORE.txt", 975, remote), "HOW-TO-RESTORE_20261122_004953.txt")
         self.assertEqual(cloud_terabox.not_right(local, remote), ["CONTENTS.json", "brain.7z"])  # another size, another pattern
 
+    def test_after_a_run_the_profile_keeps_the_sign_in_and_drops_what_chrome_fetches_again(self):
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        with mock.patch.dict(os.environ, {"CAIRN_HOME": str(home), "CAIRN_TERABOX_PROFILE": ""}):
+            profile = cloud_terabox.profile()
+            self.assertEqual(profile, home / "cloud-backup" / "chrome")
+            for folder in ("Default/Cache/Cache_Data", "Default/Code Cache/js", "component_crx_cache", "Default/Network"):
+                (profile / folder).mkdir(parents=True)
+                (profile / folder / "file").write_bytes(b"x" * 10)
+            cloud_terabox.trim_profile()
+            left = sorted(path.relative_to(profile).as_posix() for path in profile.rglob("file"))
+        self.assertEqual(left, ["Default/Network/file"])  # where Chrome keeps the sign-in
+
     def test_it_answers_in_one_line_also_when_it_cannot_start(self):
         env = {**os.environ, "CAIRN_HOME": tempfile.mkdtemp(), "CAIRN_CHROME": "", "PATH": ""}
         for name in ("LOCALAPPDATA",):
@@ -544,7 +557,7 @@ class PageTests(CloudCase):
             page.wait_for_selector(".vibe-cloud .callout")
         self.assertIn("did not finish: TeraBox asks to sign in.", page.locator(".vibe-cloud .callout").inner_text())
         self.assertEqual(page.locator(".vibe-cloud button[disabled]").count(), 0)
-        self.assertEqual(ran, [None])
+        self.assertEqual(ran, [False])  # the first button is the brain alone; "With the repos" is the other one
         page.click('.vibe-panel[data-panel="cloud"] [data-action=vibe-panel-fold]')
         page.wait_for_selector('.vibe-panel.folded[data-panel="cloud"]')
         self.assertEqual(page.locator('.vibe-panel[data-panel="cloud"] .vp-sum').inner_text(), "the last run did not finish")
