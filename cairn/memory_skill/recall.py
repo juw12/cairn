@@ -6,6 +6,9 @@
     recall.py read "path, slug or title"
     recall.py recent [--days 7]
     recall.py brief                              one page: open tasks, decisions, ideas, latest log
+
+Add --cloud to read the newest copy on GitHub instead of the folder on this computer. Without a folder on
+this computer that happens by itself.
 """
 
 from __future__ import annotations
@@ -37,10 +40,44 @@ def rules(brain) -> str:
     return "\n".join(lines)
 
 
+def from_this_computer(options) -> str:
+    brain = common.open_brain()
+    if options.command == "rules":
+        return rules(brain)
+    if options.command == "search":
+        arguments = {"query": options.query, "limit": options.limit}
+        if options.type:
+            arguments["type"] = options.type
+        return common.call(brain, "search", arguments)
+    if options.command == "read":
+        return common.call(brain, "read_note", {"path": options.note})
+    if options.command == "recent":
+        return common.call(brain, "recent", {"days": options.days})
+    return common.call(brain, "context", {})
+
+
+def from_github(options) -> str:
+    import cloud
+
+    brain = common.open_cloud()
+    try:
+        if options.command == "rules":
+            return brain.rules(common.CONFIG.get("write_folder") or "")
+        if options.command == "search":
+            return brain.search(options.query, options.type, options.limit)
+        if options.command == "read":
+            return brain.read(options.note)
+        if options.command == "recent":
+            return brain.recent(options.days)
+        return brain.brief()
+    except cloud.CloudError as error:
+        raise SystemExit(str(error))
+
+
 def main(argv: list[str] | None = None) -> int:
-    common.use_cairns_python()
     common.plain_output()
     parser = argparse.ArgumentParser(prog="recall.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--cloud", action="store_true", help="read the newest copy on GitHub")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("rules")
     search = commands.add_parser("search")
@@ -52,22 +89,11 @@ def main(argv: list[str] | None = None) -> int:
     recent = commands.add_parser("recent")
     recent.add_argument("--days", type=int, default=7)
     commands.add_parser("brief")
+    for command in commands.choices.values():
+        command.add_argument("--cloud", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     options = parser.parse_args(argv)
 
-    brain = common.open_brain()
-    if options.command == "rules":
-        print(rules(brain))
-    elif options.command == "search":
-        arguments = {"query": options.query, "limit": options.limit}
-        if options.type:
-            arguments["type"] = options.type
-        print(common.call(brain, "search", arguments))
-    elif options.command == "read":
-        print(common.call(brain, "read_note", {"path": options.note}))
-    elif options.command == "recent":
-        print(common.call(brain, "recent", {"days": options.days}))
-    else:
-        print(common.call(brain, "context", {}))
+    print(from_github(options) if common.where(options.cloud) == "cloud" else from_this_computer(options))
     return 0
 
 

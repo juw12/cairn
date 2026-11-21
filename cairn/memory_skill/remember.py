@@ -7,6 +7,9 @@
 
 It never overwrites a note, and it refuses text that looks like a password, key or token.
 When this computer has its own folder in the brain, it writes only there.
+
+Add --cloud to save straight on GitHub instead of in the folder on this computer. Without a folder on this
+computer that happens by itself.
 """
 
 from __future__ import annotations
@@ -123,8 +126,38 @@ def check(brain, path: Path | None = None) -> bool:
     return fine
 
 
+def save_on_github(options, tags: list[str], body: str, today: str) -> int:
+    """No folder on this computer: the note is made on GitHub, where every device's Cairn picks it up."""
+    import cloud
+
+    brain = common.open_cloud(max_age=0)  # the newest list of notes, so a decision gets the next free number
+    folder = (common.CONFIG.get("write_folder") or "").strip("/")
+    kind = options.command
+    try:
+        relative = brain.new_path(kind, options.title, today, folder)
+        if folder:
+            tags = [Path(folder).name, *[tag for tag in tags if tag != Path(folder).name]]
+        text = cloud.note_text(options.title, kind, tags, body, today, "accepted" if kind == "decision" else "")
+        saved = brain.save(relative, text, f"brain: remember {options.title[:60]} [skip ci]")
+        size = brain.on_github(relative)
+    except cloud.CloudError as error:
+        raise SystemExit(str(error))
+    fine = size > 0
+    print(f"{'ok ' if fine else 'NO '} on GitHub: {brain.repo}/{relative} (commit {saved['commit']})")
+    print("     No copy was written to a brain folder on this computer; each device's Cairn gets it at its next sync.")
+    return 0 if fine else 1
+
+
+def check_github() -> int:
+    brain = common.open_cloud(max_age=0)
+    state = brain._state()
+    print(f"The brain is on GitHub: {brain.repo}, last change {state.get('committed') or 'unknown'} "
+          f"(commit {str(state.get('commit', ''))[:7]}).")
+    print(f"  {len(state.get('shas', {}))} notes are readable from this computer without a synced copy.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    common.use_cairns_python()
     common.plain_output()
     parser = argparse.ArgumentParser(prog="remember.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -140,11 +173,16 @@ def main(argv: list[str] | None = None) -> int:
     decision.add_argument("--consequences", default="")
     decision.add_argument("--tags", default="")
     commands.add_parser("check")
+    parser.add_argument("--cloud", action="store_true", help="save on GitHub, not in the folder on this computer")
+    for command in commands.choices.values():
+        command.add_argument("--cloud", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     options = parser.parse_args(argv)
 
-    brain = common.open_brain()
+    in_cloud = common.where(options.cloud) == "cloud"
     if options.command == "check":
-        check(brain)
+        if in_cloud:
+            return check_github()
+        check(common.open_brain())
         return 0
 
     tags = [tag.strip().lstrip("#") for tag in options.tags.split(",") if tag.strip().lstrip("#")]
@@ -155,6 +193,9 @@ def main(argv: list[str] | None = None) -> int:
         refuse_secrets(options.title, options.body)
         body = options.body.strip() + "\n"
     today = dt.date.today().isoformat()
+    if in_cloud:
+        return save_on_github(options, tags, body, today)
+    brain = common.open_brain()
     folder = common.write_folder(brain)
     if folder is not None:
         path = save_in_folder(brain, folder, options.command, options.title, tags, body, today)

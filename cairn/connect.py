@@ -12,6 +12,11 @@ Rules that keep this safe:
 * An app that is not installed is left alone: its home folder is never created.
 * A `cairn-memory` folder Cairn did not make is never touched (the marker file says who made it).
 * Opening a second brain does not take the skill away from the first; `cairn connect` by hand does.
+
+The cloud: a brain that is pushed to GitHub is also readable without its folder. The skill is told the repo, and
+when the folder is missing on this computer (never synced, deleted, a new computer) its scripts read the notes
+from GitHub and save new ones there. `cairn connect --cloud owner/repo` connects a computer that never had the
+folder at all.
 """
 
 from __future__ import annotations
@@ -19,7 +24,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,7 +35,7 @@ from .brain import Brain
 SKILL_NAME = "cairn-memory"
 MARKER = ".cairn-connect.json"
 SOURCE = Path(__file__).resolve().parent / "memory_skill"
-COPIED = ("recall.py", "remember.py", "common.py")
+COPIED = ("recall.py", "remember.py", "common.py", "cloud.py")
 OFF_SWITCH = "CAIRN_NO_CONNECT"
 
 # home: the folder that shows the app is installed. skills: where it reads personal skills.
@@ -53,6 +60,43 @@ FOLDER_RULES = (
 
 class ConnectError(ValueError):
     """The request cannot be done as asked; the message says why."""
+
+
+class RemoteBrain:
+    """A brain that is only on GitHub: this computer has no folder of it. Given as owner/repo, or
+    owner/repo/folder when the brain is a folder inside the repo."""
+
+    def __init__(self, spec: str):
+        text = (spec or "").strip().strip("/")
+        text = re.sub(r"^(https?://)?github\.com/", "", text).removesuffix(".git")
+        parts = text.split("/")
+        if len(parts) < 2 or not all(re.fullmatch(r"[\w.-]+", part) for part in parts):
+            raise ConnectError(f"--cloud takes a GitHub repo as owner/name (got {spec!r}).")
+        self.repo = "/".join(parts[:2])
+        self.folder = "/".join(parts[2:])
+        self.dir = self.root = "github:" + "/".join(parts)
+
+
+def _git(folder, *arguments: str) -> str:
+    try:
+        done = subprocess.run(["git", "-C", str(folder), *arguments], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=20,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def cloud_of(brain) -> dict:
+    """The GitHub repo this brain is pushed to, when it has one: what the skill reads when the folder is gone."""
+    if isinstance(brain, RemoteBrain):
+        return {"repo": brain.repo, "folder": brain.folder, "branch": ""}
+    from .memory_skill.cloud import repo_of
+
+    name = repo_of(_git(brain.dir, "remote", "get-url", "origin"))
+    if not name:
+        return {}
+    return {"repo": name, "folder": _git(brain.dir, "rev-parse", "--show-prefix").strip("/"), "branch": ""}
 
 
 # ---------------------------------------------------------------- settings (one small file per computer)
@@ -129,16 +173,24 @@ def skill_files(brain: Brain, target: Path, write_folder: str = "") -> dict[str,
     """Every file of the skill as it should be in `target`, filled in for this brain and computer."""
     python = script_python()
     rules = FOLDER_RULES.format(folder=write_folder) if write_folder else SHARED_RULES
+    remote = isinstance(brain, RemoteBrain)
+    cloud = cloud_of(brain)
+    if remote:
+        place = f"on GitHub, `{cloud['repo']}`" + (f" (folder `{cloud['folder']}`)" if cloud["folder"] else "")
+        place += ". This computer has no folder of it: the scripts read and save on GitHub"
+    else:
+        place = f"at `{brain.dir}`"
     guide = (SOURCE / "SKILL.md").read_text(encoding="utf-8")
-    for token, value in (("{{BRAIN}}", str(brain.dir)), ("{{PYTHON}}", python), ("{{SKILL}}", target.as_posix()),
+    for token, value in (("{{BRAIN}}", place), ("{{PYTHON}}", python), ("{{SKILL}}", target.as_posix()),
                          ("{{WRITE_RULES}}", rules)):
         guide = guide.replace(token, value)
     config = {
-        "root": str(brain.root),
-        "brain": str(brain.dir),
+        "root": "" if remote else str(brain.root),
+        "brain": "" if remote else str(brain.dir),
         "python": python,
         "package_parent": str(Path(__file__).resolve().parent.parent),
         "write_folder": write_folder,
+        "cloud": cloud,
     }
     files = {"SKILL.md": guide, "config.json": json.dumps(config, indent=2) + "\n"}
     for name in COPIED:
@@ -291,7 +343,7 @@ def auto_connect(brain: Brain, home: Path | None = None, settings_folder: Path |
     if os.environ.get(OFF_SWITCH) or read_settings(settings_folder).get("auto") is False:
         return []
     try:
-        if not brain.dir.is_dir():
+        if isinstance(brain, RemoteBrain) or not brain.dir.is_dir():
             return []
         rows = connect(brain, auto=True, home=home, settings_folder=settings_folder)
     except Exception as error:  # a full disk or a locked file must not stop the app

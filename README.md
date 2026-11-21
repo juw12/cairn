@@ -741,6 +741,22 @@ cairn connect --remove vector            # take it out again
 cairn connect --off                      # stop connecting by itself (--on turns it back on)
 ```
 
+**The brain does not have to be on the computer.** A brain that is pushed to GitHub is the cloud copy, and the
+skill knows its repo. When the brain's folder is missing (a new computer, a wiped disk, a folder that was moved) the
+same two scripts work on GitHub by themselves and say so: they fetch the text of the notes once, then only what
+changed, and a note to remember is made on GitHub, where every device's Cairn picks it up. No clone, no Cairn open,
+and it runs even when Cairn's own code is gone (Python 3.9 or newer, nothing to install). It needs a GitHub sign-in
+on the computer: `gh auth login`, or the one git already uses.
+
+```bash
+cairn connect vector --cloud owner/repo  # a computer that never had the brain's folder: read and save on GitHub
+recall.py search "words" --cloud         # in the skill: the newest notes on GitHub, also when the folder is here
+```
+
+GitHub cannot search inside a private repo's notes, which is why the text is fetched: about 20 MB for 4,500 notes,
+half a minute the first time and a second or two after that. The fetched folder is under `~/.cairn/cloud/` and can
+be deleted at any time. Without a connection the last fetched notes still answer, and the script says how old they are.
+
 What it will not do: make a folder for an app that is not installed, touch a `cairn-memory` skill you wrote yourself,
 or move the skill to another brain just because you opened that brain (only `cairn connect` by hand does that).
 `remember.py` never overwrites a note and refuses text that looks like a password, key or token. The files it puts

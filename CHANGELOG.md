@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 91 (2026-11-21): Your AI app remembers from the cloud when the brain is not on the computer
+
+- The memory Cairn gives your AI app no longer depends on the brain's folder being on the computer. A brain that is pushed to GitHub is read from there when the folder is missing: a new computer, a wiped disk, a folder that was moved. The chat is told in the first line that the answer comes from GitHub
+- Something to remember is then saved on GitHub itself, and every device's Cairn picks it up at its next sync. It never replaces a note that is there, keeps a computer's own folder (--write-folder), and still refuses text that looks like a password, key or token
+- cairn connect vector --cloud owner/repo connects a computer that never had the brain's folder. No clone and no Cairn open: the text of the notes is fetched once (about 20 MB and half a minute for 4,500 notes), then only what changed (a second or two)
+- Add --cloud to a search or a save to use the newest notes on GitHub on purpose, for when Cairn on this computer has not synced yet
+- It works even when Cairn's own code is gone from the computer (Python 3.9 or newer, nothing to install), and without a connection the last fetched notes still answer, with their age said
+- It needs a GitHub sign-in on the computer (gh auth login, or the one git already uses). GitHub cannot search inside a private repo's notes, which is why their text is fetched; pictures and other files are not
+
 ## Build 89 (2026-11-21): Found on Google by what it does, not only by its name
 
 - Cairn in search results: the title and description now say what Cairn is in the words people type when they have never heard of it (open-source second brain, Markdown, Git repo, task board, decision log, journal), and the description search engines read lists the same
