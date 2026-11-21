@@ -2138,6 +2138,47 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .repo-patch .add { background: color-mix(in srgb, var(--journal) 16%, transparent); color: inherit; }
 .repo-patch .del { background: color-mix(in srgb, var(--danger) 14%, transparent); color: inherit; }
 .repo-patch .hunk { color: var(--muted); }
+.repo-branch { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-family: var(--mono); font-size: 12px; }
+.repo-branch:hover, .repo-branch[aria-expanded="true"] { border-color: var(--ink); color: var(--ink); }
+.repo-branches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: -4px 0 14px; font-size: 12.5px; }
+.repo-branches a { padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-family: var(--mono); font-size: 12px; text-decoration: none; }
+.repo-branches a:hover { border-color: var(--ink); color: var(--ink); }
+.repo-branches a.on { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.repo-branches a.on .muted { color: inherit; opacity: .7; }
+.repo-branches a .muted { font-family: var(--font); }
+.repo-kinds { margin: 0 0 12px; }
+.repo-sub { margin: 22px 0 10px; font: 400 20px/1.2 var(--display); }
+.repo-sub .muted { font: 400 12.5px/1.2 var(--font); }
+.repo-picked { margin-bottom: 6px; }
+.repo-picked .repo-push-row { cursor: default; }
+.repo-pill { height: 18px; font-size: 11px; }
+.repo-pill.open, .repo-pill.latest { background: var(--journal-soft); color: var(--journal-ink); }
+.repo-pill.merged { background: var(--task-soft); color: var(--task); }
+.repo-pill.closed { background: var(--danger-soft); color: var(--danger); }
+.repo-releases { display: grid; gap: 14px; max-width: 900px; margin: 0; padding: 0; list-style: none; }
+.repo-release { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.repo-release > h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font: 400 22px/1.2 var(--display); overflow-wrap: anywhere; }
+.repo-release-meta { margin: 4px 0 10px; font-size: 12.5px; }
+.repo-release .repo-doc { padding: 0; border: 0; background: transparent; }
+.repo-assets { display: grid; gap: 2px; margin: 12px 0 0; padding: 10px 0 0; border-top: 1px solid var(--line); list-style: none; }
+.repo-assets li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 12px; padding: 4px 0; font-size: 13.5px; }
+.repo-assets a { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.repo-assets .muted { font-family: var(--mono); font-size: 12px; }
+.repo-talk { max-width: 900px; margin: 0; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); list-style: none; }
+.repo-talk li + li { border-top: 1px solid var(--line); }
+.repo-talk-row { display: grid; gap: 4px; padding: 10px 14px; color: var(--ink); text-decoration: none; }
+.repo-talk-row:hover { background: var(--sunken); }
+.repo-talk-title { font-size: 14px; font-weight: 550; overflow-wrap: anywhere; }
+.repo-talk-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
+.repo-label { display: inline-block; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-size: 11px; font-weight: 450; vertical-align: 1px; }
+.repo-thread-title { max-width: 900px; margin: 0 0 6px; font: 400 28px/1.2 var(--display); overflow-wrap: anywhere; }
+.repo-thread-title .muted { font-size: 20px; }
+.repo-thread-facts { margin-bottom: 16px; }
+.repo-thread { display: grid; gap: 12px; max-width: 900px; margin: 0 0 24px; padding: 0; list-style: none; }
+.repo-say { min-width: 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.repo-say-head { margin: 0 0 8px; font-size: 13px; }
+.repo-say .repo-doc { max-width: none; padding: 0; border: 0; background: transparent; }
+.repo-say > .muted { margin: 0; font-size: 13px; }
 .repo-lightbox { position: fixed; inset: 0; z-index: 75; display: grid; grid-template-columns: 60px minmax(0, 1fr) 60px; grid-template-rows: minmax(0, 1fr) auto; align-items: center; background: rgba(12, 11, 10, .94); color: #fff; overscroll-behavior: contain; animation: fade .12s ease; }
 .repo-lb-stage { grid-column: 2; grid-row: 1; display: grid; place-items: center; height: 100%; min-height: 0; padding-top: 52px; }
 .repo-lb-stage img, .repo-lb-stage video { max-width: 100%; max-height: calc(100vh - 120px); max-height: calc(100dvh - 120px); border-radius: 4px; object-fit: contain; }
