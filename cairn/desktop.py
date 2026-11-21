@@ -124,11 +124,20 @@ class Config:
 
 # ============================================================ which folder to open
 
+def obsidian_config_dir(platform: str | None = None) -> Path:
+    """Where Obsidian keeps its own settings on this kind of computer."""
+    platform = platform or sys.platform
+    if platform == "win32":
+        return Path(os.environ.get("APPDATA", "")) / "obsidian"
+    if platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "obsidian"
+    return Path.home() / ".config" / "obsidian"
+
+
 def obsidian_vaults(config_file: Path | None = None) -> list[Path]:
     """Vaults Obsidian knows about on this machine, most recently used first."""
     if config_file is None:
-        base = Path(os.environ.get("APPDATA", "")) if sys.platform == "win32" else Path.home() / ".config"
-        config_file = base / "obsidian" / "obsidian.json"
+        config_file = obsidian_config_dir() / "obsidian.json"
     try:
         vaults = json.loads(Path(config_file).read_text(encoding="utf-8")).get("vaults", {})
     except (OSError, ValueError, AttributeError):

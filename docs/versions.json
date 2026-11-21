@@ -2,6 +2,17 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 98,
+      "date": "2026-11-21",
+      "title": "Cairn for Mac",
+      "changes": [
+        "The desktop app can now be had on a Mac: one line pasted in Terminal installs it, with no admin rights and no password, and puts Cairn.app in your Applications folder. It is the same app as on Windows: your notes open by themselves, one Sync button, and it updates itself",
+        "On a Mac, closing the window keeps Cairn in the menu bar, and a click on its Dock icon brings the window back",
+        "The welcome page offers the Mac line first when it is opened on a Mac, and the Windows download first everywhere else",
+        "On a Mac the desktop app now finds the Obsidian vault you used last. It looked in the place Linux keeps that list, so a Mac always started with an empty brain"
+      ]
+    },
+    {
       "build": 97,
       "date": "2026-11-21",
       "title": "A phone takes a new build at once, and says which build it runs",

@@ -124,6 +124,7 @@ jobs:
               "| Your device | Download | How to install |" "| --- | --- | --- |" \
               "| **Android 7+** | [Cairn-android.apk](https://github.com/$GITHUB_REPOSITORY/releases/download/apps/Cairn-android.apk) | Open the file and allow \"install unknown apps\" for your browser once. A full-screen window around the web app. |" \
               "| **Windows 10/11** | [Cairn-Setup.cmd](https://juw12.github.io/cairn/Cairn-Setup.cmd) | Double-click it. The desktop app, with your notes in a folder on the computer. |" \
+              "| **Mac** | [mac-install.sh](https://juw12.github.io/cairn/mac-install.sh) | In Terminal: \`curl -fsSL https://juw12.github.io/cairn/mac-install.sh \| bash\`. The desktop app, in ~/Applications. |" \
               "| **iPhone** | [Open the web app](https://juw12.github.io/cairn/) | In Safari: Share, then Add to Home Screen. |" > notes.md
             gh release create apps dist/Cairn-android.apk dist/Cairn-android.apk.sha256 dist/Cairn-android.version.txt \
               --title "Cairn apps" --notes-file notes.md --latest=false --repo "$GITHUB_REPOSITORY"

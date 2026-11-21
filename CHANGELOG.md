@@ -3,6 +3,13 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 98 (2026-11-21): Cairn for Mac
+
+- The desktop app can now be had on a Mac: one line pasted in Terminal installs it, with no admin rights and no password, and puts Cairn.app in your Applications folder. It is the same app as on Windows: your notes open by themselves, one Sync button, and it updates itself
+- On a Mac, closing the window keeps Cairn in the menu bar, and a click on its Dock icon brings the window back
+- The welcome page offers the Mac line first when it is opened on a Mac, and the Windows download first everywhere else
+- On a Mac the desktop app now finds the Obsidian vault you used last. It looked in the place Linux keeps that list, so a Mac always started with an empty brain
+
 ## Build 97 (2026-11-21): A phone takes a new build at once, and says which build it runs
 
 - Cairn now looks for a newer build by itself, each time it comes back to the front and every ten minutes while it stays open. Before, only the browser’s background worker looked, which on a phone’s home-screen app can be slow and never says anything ([#86](https://github.com/juw12/cairn/pull/86))

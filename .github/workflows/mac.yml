@@ -1,0 +1,65 @@
+name: Mac app
+
+# Runs the Mac installer (docs/mac-install.sh) on a real Mac the way a person would, then opens Cairn.app and
+# looks at what macOS shows: the app is listed as Cairn, its menu-bar icon is there, its page answers, a start
+# with --hidden shows no window and opening Cairn again brings the window up.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "docs/mac-install.sh"
+      - "scripts/mac_icon.py"
+      - "scripts/mac_check.py"
+      - "cairn/desktop.py"
+      - "Cairn.pyw"
+      - ".github/workflows/mac.yml"
+  pull_request:
+    paths:
+      - "docs/mac-install.sh"
+      - "scripts/mac_icon.py"
+      - "scripts/mac_check.py"
+      - "cairn/desktop.py"
+      - "Cairn.pyw"
+      - ".github/workflows/mac.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        mac: [macos-latest, macos-15-intel]   # Apple silicon and Intel
+    runs-on: ${{ matrix.mac }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cairn from this checkout
+        run: |
+          git checkout -q -b mac-check
+          CAIRN_REPO="$GITHUB_WORKSPACE" CAIRN_BRANCH=mac-check CAIRN_NO_OPEN=1 bash docs/mac-install.sh
+          test -x "$HOME/Applications/Cairn.app/Contents/MacOS/Cairn"
+          test -s "$HOME/Applications/Cairn.app/Contents/Resources/Cairn.icns"
+          plutil -lint "$HOME/Applications/Cairn.app/Contents/Info.plist"
+
+      - name: Start hidden, as after an update, and look
+        run: |
+          open -g "$HOME/Applications/Cairn.app" --args --hidden
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/mac_check.py --no-window
+
+      - name: Open Cairn again, as a click in the Dock does, and look for the window
+        run: |
+          open "$HOME/Applications/Cairn.app"
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/mac_check.py --window
+
+      - name: Run the installer again over a running Cairn (an update)
+        run: |
+          CAIRN_REPO="$GITHUB_WORKSPACE" CAIRN_BRANCH=mac-check bash docs/mac-install.sh
+          "$HOME/Library/Application Support/Cairn/venv/bin/python" scripts/mac_check.py --window
+
+      - name: What Cairn wrote in its log
+        if: always()
+        run: cat "$HOME/.config/cairn/cairn.log" || true
