@@ -2,6 +2,14 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 94,
+      "date": "2026-11-21",
+      "title": "Video tiles show the video in Safari",
+      "changes": [
+        "Repo pages: in Safari (so on an iPhone) the picture on a video’s tile was black since build 92. Safari says a frame is ready before it has one to give. A black picture is now taken again, a quarter of a second apart for up to three seconds, and a video that stays black gets no picture instead of a black one (#84)"
+      ]
+    },
+    {
       "build": 93,
       "date": "2026-11-21",
       "title": "A repo opens with its Windows, Mac, iPhone and Android versions",

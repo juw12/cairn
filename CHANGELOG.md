@@ -3,6 +3,10 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 94 (2026-11-21): Video tiles show the video in Safari
+
+- Repo pages: in Safari (so on an iPhone) the picture on a video’s tile was black since build 92. Safari says a frame is ready before it has one to give. A black picture is now taken again, a quarter of a second apart for up to three seconds, and a video that stays black gets no picture instead of a black one ([#84](https://github.com/juw12/cairn/pull/84))
+
 ## Build 93 (2026-11-21): A repo opens with its Windows, Mac, iPhone and Android versions
 
 - The Look tab of a repo starts with Versions: four lines, Windows, Mac, iPhone and Android, each with the file to download or the words "not published". The Releases tab lists every release with its files; this answers whether the project can be had on your computer and your phone ([#83](https://github.com/juw12/cairn/pull/83))
