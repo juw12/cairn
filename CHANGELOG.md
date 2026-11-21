@@ -3,6 +3,10 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 93 (2026-11-21): Video tiles show the video in Safari
+
+- Repo pages: in Safari (so on an iPhone) the picture on a video’s tile was black in build 92. Safari says a frame is ready before it has one to give. A black picture is now taken again, a quarter of a second apart for up to three seconds, and a video that stays black gets no picture instead of a black one
+
 ## Build 92 (2026-11-21): Issues, pull requests, releases and branches inside Cairn
 
 - Repo pages have two more tabs. Releases shows each release with its notes and its files to download. Issues and pull requests lists the open ones, with the closed ones one press away; one opens with everything said on it, and a pull request also shows its reviews, the comments left on lines and the files it changes ([#81](https://github.com/juw12/cairn/pull/81))

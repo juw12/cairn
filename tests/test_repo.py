@@ -389,6 +389,21 @@ class RepoPageTests(unittest.TestCase):
         # A video's tile is a picture taken from the video, not a player: a phone gives a page only a few players.
         page.wait_for_function("() => { const img = document.querySelector('.repo-tile.video img'); return img && img.src.startsWith('blob:') && img.naturalWidth === 160; }")
         self.assertEqual(page.locator(".repo-grid video").count(), 0)
+        # And it is a picture of the film (orange, in this one), not the black a browser hands over when it is
+        # asked for a frame too early. Build 92 showed black tiles in Safari.
+        light = page.evaluate(
+            """() => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 16; canvas.height = 9;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(document.querySelector('.repo-tile.video img'), 0, 0, 16, 9);
+                const data = ctx.getImageData(0, 0, 16, 9).data;
+                let red = 0;
+                for (let i = 0; i < data.length; i += 4) red += data[i];
+                return red / (data.length / 4);
+            }"""
+        )
+        self.assertGreater(light, 150)
         self.assertEqual(page.evaluate("fetch(document.querySelector('.repo-tile.video img').src).then((r) => r.blob()).then((b) => b.type)"), "image/jpeg")
         # Folders with pictures are cards with a cover; the rest are plain links to their files.
         cards = page.eval_on_selector_all(".repo-folder strong", "els => els.map((el) => el.textContent)")

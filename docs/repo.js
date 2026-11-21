@@ -45,6 +45,7 @@ const LEAD_VIDEOS = 6;
 const PREVIEW_VIDEO_BYTES = 12 * 1024 * 1024; // a video this small is fetched for a picture of its first moments
 const POSTER_WIDTH = 640;
 const POSTER_WAIT_MS = 20000;
+const POSTER_LOOKS = 12; // times a black picture of a video is taken again, a quarter of a second apart
 const MAX_TEXT_BYTES = 600 * 1024; // a bigger text file is offered as a download, not printed
 const PUSHES = 30;
 const RELEASES = 20;
@@ -549,6 +550,7 @@ function framePicture(url) {
       if (over) return;
       over = true;
       clearTimeout(timer);
+      clearTimeout(again);
       video.pause();
       video.removeAttribute("src");
       video.load();
@@ -558,8 +560,9 @@ function framePicture(url) {
     const timer = setTimeout(() => finish(null), POSTER_WAIT_MS);
     // A little way in: the very first frame is often black.
     const moment = () => Math.min(0.3, (Number.isFinite(video.duration) ? video.duration : 1) / 2);
+    let looks = 0;
+    let again = null;
     const draw = () => {
-      // Only a frame that is really there: before that, a canvas takes a black picture without complaint.
       if (over || video.readyState < 2 || !video.videoWidth) return;
       if (!jumped && video.currentTime < moment() * 0.9) return;
       const scale = Math.min(1, POSTER_WIDTH / video.videoWidth);
@@ -568,6 +571,16 @@ function framePicture(url) {
       canvas.height = Math.round(video.videoHeight * scale);
       try {
         canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Safari says a frame is ready before it has one to give, and a canvas then takes a black picture
+        // without complaint. So a black picture is not believed: the video is looked at again a moment later
+        // (it is playing, so that is also a later frame), for up to three seconds. Still black then: no picture.
+        if (isBlack(canvas)) {
+          looks += 1;
+          clearTimeout(again);
+          if (looks >= POSTER_LOOKS) finish(null);
+          else again = setTimeout(draw, 250);
+          return;
+        }
         canvas.toBlob((blob) => finish(blob ? URL.createObjectURL(blob) : null), "image/jpeg", 0.8);
       } catch {
         finish(null);
@@ -582,10 +595,25 @@ function framePicture(url) {
     });
     for (const name of ["loadeddata", "canplay", "timeupdate", "ended"]) video.addEventListener(name, draw);
     video.addEventListener("error", () => finish(null));
+    // The moment a frame is really put on the screen, where the browser can say so.
+    video.requestVideoFrameCallback?.(draw);
     document.body.append(holder);
     video.src = url;
     video.play().catch(() => {});
   });
+}
+
+// True when a canvas holds nothing but black (or nothing at all): sixteen by sixteen samples are enough to tell.
+function isBlack(canvas) {
+  const small = document.createElement("canvas");
+  small.width = 16;
+  small.height = 16;
+  const ctx = small.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(canvas, 0, 0, 16, 16);
+  const data = ctx.getImageData(0, 0, 16, 16).data;
+  let light = 0;
+  for (let i = 0; i < data.length; i += 4) light += (data[i] + data[i + 1] + data[i + 2]) * (data[i + 3] / 255);
+  return light / (data.length / 4) / 3 < 4;
 }
 
 // Pictures of videos are made one at a time: one player in use, never a pile of them.
