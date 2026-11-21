@@ -530,6 +530,41 @@ class AtOnceTests(unittest.TestCase):
         self.assertEqual(live.tick(), "synced")
         self.assertTrue(marker.exists())
 
+    def test_it_looks_more_often_while_a_conversation_is_going(self):
+        for brain in (self.mac, self.asus):
+            brain.set_sync_mode("auto")
+        live, _ = self.watcher(self.asus)
+        live.tick()
+        self.assertEqual(live.wait_seconds(), livesync.EVERY_SECONDS, "a quiet brain is asked every 20 s")
+
+        # A message arrives: for ten minutes the next look comes after 5 s, because an answer usually follows.
+        handoff.send(self.mac, "Are you there?", to=["asus"], sender=MAC)
+        handoff.deliver(self.mac)
+        self.assertEqual(live.tick(), "synced")
+        self.assertEqual(live.wait_seconds(), livesync.TALKING_EVERY_SECONDS)
+        with mock.patch.object(livesync.time, "monotonic", return_value=livesync.time.monotonic() + livesync.TALKING_FOR_SECONDS + 1):
+            self.assertEqual(live.wait_seconds(), livesync.EVERY_SECONDS, "and then it is quiet again")
+
+        # The same on the side that writes: a message saved here, or one the app asks to send now.
+        writer, _ = self.watcher(self.mac)
+        writer.tick()
+        self.assertEqual(writer.wait_seconds(), livesync.EVERY_SECONDS)
+        handoff.send(self.mac, "One more", to=["asus"], sender=MAC)
+        self.assertEqual(writer.tick(), "synced")
+        self.assertEqual(writer.wait_seconds(), livesync.TALKING_EVERY_SECONDS)
+        waker, _ = self.watcher(self.asus)
+        waker.wake()
+        self.assertEqual(waker.wait_seconds(), livesync.TALKING_EVERY_SECONDS)
+
+        # A change that is no message between computers leaves the pace alone.
+        self.asus.sync_now()  # it has every message so far
+        quiet, _ = self.watcher(self.asus)
+        self.assertEqual(quiet.tick(), "")
+        self.mac.write("notes/plain.md", "---\ntitle: Plain\n---\n")
+        self.mac.sync_now()
+        self.assertEqual(quiet.tick(), "synced")
+        self.assertEqual(quiet.wait_seconds(), livesync.EVERY_SECONDS)
+
     def test_a_pull_made_outside_cairn_reaches_the_open_pages_too(self):
         live, handler = self.watcher(self.asus)
         live.tick()

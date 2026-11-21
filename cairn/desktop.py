@@ -461,6 +461,17 @@ def mark_auto_sync(brain, on: bool) -> None:
         log(f"could not note the sync setting in the brain's repository: {error}")
 
 
+def start_live_sync(server, config) -> "livesync.LiveSync":
+    """What the app does at start so that a message for another computer leaves at once and theirs arrive
+    within seconds (livesync.py): note the sync setting in the brain's repository, start the loop, and let
+    the server wake it when a message is saved through the app."""
+    handler = server.RequestHandlerClass
+    mark_auto_sync(handler.brain, bool(config.get("autoSync", True)))
+    live = livesync.LiveSync(handler, log=log).start()
+    handler.live_sync = live
+    return live
+
+
 class DesktopHooks:
     """Backs GET/POST /api/desktop. The GUI parts (window, restart) are injected by the app."""
 
@@ -1159,10 +1170,7 @@ class DesktopApp:
         port = PORT if wait_for_port(PORT, 15) else 0
         self.server = make_server(brain, port=port, desktop=self.hooks)
         self.autopilot = attach_autopilot(self.server, brain)
-        # A message for another computer leaves at once, and theirs arrive within seconds (livesync.py).
-        mark_auto_sync(brain, bool(self.config.get("autoSync", True)))
-        self.live_sync = livesync.LiveSync(self.server.RequestHandlerClass, log=log).start()
-        self.server.RequestHandlerClass.live_sync = self.live_sync
+        self.live_sync = start_live_sync(self.server, self.config)
         self.hooks.server = self.server
         self.hooks.pick_folder = self.pick_folder
         self.hooks.request_restart = self.restart

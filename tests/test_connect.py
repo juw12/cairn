@@ -296,6 +296,34 @@ class SkillScriptsTests(ConnectCase):
         self.assertIn("recall.py handoffs", guide)
         self.assertIn("remember.py handoff", guide)
 
+    def test_the_skill_fetches_and_sends_by_itself_while_cairn_is_closed(self):
+        # No app is running here. The brain's repository names a sync command; the scripts run it.
+        marker = self.tmp / "synced.txt"
+        script = self.tmp / "sync.py"
+        script.write_text(
+            f"from pathlib import Path\np = Path({str(marker)!r})\np.write_text((p.read_text() if p.exists() else '') + 'x')\nprint('synced by the test')\n",
+            encoding="utf-8")
+        subprocess.run(["git", "init", "-q", "-b", "main", str(self.brain.root)], check=True, capture_output=True)
+        self.brain.set_sync_mode(f'"{sys.executable}" "{script}"')
+        sessions = self.brain.dir / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / "2026-11-20-on-the-other.md").write_text(
+            '---\ntitle: On the other\ntype: session\nstatus: done\nmachine: "Other Laptop 9,1"\nstarted: 2026-11-20T10:00\n---\n', encoding="utf-8")
+        self.connect("vector")
+
+        listed = self.run_script("recall.py", "handoffs")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertEqual(marker.read_text(), "x", "it fetched before it listed")
+        self.assertEqual(self.run_script("recall.py", "handoffs", "--offline").returncode, 0)
+        self.assertEqual(marker.read_text(), "x", "--offline leaves the network alone")
+        self.assertEqual(self.run_script("recall.py", "search", "anything").returncode, 0)
+        self.assertEqual(marker.read_text(), "x", "a plain search never syncs")
+
+        left = self.run_script("remember.py", "handoff", "Start it once on Windows", "--to", "other", "--body", "And read the log.")
+        self.assertEqual(left.returncode, 0, left.stderr)
+        self.assertIn("Sent: it is on the brain's remote now.", left.stdout)
+        self.assertEqual(marker.read_text(), "xx", "it was sent at once")
+
     def test_a_secret_is_refused(self):
         self.connect("vector")
         refused = self.run_script("remember.py", "note", "Login", "--body", "password: hunter2-hunter2")

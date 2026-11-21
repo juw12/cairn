@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cairn import desktop, publish
+from cairn import core, desktop, handoff, livesync, publish
 from cairn.brain import Brain, SyncError, clone_repo, repo_folder_name
 from cairn.cli import build_parser
 from cairn.server import make_server
@@ -230,6 +230,115 @@ class DesktopApiTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+
+@unittest.skipUnless(HAS_GIT, "git not installed")
+class LiveSyncInTheAppTests(unittest.TestCase):
+    """The desktop app's part of sending a message at once, without its window: the setting it writes into
+    the brain's repository, and the loop it starts. Two devices and their remote are folders on this disk."""
+
+    def setUp(self):
+        self.repos = Repos()
+        self.addCleanup(self.repos.cleanup)
+        for name, value in (("documents_dir", self.repos.tmp / "Documents"), ("obsidian_vaults", []), ("log", None)):
+            patcher = mock.patch.object(desktop, name, return_value=value)  # never touch the real app's files
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.laptop = Brain(self.repos.laptop)
+        self.laptop.init()
+        git(self.repos.laptop, "add", "-A")
+        git(self.repos.laptop, "commit", "-q", "-m", "start")
+        git(self.repos.laptop, "push", "-q", "-u", "origin", "main")
+        git(self.repos.phone, "pull", "-q", "origin", "main")
+        git(self.repos.phone, "branch", "-q", "--set-upstream-to=origin/main", "main")
+        self.other = Brain(self.repos.phone)
+        self.config = desktop.Config(self.repos.tmp / "config.json")
+        self.config.remember_folder(self.repos.laptop)
+        self.hooks = desktop.DesktopHooks(self.config)
+        self.server = make_server(self.laptop, port=0, desktop=self.hooks)
+        self.hooks.server = self.server
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+
+    def call(self, method, path, body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        conn.request(method, path, body=json.dumps(body) if body is not None else None,
+                     headers={"X-Cairn": "1", "Content-Type": "application/json"})
+        response = conn.getresponse()
+        data = json.loads(response.read() or b"{}")
+        conn.close()
+        return response.status, data
+
+    def test_the_sync_setting_follows_automatic_sync_and_leaves_the_users_own_command_alone(self):
+        self.assertEqual(self.laptop.sync_mode(), "")
+        desktop.mark_auto_sync(self.laptop, True)
+        self.assertEqual(self.laptop.sync_mode(), "auto")
+        desktop.mark_auto_sync(self.laptop, True)
+        self.assertEqual(self.laptop.sync_mode(), "auto")
+        desktop.mark_auto_sync(self.laptop, False)
+        self.assertEqual(self.laptop.sync_mode(), "")
+        self.laptop.set_sync_mode("my-sync.cmd")
+        for on in (True, False):
+            desktop.mark_auto_sync(self.laptop, on)
+            self.assertEqual(self.laptop.sync_mode(), "my-sync.cmd")
+        # A folder that is no git repository is left as it is, quietly.
+        plain = Brain(self.repos.tmp / "plain")
+        plain.init()
+        desktop.mark_auto_sync(plain, True)
+        self.assertEqual(plain.sync_mode(), "")
+
+    def test_the_switch_in_settings_and_opening_another_brain_write_the_setting(self):
+        live = desktop.start_live_sync(self.server, self.config)
+        self.addCleanup(live.stop)
+        self.assertEqual(self.laptop.sync_mode(), "auto", "automatic sync is on by default")
+        self.assertIs(self.server.RequestHandlerClass.live_sync, live)
+
+        self.assertEqual(self.call("POST", "/api/desktop", {"action": "auto-sync", "on": False}), (200, {"autoSync": False}))
+        self.assertEqual(self.laptop.sync_mode(), "")
+        self.assertEqual(self.call("POST", "/api/desktop", {"action": "auto-sync", "on": True}), (200, {"autoSync": True}))
+        self.assertEqual(self.laptop.sync_mode(), "auto")
+
+        status, _ = self.call("POST", "/api/desktop", {"action": "open", "path": str(self.repos.phone)})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.other.sync_mode(), "auto", "the brain opened next is set up the same way")
+
+    def test_with_automatic_sync_off_nothing_is_written_or_sent(self):
+        self.config.set("autoSync", False)
+        live = desktop.start_live_sync(self.server, self.config)
+        self.addCleanup(live.stop)
+        self.assertEqual(self.laptop.sync_mode(), "")
+        handoff.send(self.laptop, "Stays here", to=["all"], sender="Laptop")
+        live.tick()
+        self.assertEqual(live.tick(), "")
+        self.assertEqual(git(self.repos.remote, "rev-list", "--count", "main"), "1")
+
+    def test_a_message_saved_in_the_app_leaves_at_once_and_the_other_devices_answer_arrives(self):
+        live = desktop.start_live_sync(self.server, self.config)
+        live.stop()  # the rounds are made by hand here, so the test does not wait on a clock
+        self.other.set_sync_mode("auto")
+        self.assertEqual(live.tick(), "")
+
+        # The page saves a message through the app, exactly as Today's form does.
+        message = core.handoff_message("Laptop", "Check the pairing", "With the 4-digit code.", "2026-11-21T10:00:00", [],
+                                       to=["all"], sent="2026-11-21T03:00:00Z")
+        status, _ = self.call("PUT", f"/api/files?path={message['path']}", {"text": message["text"], "mtime": None})
+        self.assertEqual(status, 200)
+        self.assertEqual(live.wait_seconds(), livesync.TALKING_EVERY_SECONDS, "saving it asked for a round now")
+        self.assertEqual(live.tick(), "synced")
+        self.assertIn(message["path"], git(self.repos.remote, "ls-tree", "-r", "--name-only", "main"))
+
+        # The other device has it after its next look, answers, and the answer reaches the open page.
+        self.assertEqual(handoff.refresh(self.other), "")
+        self.assertEqual(handoff.threads(self.other)[0]["title"], "Check the pairing")
+        answer = handoff.answer(self.other, "pairing", "It works.", says="done", sender="Phone")
+        self.assertEqual(handoff.deliver(self.other), "Sent: it is on the brain's remote now.")
+        feed = self.server.RequestHandlerClass.changes
+        before = feed.revision
+        self.assertEqual(live.tick(), "synced")
+        self.assertEqual(feed.since(before, feed.epoch, "a page")["paths"], [answer["path"]])
+        self.assertEqual([m["says"] for m in handoff.threads(self.laptop)[0]["messages"]], ["note", "done"])
 
 
 class FirstRunTests(unittest.TestCase):
