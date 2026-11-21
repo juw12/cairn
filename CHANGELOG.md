@@ -5,10 +5,10 @@ the app shows the same list under Version history.
 
 ## Build 97 (2026-11-21): A phone takes a new build at once, and says which build it runs
 
-- Cairn now looks for a newer build by itself, each time it comes back to the front and every ten minutes while it stays open. Before, only the browser’s background worker looked, which on a phone’s home-screen app can be slow and never says anything
-- A newer build is said out loud (“Cairn build 97 is ready”) with an Update now button, and the menu shows “Update to build 97” until it is taken. Coming back to Cairn after a while takes it at once; while you are busy it waits for a pause, as before
-- Version history names the build this page really runs. A page left open since yesterday used to say it was on the newest build while still running the old one. It now says which build it is on and offers the newer one with Update now
-- A page that was open during the very first install used to ignore every later update for as long as it stayed open. It no longer does
+- Cairn now looks for a newer build by itself, each time it comes back to the front and every ten minutes while it stays open. Before, only the browser’s background worker looked, which on a phone’s home-screen app can be slow and never says anything ([#86](https://github.com/juw12/cairn/pull/86))
+- A newer build is said out loud (“Cairn build 97 is ready”) with an Update now button, and the menu shows “Update to build 97” until it is taken. Coming back to Cairn after a while takes it at once; while you are busy it waits for a pause, as before ([#86](https://github.com/juw12/cairn/pull/86))
+- Version history names the build this page really runs. A page left open since yesterday used to say it was on the newest build while still running the old one. It now says which build it is on and offers the newer one with Update now ([#86](https://github.com/juw12/cairn/pull/86))
+- A page that was open during the very first install used to ignore every later update for as long as it stayed open. It no longer does ([#86](https://github.com/juw12/cairn/pull/86))
 
 ## Build 96 (2026-11-21): Cairn Pro: the Autopilot takes more than one goal with a licence key
 
