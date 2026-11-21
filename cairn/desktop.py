@@ -1243,6 +1243,10 @@ class DesktopApp:
 
         # a new chat in the user's AI app starts with this brain as its memory
         threading.Thread(target=connect.auto_connect, args=(brain,), daemon=True).start()
+        from . import cloud_backup
+
+        # the cloud backup's daily turn; it does nothing on a computer where it was never set up
+        cloud_backup.start_auto(lambda: self.server.RequestHandlerClass.brain)
         self.hooks.phone = PhoneAccess(self.server, config_dir() / "devices.json")
         self.hooks.sync_phone()
         url = f"http://127.0.0.1:{self.server.server_address[1]}/"

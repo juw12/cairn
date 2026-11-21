@@ -170,6 +170,11 @@ export class ServerStore {
   async githubPush(account) {
     return this.request("POST", "api/github/push", { account });
   }
+
+  // Send the backup to the cloud drive now (set up on this computer with `cairn cloud setup`).
+  async cloudSync(repos = false) {
+    return this.request("POST", "api/cloud/sync", repos ? { repos: true } : {});
+  }
 }
 
 // ------------------------------------------------------------ browser-only: a real folder on disk

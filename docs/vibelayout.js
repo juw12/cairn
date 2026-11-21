@@ -20,6 +20,7 @@ const PAGES = {
       { id: "recap", label: "Live recap" },
       { id: "machine", label: "This computer", half: true },
       { id: "github", label: "GitHub minutes", half: true },
+      { id: "cloud", label: "Cloud backup", half: true },
       { id: "overview", label: "Overview" },
       { id: "figures", label: "Numbers" },
       { id: "activity", label: "Activity" },

@@ -950,7 +950,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
     vibe_parser.add_argument("--task", help="start: link a task, e.g. ship-v1")
     vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor")
-    vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest)")
+    vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest one of this computer)")
     vibe_parser.add_argument("--result", default="shipped", choices=["shipped", "partial", "dropped"], help="end: the outcome")
     vibe_parser.add_argument("--once", action="store_true", help="watch: one pass, then exit")
     vibe_parser.add_argument("--every", type=int, default=60, help="watch: seconds between passes (default 60)")
@@ -980,6 +980,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mcp_parser.add_argument("--read-only", action="store_true", help="leave out the tools that write")
     mcp_parser.add_argument("--print-config", action="store_true", help="print the config to paste into MCP clients, then exit")
+    cloud_parser = sub.add_parser(
+        "cloud",
+        help="a second copy of the brain (and your repos) in a cloud drive, locked on this computer first",
+        description="status (default) | setup [--repos] | sync [--repos | --brain-only] | auto on|off | repos on|off | "
+        "window | key [--show] | off. Off until `cairn cloud setup` has run on this computer: it needs git, 7-Zip, "
+        "Google Chrome and one sign-in to the drive (TeraBox) by you. Every archive is locked with a key that stays here.",
+    )
+    cloud_parser.add_argument("action", nargs="?", default="status",
+                              choices=["status", "setup", "sync", "auto", "repos", "window", "key", "off"])
+    cloud_parser.add_argument("word", nargs="?", default="", help="auto, repos: on or off")
+    cloud_parser.add_argument("--repos", action="store_true", help="setup, sync: every GitHub repo of yours too")
+    cloud_parser.add_argument("--brain-only", action="store_true", help="sync: the brain only, this once")
+    cloud_parser.add_argument("--owner", default="", help="setup: whose repos (default: the account the GitHub CLI is signed in to)")
+    cloud_parser.add_argument("--show", action="store_true", help="key: print it")
     connect_parser = sub.add_parser(
         "connect",
         help="make this brain the memory of the AI apps on this computer (Vector by itself; others by name)",
@@ -1085,6 +1099,43 @@ def cmd_connect(brain: Brain, args) -> int:
     for row in rows:
         print(connect.describe(row))
     return 0
+
+
+def cmd_cloud(brain: Brain, args) -> int:
+    from . import cloud_backup
+
+    action, word = args.action, (args.word or "").lower()
+    try:
+        if action == "setup":
+            return 0 if cloud_backup.setup(repos=args.repos, owner=args.owner) else 2
+        if action == "sync":
+            repos = True if args.repos else False if args.brain_only else None
+            print(cloud_backup.sync(brain, repos)["message"])
+            return 0
+        if action == "window":
+            cloud_backup.send("window", log=lambda line: None)
+            print("The TeraBox window is open. Sign in there and close it when you are in.")
+            return 0
+        if action == "key":
+            found = cloud_backup.read_key()
+            print(found if found and args.show else f"The key is in {cloud_backup.key_place()}." if found
+                  else "No key yet. `cairn cloud setup` makes one.")
+            return 0
+        if action in ("auto", "repos"):
+            if word not in ("on", "off"):
+                print(f"cairn cloud {action} on|off", file=sys.stderr)
+                return 1
+            if action == "repos" and word == "on" and not cloud_backup.settings().get("owner"):
+                print("Whose repos? Run: cairn cloud setup --repos", file=sys.stderr)
+                return 1
+            cloud_backup.change(**{action: word == "on"})
+        elif action == "off":
+            cloud_backup.change(set_up=False)
+        print(cloud_backup.summary(cloud_backup.status()))
+        return 0
+    except cloud_backup.CloudError as error:
+        print(str(error), file=sys.stderr)
+        return 1
 
 
 def cmd_mcp(brain: Brain, args) -> int:
@@ -1257,6 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
         "handoff": cmd_handoff,
         "mcp": cmd_mcp,
         "connect": cmd_connect,
+        "cloud": cmd_cloud,
         "precedent": cmd_precedent,
         "autopilot": cmd_autopilot,
         "pro": cmd_pro,
