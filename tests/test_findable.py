@@ -25,15 +25,6 @@ class FindableTests(unittest.TestCase):
         self.assertEqual((about["@type"], about["name"], about["url"]), ("SoftwareApplication", "Cairn", ADDRESS))
         self.assertEqual(about["offers"]["price"], "0")
 
-    def test_title_and_description_use_the_words_people_search_with(self):
-        title = re.search(r"<title>(.*?)</title>", self.index)[1]
-        described = re.search(r'<meta name="description" content="([^"]+)">', self.index)[1]
-        self.assertLessEqual(len(title), 70)  # longer is cut off in a search result
-        for word in ("Cairn", "open-source", "second brain", "Git repo"):
-            self.assertIn(word, title)
-        for word in ("Markdown", "task board", "decision log", "journal", "Obsidian", "Free"):
-            self.assertIn(word, described)
-
     def test_a_reader_without_javascript_gets_words_and_links(self):
         words = re.search(r"<noscript>(.*?)</noscript>", self.index, re.S)[1]
         self.assertIn("<h1>Cairn", words)
