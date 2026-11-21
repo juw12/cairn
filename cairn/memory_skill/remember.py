@@ -8,7 +8,7 @@
     remember.py answer "a few words of the conversation" --says picked-up|done|note|closed [--text "..."]
 
 It never overwrites a note, and it refuses text that looks like a password, key or token.
-When this computer has its own folder in the brain, it writes only there.
+When this computer has its own folder in the brain, what this script saves goes there.
 
 Add --cloud to save straight on GitHub instead of in the folder on this computer. Without a folder on this
 computer that happens by itself.

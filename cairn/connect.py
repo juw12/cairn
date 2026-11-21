@@ -50,11 +50,18 @@ SHARED_RULES = (
     "- Notes go in the brain's usual folders (`notes/`, `decisions/`), named the way Cairn names them. Change an\n"
     "  existing note only when the user asks for that note to change."
 )
+# A folder of its own keeps two computers from taking the same file name or decision number. It says where
+# remember.py puts what it saves, not what this computer may work on: every computer has the same role.
 FOLDER_RULES = (
-    "- This computer writes only inside `{folder}/` (`notes/` and `decisions/` there); `remember.py` does that by\n"
-    "  itself. Never create, edit, move or delete a file anywhere else in the brain unless the user names that\n"
-    "  exact file: the other devices write there. A correction to another device's note is a new note here that\n"
-    "  links to it with `[[note title]]`."
+    "- What `remember.py` saves from this computer goes in `{folder}/` (`notes/` and `decisions/` there), so two\n"
+    "  computers never take the same file name or decision number. That is where its own notes land, not a\n"
+    "  limit on the work: every computer has the same role.\n"
+    "- When the work belongs in a shared note (a project's note, the Update Log, a task, the journal), create\n"
+    "  or edit that note from here, the way any other computer would. Do not leave it for another computer\n"
+    "  because that one wrote it first. Before editing a shared note run `remember.py check`, keep the edit\n"
+    "  small, and say in the note or the Update Log which computer made it.\n"
+    "- Hand something to another computer only when it is physically there: its files, its apps, a check that\n"
+    "  needs that machine."
 )
 
 
