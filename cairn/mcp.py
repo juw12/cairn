@@ -30,7 +30,9 @@ INSTRUCTIONS = (
     "plain Markdown in the repo. Before answering questions about why the project works the way it does, "
     "search it (decisions record the reasons). When the user settles on something, capture it as a decision; "
     "when work is agreed, capture a task; when you finish a step, log it to the journal and move the task "
-    "with update_note. Call context first for a one-page brief of open tasks, accepted decisions and active ideas."
+    "with update_note. Call context first for a one-page brief of open tasks, accepted decisions and active ideas. "
+    "The brain may be shared by several computers: call handoffs at the start to see what another computer left "
+    "for this one, and leave what only another computer can do or check with handoff_send."
 )
 
 _WORD_RE = re.compile(r"[\w#@-]+", re.UNICODE)
@@ -300,6 +302,36 @@ def _tool_queue_add(brain: Brain, args: dict) -> str:
     return f"Queued brain/{note['path']}"
 
 
+def _tool_handoffs(brain: Brain, args: dict) -> str:
+    from . import handoff
+
+    wanted = (args.get("thread") or "").strip()
+    if wanted:
+        return handoff.transcript(brain, handoff.find_thread(handoff.threads(brain), wanted))
+    return handoff.overview(brain, args.get("device") or "", everything=bool(args.get("all")))
+
+
+def _tool_handoff_send(brain: Brain, args: dict) -> str:
+    from . import handoff
+
+    to = args.get("to")
+    recipients = [to] if isinstance(to, str) else [str(name) for name in to] if isinstance(to, list) else []
+    if not recipients:
+        raise ToolError('Say who it is for in "to": a computer\'s name (a few words of it are enough) or "all".')
+    note = handoff.send(brain, args.get("title") or "", args.get("body") or "", to=recipients, sender=args.get("device") or "")
+    for_whom = ", ".join(note["meta"]["to"])
+    return f"Left for {'every computer' if for_whom == 'all' else for_whom}: brain/{note['path']}\n{handoff.deliver(brain)}"
+
+
+def _tool_handoff_answer(brain: Brain, args: dict) -> str:
+    from . import handoff
+
+    says = args.get("says") or "note"
+    note = handoff.answer(brain, args.get("thread") or "", args.get("text") or "", says=says, sender=args.get("device") or "")
+    said = {"note": "Answered", "picked-up": "Picked up", "done": "Done", "closed": "Closed for every computer"}[says]
+    return f"{said}: brain/{note['path']}\n{handoff.deliver(brain)}"
+
+
 def _tool_precedent_log(brain: Brain, args: dict) -> str:
     from . import precedent
 
@@ -471,6 +503,54 @@ TOOLS: list[dict] = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
         "write": True,
         "handler": _tool_precedent_log,
+    },
+    {
+        "name": "handoffs",
+        "description": "What the user's other computers left for this one, and what this one is waiting for. Several computers can share one brain and leave each other messages: what one found, what is left hanging, what only another can do. Call it at the start of a piece of work. With thread, one conversation in full.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "thread": {"type": "string", "description": "A conversation's name or a few words of it: show that one in full"},
+                "all": {"type": "boolean", "description": "Also what is between other computers, and what is settled", "default": False},
+                "device": {"type": "string", "description": "Look as this computer instead of the one the server runs on"},
+            },
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+        "handler": _tool_handoffs,
+    },
+    {
+        "name": "handoff_send",
+        "description": "Leave a message for another of the user's computers: something only it can do or check, or what was left unfinished here. It shows on that computer's Today page and in its handoffs. Use it instead of only telling the user.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The message in one line"},
+                "to": {"type": "array", "items": {"type": "string"}, "description": "Who it is for: computer names (a few words of a name are enough), or [\"all\"] for every computer"},
+                "body": {"type": "string", "description": "The details in Markdown: what was found, what is left, where the files are"},
+                "device": {"type": "string", "description": "Speak as this computer instead of the one the server runs on"},
+            },
+            "required": ["title", "to"],
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+        "write": True,
+        "handler": _tool_handoff_send,
+    },
+    {
+        "name": "handoff_answer",
+        "description": "Add to a conversation between computers. says: 'picked-up' when this computer takes it on, 'done' when its part is finished (put the result in text), 'note' for a question or an answer, 'closed' to end it for every computer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "thread": {"type": "string", "description": "The conversation's name or a few words of it"},
+                "says": {"type": "string", "enum": list(core.HANDOFF_SAYS), "default": "note"},
+                "text": {"type": "string", "description": "What to say; the first line is the title. Needed for 'note'"},
+                "device": {"type": "string", "description": "Speak as this computer instead of the one the server runs on"},
+            },
+            "required": ["thread"],
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+        "write": True,
+        "handler": _tool_handoff_answer,
     },
 ]
 

@@ -31,7 +31,7 @@ import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
 import { movePanel, openPanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
 import { pickChartDay, setChartMetric, setChartRange, showNeeds, wireHome } from "./home.js";
-import { sayHandoff, sendHandoff, toggleHandoff, toggleHandoffForm, toggleSettled } from "./handoffs.js";
+import { renameDevice, sayHandoff, sendHandoff, toggleHandoff, toggleHandoffForm, toggleSettled } from "./handoffs.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
 import { wireRepo } from "./repo.js";
 import { initDatabases } from "./database.js";
@@ -399,6 +399,7 @@ function wireGlobal() {
       "handoff-open": () => toggleHandoff(actionEl.dataset.thread),
       "handoff-write": toggleHandoffForm,
       "handoff-settled": toggleSettled,
+      "handoff-rename": renameDevice,
       "handoff-say": () => sayHandoff(actionEl.dataset.thread, actionEl.dataset.says),
       "home-needs-all": () => {
         showNeeds();

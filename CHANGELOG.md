@@ -3,6 +3,16 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 90 (2026-11-21): Messages between computers leave at once, and a phone takes part
+
+- A message for another computer leaves the moment it is written, where the brain syncs by itself: the desktop app with automatic sync on, or a brain whose repository names a sync command (git config cairn.sync). While the app is open it asks the remote every 20 seconds whether something new is there, so the other computer's message shows on Today without a reload. Before, a message waited for the next round, up to 10 minutes
+- From a terminal the same: cairn handoff send and an answer say whether they were sent now, and cairn handoff fetches before it lists. Without the setting nothing is pushed for you and the command says the message goes with the next sync
+- A phone and the web app take part. They go by a name kept in that browser (Phone until you press Rename), a message can be for that name, and they pick up, finish and close like a computer. Before, they could only read and answer
+- Close for everyone: any device can call a conversation off for all of them, in the app and with cairn handoff close
+- The order no longer depends on the clocks. A message carries the same moment in UTC and names the message it follows, so two time zones read the same order and an answer never shows before what it answers
+- Assistants reach it without a terminal: cairn mcp has handoffs, handoff_send and handoff_answer, and the memory skill that Cairn puts into your AI app looks at what another computer left when a chat starts
+- Pages open on a computer now show notes that arrived through a sync made outside Cairn (a script, a pull in a terminal) within seconds
+
 ## Build 89 (2026-11-21): Found on Google by what it does, not only by its name
 
 - Cairn in search results: the title and description now say what Cairn is in the words people type when they have never heard of it (open-source second brain, Markdown, Git repo, task board, decision log, journal), and the description search engines read lists the same

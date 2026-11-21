@@ -13,7 +13,7 @@ description: Use the Cairn command line to capture ideas, tasks and decisions, w
 2. Choose the brain with the two global options, placed before the command:
    - `--root <folder>`: the project folder (default: the current folder).
    - `--brain <folder>`: the brain folder relative to the root (default: `brain/`). For an Obsidian vault that is the brain itself, use `--root <vault> --brain .`.
-3. Every command below except `list`, `todos`, `log` with no text, `context --stdout`, `handoff` with no action and `handoff show` changes files. If your instructions say the brain is read-only on this device, use only those.
+3. Every command below except `list`, `todos`, `log` with no text, `context --stdout`, `handoff` with no action and `handoff show` changes files (those two fetch the other computers' notes first where the brain is set up to sync by itself; `--offline` stops that). If your instructions say the brain is read-only on this device, use only those.
 
 Pass note text as one quoted argument, never as shell syntax.
 
@@ -48,7 +48,7 @@ cairn context --stdout                    # print the one-page brief without wri
 
 ## Other computers
 
-One brain can be shared by several computers. They leave each other messages: what one found, what is left hanging, what only another computer can do.
+One brain can be shared by several computers and a phone. They leave each other messages: what one found, what is left hanging, what only another one can do.
 
 ```bash
 cairn handoff                                         # what the other computers left for this one
@@ -56,10 +56,13 @@ cairn handoff show "<a few words of its name>"        # one conversation in full
 cairn handoff pickup "<a few words>"                  # this computer has taken it on
 cairn handoff done "<a few words>" "what was done"    # this computer's part is finished
 cairn handoff reply "<a few words>" "a question or an answer"
+cairn handoff close "<a few words>" "why"             # over, for every computer
 cairn handoff send "what it must know or do" --to "<computer>" -m "the details"   # --to all: every computer
 ```
 
-`--to` takes a computer's name or a few words of it, and can be given several times. Run `cairn handoff` at the start of a piece of work. When you stop with something only another computer can do or check, leave it with `send` instead of only telling the user. A message arrives with the brain's next sync, not at once.
+`--to` takes a computer's name or a few words of it, and can be given several times. Run `cairn handoff` at the start of a piece of work. When you stop with something only another computer can do or check, leave it with `send` instead of only telling the user. Say `done` with the result in it: the other computer reads that, not your chat.
+
+Each command ends by saying whether the message was sent now or goes with the brain's next sync. It is sent at once only where the brain's repository says so (`git config cairn.sync`); do not set that yourself unless the user asks. `--offline` skips the network.
 
 ## Maintain
 

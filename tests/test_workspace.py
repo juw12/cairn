@@ -344,7 +344,7 @@ class WorkspaceTests(unittest.TestCase):
         page.wait_for_selector("#ed-body")
         self.assertEqual(page.locator(".tab-strip").count(), 0, "one note, no tab strip")
         page.keyboard.press("Escape")
-        page.click('.item-card[data-open="ideas/share-trip-link.md"]', modifiers=["Control"])
+        page.click('.item-card[data-open="ideas/share-trip-link.md"]', modifiers=["ControlOrMeta"])  # Ctrl+click, Cmd+click on a Mac (there Ctrl+click is the right mouse button)
         page.wait_for_selector(".tab-strip")
         tabs = lambda: page.eval_on_selector_all(".note-tab", "els => els.map((e) => e.dataset.tab)")  # noqa: E731
         self.assertEqual(tabs(), ["ideas/offline-maps.md", "ideas/share-trip-link.md"])
@@ -428,7 +428,7 @@ class WorkspaceTests(unittest.TestCase):
         # Alt+click on a tab opens that tab beside the current note.
         page.keyboard.press("Escape")
         page.wait_for_selector("#drawer-layer", state="detached")
-        page.click('.item-card[data-open="ideas/weather-overlay.md"]', modifiers=["Control"])
+        page.click('.item-card[data-open="ideas/weather-overlay.md"]', modifiers=["ControlOrMeta"])  # Ctrl+click, Cmd+click on a Mac (there Ctrl+click is the right mouse button)
         page.wait_for_selector('.note-tab[data-tab="ideas/weather-overlay.md"].on')
         page.click('.note-tab[data-tab="ideas/share-trip-link.md"]', modifiers=["Alt"])
         page.wait_for_selector('.split-pane[data-split-path="ideas/share-trip-link.md"]')
@@ -492,7 +492,7 @@ class WorkspaceTests(unittest.TestCase):
         page.click('.item-card[data-open="ideas/offline-maps.md"]')
         page.wait_for_selector("#ed-body")
         page.keyboard.press("Escape")
-        page.click('.item-card[data-open="ideas/ar-peak-finder.md"]', modifiers=["Control"])
+        page.click('.item-card[data-open="ideas/ar-peak-finder.md"]', modifiers=["ControlOrMeta"])  # Ctrl+click, Cmd+click on a Mac (there Ctrl+click is the right mouse button)
         page.wait_for_selector(".tab-strip")
         page.click('[data-action="delete"]')
         page.click(".modal button[type=submit]")

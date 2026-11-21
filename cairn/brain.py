@@ -7,6 +7,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import threading
+
 from . import core
 
 SKIP_DIRS = {
@@ -38,6 +40,7 @@ NETWORK_TIMEOUT = 180  # one clone, or a fetch/push that may wait for a GitHub s
 ROUTE_TIMEOUT = 75  # one fetch/push attempt over one network route before trying the next
 # No console window flashing up for every git call when Cairn runs as a windowed app on Windows.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_SYNC_LOCK = threading.RLock()  # one sync at a time in a process (the app's own rounds, a handoff leaving at once)
 # Signs that git couldn't get through (as opposed to "GitHub said no"): worth trying another route.
 NETWORK_ERRORS = (
     "unable to access", "could not resolve", "timed out", "connection was reset", "connection reset",
@@ -421,7 +424,107 @@ class Brain:
         sha = self._git("rev-parse", "--short", "HEAD").stdout.strip()
         return {"commit": sha, "message": message}
 
+    # ------------------------------------------------------------ syncing right away (handoffs, livesync.py)
+
+    def sync_mode(self) -> str:
+        """How this brain may be synced without asking, from `git config cairn.sync` in its repository:
+        "" (not at all, the default), "auto" (Cairn's own commit, pull and push) or a command of the
+        user's own that does it. The desktop app sets "auto" while its automatic sync is on."""
+        if not self.git_available():
+            return ""
+        try:
+            return self._git("config", "--get", "cairn.sync").stdout.strip()
+        except (subprocess.TimeoutExpired, OSError):
+            return ""
+
+    def set_sync_mode(self, mode: str) -> None:
+        """Write (or with "" remove) `cairn.sync` in this repository's own git config."""
+        if not self.git_available():
+            return
+        if mode:
+            self._git("config", "cairn.sync", mode)
+        else:
+            self._git("config", "--unset-all", "cairn.sync")
+
+    def head(self) -> str:
+        """The commit the brain's repository is on, or "" without git."""
+        try:
+            return self._git("rev-parse", "--verify", "-q", "HEAD").stdout.strip()
+        except (subprocess.TimeoutExpired, OSError):
+            return ""
+
+    def changed_between(self, before: str, after: str) -> list[str]:
+        """Brain files that differ between two commits, as paths inside the brain."""
+        if not before or not after or before == after:
+            return []
+        spec = self._brain_pathspec()
+        listed = self._git("diff", "--name-only", "--no-renames", "-z", before, after, "--", spec).stdout
+        prefix = "" if spec == "." else spec.rstrip("/") + "/"
+        return sorted(name[len(prefix):] for name in listed.split("\0") if name and name.startswith(prefix))
+
+    def handoffs_unsent(self) -> bool:
+        """A message for another computer is written here and not committed (or committed and not pushed)."""
+        folder = f"{self._brain_pathspec().rstrip('/')}/{core.HANDOFF_FOLDER}" if self._brain_pathspec() != "." else core.HANDOFF_FOLDER
+        try:
+            if self._git("status", "--porcelain", "--untracked-files=all", "--", folder).stdout.strip():
+                return True
+            if not self._upstream():
+                return False
+            return bool(self._git("diff", "--name-only", "@{u}", "HEAD", "--", folder).stdout.strip())
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+
+    def remote_moved(self) -> bool:
+        """The remote has commits this computer has not fetched: one small question to the remote.
+        False when it cannot be asked (offline, no remote, no upstream)."""
+        try:
+            upstream = self._upstream()  # "origin/main"
+            if not upstream or "/" not in upstream:
+                return False
+            remote, branch = upstream.split("/", 1)
+            asked = self._network("ls-remote", "--heads", remote, branch)
+            if asked.returncode != 0 or not asked.stdout.strip():
+                return False
+            theirs = asked.stdout.split()[0]
+            known = self._git("rev-parse", "--verify", "-q", f"refs/remotes/{upstream}").stdout.strip()
+            if theirs == known:
+                return False
+            # A commit this computer already has (it pushed it, another process fetched it) is no news.
+            return self._git("cat-file", "-e", f"{theirs}^{{commit}}").returncode != 0 or \
+                self._git("merge-base", "--is-ancestor", theirs, "HEAD").returncode != 0
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+
+    def sync_now(self, timeout: int = 180) -> str:
+        """Sync as `cairn.sync` says. Returns a sentence about what happened; raises SyncError when it
+        could not be done. One sync at a time in this process."""
+        mode = self.sync_mode()
+        if not mode:
+            raise SyncError("Syncing right away is not set up for this brain (git config cairn.sync).")
+        with _SYNC_LOCK:
+            if mode == "auto":
+                result = self.git_sync()
+                return f"committed {result['committed'] or 'nothing'}, pulled {result['pulled']}, pushed {result['pushed']}"
+            try:
+                done = subprocess.run(
+                    mode, shell=True, cwd=str(self.root), capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=timeout, creationflags=NO_WINDOW,
+                )
+            except subprocess.TimeoutExpired:
+                raise SyncError(f"The sync command took longer than {timeout} s.") from None
+            except OSError as error:
+                raise SyncError(f"The sync command could not start: {error}") from None
+            lines = [line for line in (done.stdout + done.stderr).splitlines() if line.strip()]
+            if done.returncode != 0:
+                raise SyncError(lines[-1] if lines else f"The sync command ended with code {done.returncode}.")
+            return lines[-1] if lines else "synced"
+
     def git_sync(self, message: str = "") -> dict:
+        """Commit brain edits, pull others' edits, push. One sync at a time in this process."""
+        with _SYNC_LOCK:
+            return self._git_sync(message)
+
+    def _git_sync(self, message: str = "") -> dict:
         """One step to be up to date everywhere: commit brain edits, pull others' edits, push.
 
         Only the brain folder is committed. Anything else in the working tree is left alone

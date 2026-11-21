@@ -2,8 +2,8 @@
 
 A computer leaves a message for one, several or all of the others: what it found, what is left hanging,
 what only another computer can do. The others say "picked up", answer, and say "done". The rules of a
-conversation are in core.py (shared with the web app); this module reads and writes the files and finds
-out which computer this is.
+conversation are in core.py (shared with the web app); this module reads and writes the files, finds out
+which computer this is, and sends a new message on its way at once where the brain allows that.
 
 Every message is its own file in handoffs/, written once and never edited, so two computers never write
 the same file and the brain's git remote carries the conversation without anything to merge.
@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime as dt
 
 from . import core, machine
-from .brain import Brain
+from .brain import Brain, SyncError
 
 
 class HandoffError(ValueError):
@@ -22,7 +22,8 @@ class HandoffError(ValueError):
 
 
 TITLE_LIMIT = 80
-DEFAULT_TITLES = {"picked-up": "Picked up", "done": "Done"}
+DEFAULT_TITLES = {"picked-up": "Picked up", "done": "Done", "closed": "Closed"}
+NEXT_SYNC = "It reaches the other computers with the brain's next sync."
 
 
 def this_device() -> str:
@@ -30,13 +31,22 @@ def this_device() -> str:
     return machine.device_name()
 
 
-def _stamp(now: dt.datetime | None = None) -> str:
-    return (now or dt.datetime.now()).strftime("%Y-%m-%dT%H:%M:%S")
+def _stamps(now: dt.datetime | None = None) -> tuple[str, str]:
+    """One moment twice: on this computer's clock, and in UTC for the computers in other time zones."""
+    moment = (now or dt.datetime.now()).astimezone()
+    return moment.strftime("%Y-%m-%dT%H:%M:%S"), moment.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _when(stamp: str) -> str:
-    """A message's time as people read it: to the minute."""
-    return stamp.replace("T", " ")[:16]
+def when(message: dict) -> str:
+    """A message's time as people read it: to the minute, on this computer's clock."""
+    sent = message.get("sent") or ""
+    if sent:
+        try:
+            moment = dt.datetime.strptime(sent, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+            return moment.astimezone().strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            pass
+    return (message.get("at") or "").replace("T", " ")[:16]
 
 
 def threads(brain: Brain) -> list[dict]:
@@ -135,12 +145,14 @@ def send(brain: Brain, title: str, body: str = "", to: list[str] | None = None,
     if recipients and all(core.device_key(name) == core.device_key(sender) for name in recipients):
         raise HandoffError("That is this computer itself. Name another computer, or \"all\".")
     existing = [f["path"] for f in brain.files()]
-    return _write(brain, core.handoff_message(sender, title, body, _stamp(now), existing, to=recipients))
+    stamp, sent = _stamps(now)
+    return _write(brain, core.handoff_message(sender, title, body, stamp, existing, to=recipients, sent=sent))
 
 
 def answer(brain: Brain, wanted: str, text: str = "", says: str = "note",
            sender: str = "", now: dt.datetime | None = None) -> dict:
-    """Add to a conversation: a note, "picked-up" (this computer has taken it on) or "done"."""
+    """Add to a conversation: a note, "picked-up" (this computer has taken it on), "done" (its part is
+    finished) or "closed" (the whole conversation is over, for every computer)."""
     if says not in core.HANDOFF_SAYS:
         raise HandoffError(f"A message says one of: {', '.join(core.HANDOFF_SAYS)}.")
     thread = find_thread(threads(brain), wanted)
@@ -149,11 +161,43 @@ def answer(brain: Brain, wanted: str, text: str = "", says: str = "note",
         raise HandoffError("What do you want to say?")
     sender = " ".join(str(sender).split()) or this_device()
     existing = [f["path"] for f in brain.files()]
-    return _write(brain, core.handoff_message(sender, title, body, _stamp(now), existing, thread=thread["id"], says=says))
+    stamp, sent = _stamps(now)
+    last_seen = thread["messages"][-1]["path"].rsplit("/", 1)[-1][:-3]
+    message = core.handoff_message(sender, title, body, stamp, existing, thread=thread["id"], says=says, sent=sent, after=last_seen)
+    return _write(brain, message)
 
 
 def body_of(brain: Brain, path: str) -> str:
     return core.parse_note(brain.read(path)["text"])["body"].strip()
+
+
+# ------------------------------------------------------------ on its way at once
+
+
+def deliver(brain: Brain) -> str:
+    """Send what was just written to the other computers now, where the brain is set up for it
+    (`git config cairn.sync`, see Brain.sync_mode). Returns the sentence to tell the writer."""
+    if not brain.sync_mode():
+        return NEXT_SYNC
+    try:
+        brain.sync_now()
+    except SyncError as error:
+        return f"Not sent yet: {error} It goes with the brain's next sync."
+    except Exception as error:  # noqa: BLE001 - a message that is written must never fail on its way out
+        return f"Not sent yet: {error}. It goes with the brain's next sync."
+    return "Sent: it is on the brain's remote now."
+
+
+def refresh(brain: Brain) -> str:
+    """Before reading: fetch what the other computers have left, where the brain is set up for it.
+    Returns "" when the notes are current (or cannot be made so quietly), else a sentence."""
+    if not brain.sync_mode():
+        return ""
+    try:
+        brain.sync_now()
+    except Exception as error:  # noqa: BLE001 - reading works without the network too
+        return f"Could not fetch the other computers' messages just now ({error}). Showing what is here."
+    return ""
 
 
 # ------------------------------------------------------------ what the command line prints
@@ -169,7 +213,7 @@ def thread_line(thread: dict) -> list[str]:
     parts = "; ".join(f"{part['device']} {STATE_WORDS[part['state']]}" for part in thread["parts"])
     count = len(thread["messages"])
     lines = [f"  {thread['title']}"]
-    lines.append(f"    from {thread['from'] or 'someone'} to {_for_whom(thread)} · {_when(thread['messages'][0]['at'])} · {count} message{'' if count == 1 else 's'}")
+    lines.append(f"    from {thread['from'] or 'someone'} to {_for_whom(thread)} · {when(thread['messages'][0])} · {count} message{'' if count == 1 else 's'}")
     if parts:
         lines.append(f"    {parts}")
     lines.append(f"    {thread['id']}")
@@ -210,11 +254,11 @@ def overview(brain: Brain, device: str = "", everything: bool = False) -> str:
 
 
 def transcript(brain: Brain, thread: dict) -> str:
-    """One conversation in full, oldest message first."""
+    """One conversation in full, in the order it was said."""
     out = [thread["title"], f"from {thread['from'] or 'someone'} to {_for_whom(thread)} · {'open' if thread['open'] else 'settled'}", f"{thread['id']}", ""]
     for message in thread["messages"]:
-        mark = {"picked-up": " [picked up]", "done": " [done]"}.get(message["says"], "")
-        out.append(f"--- {message['from'] or 'someone'} · {_when(message['at'])}{mark}")
+        mark = {"picked-up": " [picked up]", "done": " [done]", "closed": " [closed for everyone]"}.get(message["says"], "")
+        out.append(f"--- {message['from'] or 'someone'} · {when(message)}{mark}")
         if message["path"] != thread["path"] or message["title"] != thread["title"]:
             out.append(message["title"])
         body = body_of(brain, message["path"])

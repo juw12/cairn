@@ -100,7 +100,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(
             set(tools),
             {"search", "read_note", "list_notes", "context", "recent", "code_todos", "capture", "update_note", "log",
-         "precedent_brief", "queue_next", "queue_add", "precedent_log"},
+         "precedent_brief", "queue_next", "queue_add", "precedent_log", "handoffs", "handoff_send", "handoff_answer"},
         )
         for tool in tools.values():
             self.assertEqual(tool["inputSchema"]["type"], "object")
@@ -112,6 +112,63 @@ class McpServerTests(unittest.TestCase):
         for tool in tools.values():
             for hint in hint_names:
                 self.assertIsInstance(tool["annotations"].get(hint), bool, f"{tool['name']} {hint}")
+
+    def test_computers_leave_each_other_messages(self):
+        mac, asus = "MacBook Pro 15,4", "ASUS EXPERTBOOK P5405CSA"
+        sessions = self.project / "brain" / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        for index, device in enumerate((mac, asus)):
+            (sessions / f"2026-11-20-work-{index}.md").write_text(
+                f'---\ntitle: Work {index}\ntype: session\nstatus: done\nmachine: "{device}"\nstarted: 2026-11-20T10:00\n---\n', encoding="utf-8")
+
+        text, error = self.client.call("handoffs", device=asus)
+        self.assertFalse(error, text)
+        self.assertIn("Nothing is waiting for this computer.", text)
+
+        text, error = self.client.call("handoff_send", title="Check Buddy on the Windows laptop", to=["asus"], body="Run the self-test.", device=mac)
+        self.assertFalse(error, text)
+        self.assertIn(f"Left for {asus}: brain/handoffs/", text)
+        self.assertIn("next sync", text, "a folder without git cannot send at once, and says so")
+
+        text, error = self.client.call("handoffs", device=asus)
+        self.assertIn(f"For this computer ({asus}):", text)
+        self.assertIn("Check Buddy on the Windows laptop", text)
+
+        text, error = self.client.call("handoff_answer", thread="buddy", says="picked-up", device=asus)
+        self.assertFalse(error, text)
+        self.assertIn("Picked up: brain/handoffs/", text)
+        text, error = self.client.call("handoff_answer", thread="buddy", says="done", text="24 of 24 checks pass.", device=asus)
+        self.assertFalse(error, text)
+
+        text, error = self.client.call("handoffs", thread="buddy")
+        self.assertFalse(error, text)
+        self.assertIn("Run the self-test.", text)
+        self.assertIn("[picked up]", text)
+        self.assertIn("24 of 24 checks pass.", text)
+        self.assertIn("settled", text)
+        text, error = self.client.call("handoffs", device=mac, all=True)
+        self.assertIn("Settled:", text)
+
+        # What cannot be done says why, as a tool error and not a crash.
+        text, error = self.client.call("handoff_send", title="For nobody")
+        self.assertTrue(error)
+        self.assertIn("who it is for", text)
+        text, error = self.client.call("handoff_send", title="For a stranger", to=["thinkpad"], device=mac)
+        self.assertTrue(error)
+        self.assertIn("No computer called", text)
+        text, error = self.client.call("handoff_answer", thread="no such conversation", text="hello")
+        self.assertTrue(error)
+        self.assertIn("No conversation fits", text)
+
+        # A read-only server still shows what was left; it cannot answer.
+        reader = McpClient(self.project, "--read-only")
+        reader.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        names = {tool["name"] for tool in reader.request("tools/list")["result"]["tools"]}
+        self.assertIn("handoffs", names)
+        self.assertFalse({"handoff_send", "handoff_answer"} & names)
+        text, error = reader.call("handoffs", device=mac, all=True)
+        self.assertIn("Check Buddy on the Windows laptop", text)
+        reader.close()
 
     def test_capture_search_and_read_a_decision(self):
         text, error = self.client.call(
