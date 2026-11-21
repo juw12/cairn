@@ -142,6 +142,14 @@ Cairn in its own window. After that, everything happens inside the app:
   changes to its engine restart Cairn quietly while it's in the tray, or after a couple of idle minutes,
   and bring the window back where you were. **Settings** turns each of these on or off.
 
+**On a phone.** iPhone: open [juw12.github.io/cairn](https://juw12.github.io/cairn/) in Safari, tap Share, then
+*Add to Home Screen*. Android: download
+[`Cairn-android.apk`](https://github.com/juw12/cairn/releases/download/apps/Cairn-android.apk) (a full-screen
+window around the same web app, see [`android/`](android/README.md)), or open the page in Chrome and choose
+*Install app*. On a phone Cairn opens the brain you keep on GitHub, or pairs with the desktop app by QR code.
+
+**On a Mac** there is no download yet: use the terminal (1) or the browser (2) below.
+
 **1. Local app from the terminal.** Python 3.13+, no dependencies:
 
 ```bash

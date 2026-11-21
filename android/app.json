@@ -1,0 +1,10 @@
+{
+  "name": "Cairn",
+  "id": "io.github.juw12.cairn",
+  "url": "https://juw12.github.io/cairn/",
+  "versionName": "1.0.0",
+  "versionCode": 1,
+  "minSdk": 24,
+  "targetSdk": 34,
+  "certSha256": "9338dd85836a1ac93c2eaf45d9df5fa062e67d2614afcee77c1f8d4ec47ca214"
+}
