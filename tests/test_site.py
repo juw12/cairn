@@ -202,6 +202,35 @@ class SiteTests(unittest.TestCase):
         self.assertNotIn("<script>alert(1)", tricky)
         self.assertNotIn("<script>alert(1)", (self.out / "index.html").read_text(encoding="utf-8"))
 
+    def test_url_adds_a_feed_of_the_notes_and_the_key_search_engines_ask_for(self):
+        site.build(self.source, self.out, "Ada Lovelace", "https://ada.example/brain/")
+        feed = (self.out / "feed.xml").read_text(encoding="utf-8")
+        atom = {"a": "http://www.w3.org/2005/Atom"}
+        root = ElementTree.fromstring(feed)
+        self.assertEqual(root.find("a:title", atom).text, "Ada Lovelace")
+        self.assertEqual(root.find("a:updated", atom).text, "2026-11-10T00:00:00Z")
+        links = {link.get("rel"): link.get("href") for link in root.findall("a:link", atom)}
+        self.assertEqual(links, {"self": "https://ada.example/brain/feed.xml", "hub": site.HUB, "alternate": "https://ada.example/brain/"})
+        entries = root.findall("a:entry", atom)
+        self.assertEqual([entry.find("a:title", atom).text for entry in entries], ["Built X & shipped it", "Other public"])  # newest first
+        self.assertEqual(entries[0].find("a:link", atom).get("href"), "https://ada.example/brain/notes/built-x.html")
+        self.assertEqual(entries[1].find("a:updated", atom).text, "2026-11-01T00:00:00Z")
+        index = (self.out / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<link rel="alternate" type="application/atom+xml" title="Ada Lovelace" href="feed.xml">', index)
+        key = site.indexnow_key("https://ada.example/brain/")
+        self.assertRegex(key, r"^[0-9a-f]{32}$")
+        self.assertEqual((self.out / f"{key}.txt").read_text(encoding="utf-8"), key + "\n")
+        for private in ("salary numbers", "not yet ready", "Secret plan.md"):
+            self.assertNotIn(private, feed)
+        # The same notes give the same feed: nothing in it is the time of the build.
+        self.assertEqual(site.build(self.source, self.out, "Ada Lovelace", "https://ada.example/brain/")["write"], [])
+
+    def test_without_an_address_there_is_no_feed_and_no_key(self):
+        site.build(self.source, self.out, "Ada Lovelace")
+        self.assertFalse((self.out / "feed.xml").exists())
+        self.assertEqual([p.name for p in self.out.glob("*.txt")], [])
+        self.assertNotIn("atom+xml", (self.out / "index.html").read_text(encoding="utf-8"))
+
     def test_a_note_named_index_does_not_replace_the_front_page(self):
         (self.source / "index.md").write_text("---\ntitle: My index note\npublish: true\n---\nbody\n", encoding="utf-8")
         site.build(self.source, self.out, "Ada")

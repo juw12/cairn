@@ -315,6 +315,18 @@ def public_digest(source: Path) -> str:
     return digest.hexdigest()
 
 
+def _announce(web: dict) -> None:
+    """Tell search engines which public pages changed (announce.py). Never raises: it runs on its own thread."""
+    try:
+        from . import announce
+
+        line = announce.summary(announce.after_publish(web))
+        if line:
+            log(line)
+    except Exception as error:
+        log(f"search engines not told: {error}")
+
+
 def publish_now(source: Path, repo: str, config: "Config", force: bool = False) -> dict:
     """Publish public notes to `repo` if they changed (or always with force). Records the outcome."""
     from . import publish
@@ -331,6 +343,9 @@ def publish_now(source: Path, repo: str, config: "Config", force: bool = False) 
         raise SyncError(str(error)) from error
     config.data["publishedDigest"] = digest
     web = report.get("site") or {}
+    if web.get("live") and config.get("announcePublic", True) and (web.get("changed") or web.get("feed")):
+        # The pages are online about a minute after the commit; waiting for that must not hold up the sync.
+        threading.Thread(target=_announce, args=(web,), name="cairn-announce", daemon=True).start()
     config.set("lastPublish", {
         "at": stamp, "repo": repo, "commit": (report.get("commit") or "")[:7],
         "changed": len(report["write"]) + len(report["delete"]),

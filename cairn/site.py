@@ -20,6 +20,7 @@ loses its page on the next build, and files you added to the folder by hand are 
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import posixpath
@@ -33,6 +34,9 @@ MANIFEST = ".cairn-site.json"
 STYLESHEET = "site.css"
 SEARCH_SCRIPT = "search.js"
 SITEMAP = "sitemap.xml"
+FEED = "feed.xml"  # the notes as an Atom feed, newest first
+FEED_ENTRIES = 50
+HUB = "https://pubsubhubbub.appspot.com/"  # the public WebSub hub Google reads feeds through
 ROBOTS = "robots.txt"
 NO_JEKYLL = ".nojekyll"  # GitHub Pages then serves the files as they are
 SEARCH_TEXT_LIMIT = 20000  # characters of one note the search script carries
@@ -451,6 +455,42 @@ def _sitemap(notes: list[dict], base: str) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n'
 
 
+def indexnow_key(base: str) -> str:
+    """The key that lets a site tell IndexNow search engines (Bing, Yandex, Naver, Seznam) about its pages.
+
+    It is not a secret: the site shows it in a file of the same name, which is how those engines know the
+    site itself is asking. The same address always gets the same key, so nothing has to be remembered.
+    """
+    return hashlib.sha256(f"cairn indexnow {base}".encode("utf-8")).hexdigest()[:32]
+
+
+def _feed(notes: list[dict], site_title: str, base: str) -> str:
+    """An Atom feed of the dated notes. Search engines read a feed for what is new, and the hub link lets
+    a publish tell them at once. Nothing in it is the time of the build, so unchanged notes give the same file."""
+    dated = sorted((note for note in notes if _day(note)), key=lambda note: (_day(note), note["path"]), reverse=True)
+    if not dated:
+        return ""
+    entries = []
+    for note in dated[:FEED_ENTRIES]:
+        address = html.escape(_address(base, page_path(note["path"])))
+        headline = _shorten(_text(note["meta"].get("claim")), 110) or note["title"]
+        entries.append(
+            f"  <entry>\n    <title>{html.escape(headline)}</title>\n    <link href=\"{address}\"/>\n"
+            f"    <id>{address}</id>\n    <updated>{_day(note)}T00:00:00Z</updated>\n"
+            f"    <summary>{html.escape(_summary(note))}</summary>\n  </entry>\n"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<feed xmlns="http://www.w3.org/2005/Atom">\n'
+        f"  <title>{html.escape(site_title)}</title>\n  <id>{html.escape(base)}</id>\n"
+        f"  <updated>{_day(dated[0])}T00:00:00Z</updated>\n"
+        f'  <link rel="self" href="{html.escape(base + FEED)}"/>\n  <link rel="hub" href="{HUB}"/>\n'
+        f'  <link rel="alternate" href="{html.escape(base)}"/>\n'
+        f"  <author><name>{html.escape(site_title)}</name></author>\n"
+        + "".join(entries)
+        + "</feed>\n"
+    )
+
+
 # ------------------------------------------------------------ pages
 
 CSS = """\
@@ -647,6 +687,8 @@ def _index_page(notes: list[dict], site_title: str, base: str = "") -> str:
     if address:
         listed["url"] = address
     head = [_structured(listed)] + ([f'<script src="{SEARCH_SCRIPT}" defer></script>'] if notes else [])
+    if base and any(_day(note) for note in notes):
+        head.append(f'<link rel="alternate" type="application/atom+xml" title="{html.escape(site_title)}" href="{FEED}">')
     # The heading stays the name; the title a search result shows also says what is on the page.
     title = f"{site_title} · public brain: {pieces + ' with evidence' if work else count}" if notes else site_title
     return _page(
@@ -673,6 +715,11 @@ def files(public: dict[str, str], title: str = "", url: str = "") -> dict[str, s
     if base:
         pages[SITEMAP] = _sitemap(notes, base)
         pages[ROBOTS] = f"User-agent: *\nAllow: /\n\nSitemap: {base}{SITEMAP}\n"  # read by crawlers when the folder is a site's root
+        feed = _feed(notes, site_title, base)
+        if feed:
+            pages[FEED] = feed
+        key = indexnow_key(base)
+        pages[f"{key}.txt"] = key + "\n"
     for note in notes:
         here = page_path(note["path"])
 
