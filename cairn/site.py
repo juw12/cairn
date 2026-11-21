@@ -427,17 +427,24 @@ def base_url(url: str) -> str:
     return url.split("#")[0].split("?")[0].rstrip("/") + "/"
 
 
+def _structured(data: dict) -> str:
+    """`data` as the JSON-LD block search engines read. "<" is written as \\u003c, so no text can end the tag."""
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    return f'<script type="application/ld+json">{text}</script>'
+
+
+def _day(note: dict) -> str:
+    when = _when(note)
+    return when if re.fullmatch(r"\d{4}-\d{2}-\d{2}", when) else ""
+
+
 def _address(base: str, page: str) -> str:
     return base + ("" if page == "index.html" else urllib.parse.quote(page)) if base else ""
 
 
 def _sitemap(notes: list[dict], base: str) -> str:
-    def day(note: dict) -> str:
-        when = _when(note)
-        return when if re.fullmatch(r"\d{4}-\d{2}-\d{2}", when) else ""
-
-    rows = [(base, max((day(note) for note in notes), default=""))]
-    rows += [(_address(base, page_path(note["path"])), day(note)) for note in sorted(notes, key=lambda note: note["path"])]
+    rows = [(base, max((_day(note) for note in notes), default=""))]
+    rows += [(_address(base, page_path(note["path"])), _day(note)) for note in sorted(notes, key=lambda note: note["path"])]
     urls = "".join(
         f"  <url><loc>{html.escape(loc)}</loc>{f'<lastmod>{when}</lastmod>' if when else ''}</url>\n" for loc, when in rows
     )
@@ -556,9 +563,26 @@ def _note_page(note: dict, site_title: str, link, base: str = "") -> str:
         f'<div class="claim">{html.escape(claim)}{_evidence_html(_evidence(meta))}</div>' if claim else "",
         render_markdown(body, link),
     ]
+    # A search result shows this title. "titip" alone says nothing to someone who has never heard of it, so a
+    # note with a claim is titled by the claim ("Built titip: Outlook inbox from a paired phone").
+    headline = _shorten(claim, 70) if claim else note["title"]
+    address = _address(base, path)
+    about = {
+        "@context": "https://schema.org", "@type": "Article",
+        "headline": _shorten(headline, 110), "name": note["title"], "description": _summary(note),
+        "author": {"@type": "Person", "name": site_title},
+    }
+    if _day(note):
+        about["dateModified"] = _day(note)
+    if note["tags"]:
+        about["keywords"] = ", ".join(str(tag) for tag in note["tags"])
+    if address:
+        about["url"] = about["mainEntityOfPage"] = address
+    if _evidence(meta):
+        about["citation"] = _evidence(meta)
     return _page(
-        f"{note['title']} · {site_title}", "\n".join(part for part in content if part), _href(path, STYLESHEET),
-        description=_summary(note), address=_address(base, path),
+        f"{headline} · {site_title}", "\n".join(part for part in content if part), _href(path, STYLESHEET),
+        description=_summary(note), address=address, head=_structured(about),
     )
 
 
@@ -602,10 +626,32 @@ def _index_page(notes: list[dict], site_title: str, base: str = "") -> str:
     content.append("</div>")
     count = f'{len(notes)} public note{"s" if len(notes) != 1 else ""}'
     description = f"{site_title}: {pieces if work else count}, each on its own page. Search them all."
+    address = _address(base, "index.html")
+    listed = {
+        "@context": "https://schema.org", "@type": "CollectionPage", "name": site_title,
+        "author": {"@type": "Person", "name": site_title},
+        "mainEntity": {
+            "@type": "ItemList",
+            "numberOfItems": len(notes),
+            "itemListElement": [
+                {
+                    "@type": "ListItem", "position": position, "name": note["title"],
+                    **({"url": _address(base, page_path(note["path"]))} if base else {}),
+                }
+                for position, note in enumerate(work + other, 1)
+            ],
+        },
+    }
+    if notes:
+        listed["description"] = description
+    if address:
+        listed["url"] = address
+    head = [_structured(listed)] + ([f'<script src="{SEARCH_SCRIPT}" defer></script>'] if notes else [])
+    # The heading stays the name; the title a search result shows also says what is on the page.
+    title = f"{site_title} · public brain: {pieces + ' with evidence' if work else count}" if notes else site_title
     return _page(
-        site_title, "\n".join(content), STYLESHEET,
-        description=description if notes else "", address=_address(base, "index.html"), kind="website",
-        head=f'<script src="{SEARCH_SCRIPT}" defer></script>' if notes else "",
+        title, "\n".join(content), STYLESHEET,
+        description=description if notes else "", address=address, kind="website", head="\n".join(head),
     )
 
 

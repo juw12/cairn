@@ -2,6 +2,16 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 88,
+      "date": "2026-11-21",
+      "title": "Found on Google by what it does, not only by its name",
+      "changes": [
+        "Cairn in search results: the title and description now say what Cairn is in the words people type when they have never heard of it (open-source second brain, Markdown, Git repo, task board, decision log, journal), and the description search engines read lists the same",
+        "Public brain page: a note with a claim is titled by the claim in search results, for example “Built titip: Outlook inbox from a paired phone” instead of “titip”. The heading on the page stays the note’s own title",
+        "Public brain page: the first page’s title says what it is and how much is on it, and every page describes itself in the form search engines read (what it is, who wrote it, when it last changed, its tags and the links that back it)"
+      ]
+    },
+    {
       "build": 87,
       "date": "2026-11-21",
       "title": "Your computers leave messages for each other",
