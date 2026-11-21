@@ -473,7 +473,7 @@ def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:
 
     server = make_server(brain, port)
     worker = attach_autopilot(server, brain)
-    live = livesync.LiveSync(server.RequestHandlerClass).start()
+    live = livesync.LiveSync(server.RequestHandlerClass, log=lambda text: print(text, flush=True)).start()
     server.RequestHandlerClass.live_sync = live
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"Cairn {__version__} · {brain.project_name} · brain: {brain.dir}")
