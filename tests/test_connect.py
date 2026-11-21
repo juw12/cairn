@@ -205,7 +205,12 @@ class SkillScriptsTests(ConnectCase):
     def test_with_a_folder_of_its_own_this_computer_writes_only_there(self):
         connect.set_write_folder(self.brain, "devices/laptop", self.settings)
         self.connect("vector")
-        self.assertIn("writes only inside `devices/laptop/`", (self.vector_skill / "SKILL.md").read_text(encoding="utf-8"))
+        skill = (self.vector_skill / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("goes in `devices/laptop/`", skill)
+        # its own notes land in that folder; the work is not fenced in: every computer has the same role
+        self.assertIn("every computer has the same role", skill)
+        self.assertIn("create\n  or edit that note from here", skill)
+        self.assertNotIn("Never create, edit, move or delete", skill)
         decisions = self.brain.dir / "devices" / "laptop" / "decisions"
         decisions.mkdir(parents=True)
         (decisions / "mac-0007-an-older-one.md").write_text("---\ntitle: An older one\ntype: decision\n---\n", encoding="utf-8")
