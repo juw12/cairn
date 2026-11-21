@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 92 (2026-11-21): Issues, pull requests, releases and branches inside Cairn
+
+- Repo pages have two more tabs. Releases shows each release with its notes and its files to download. Issues and pull requests lists the open ones, with the closed ones one press away; one opens with everything said on it, and a pull request also shows its reviews, the comments left on lines and the files it changes
+- Branches: the branch name under a repo’s title lists its branches. Picking one shows that branch’s pictures, README, pushes and files, and every step from there stays on it
+- A link to github.com anywhere in Cairn (a note, Vibe, Home, a README, the version history) now opens that repo, folder, file, push, pull request, issue or list of releases inside Cairn. Ctrl or Cmd with the click still opens github.com, and so does every button that says GitHub. Downloads, and pages Cairn has no place for, stay on GitHub
+- Pictures and videos: up to six videos lead the grid, so a folder of many covers no longer pushes every video off the first screen, and Pictures or Videos can be shown alone
+- A video’s tile is now a picture taken from the video instead of a live player. A phone gives a page only a few video players, and a grid of videos could use them up before the one you opened
+- One thing a browser cannot do: save a file of a private repo’s release without github.com. GitHub refuses that request from any web page, so those files download through github.com and the page says so
+
 ## Build 91 (2026-11-21): Your AI app remembers from the cloud when the brain is not on the computer
 
 - The memory Cairn gives your AI app no longer depends on the brain's folder being on the computer. A brain that is pushed to GitHub is read from there when the folder is missing: a new computer, a wiped disk, a folder that was moved. The chat is told in the first line that the answer comes from GitHub

@@ -1,11 +1,15 @@
 // Repo pages: look inside one GitHub repo without leaving Cairn.
 //
-// A repo, or any folder inside it, opens as three tabs:
-//   Look    every picture and video under the folder, its sub-folders as cards with a cover, and its README
-//   Pushes  the latest commits that touched the folder; a commit opens to its pictures, files and changes
-//   Files   the folder's listing; a file opens as a picture, a video, sound, rendered Markdown or text
+// A repo, or any folder inside it, opens as tabs:
+//   Look      every picture and video under the folder, its sub-folders as cards with a cover, and its README
+//   Pushes    the latest commits that touched the folder; a commit opens to its pictures, files and changes
+//   Files     the folder's listing; a file opens as a picture, a video, sound, rendered Markdown or text
+//   Releases  each release with its notes and its files to download
+//   Issues and pull requests   the open ones (or the closed); one opens with everything said on it
+// The branch chip under the title lists the branches; picking one shows that branch instead of the default one.
 //
-// The address holds the place (#/projects/<owner>/<repo>/<tab>/<path>), so Back, reload and a link all work.
+// The address holds the place (#/projects/<owner>/<repo>/<tab>/<path>?ref=<branch>), so Back, reload and a link
+// all work. A link to github.com anywhere in Cairn is turned into such an address (githubTarget) and opens here.
 // Everything is read from the GitHub API with the sign-in Cairn already has. Nothing is written.
 //
 // A public repo's pictures load straight from raw.githubusercontent.com. Videos and sound, and every file of a
@@ -13,6 +17,8 @@
 // "application/octet-stream", which Safari will not play, and gives nothing from a private repo without a token.
 // A blob is only ever shown in <img>, <video> or <audio>, or saved with a download link. It is never opened as a
 // page, because a blob page would run as Cairn and could read the sign-in.
+// In the grid a video is a picture taken from it (framePicture), never a live player: a phone gives a page only
+// a few players, and the one video that is opened needs one.
 
 import * as gh from "./github.js";
 import { escapeHtml as esc } from "./md.js";
