@@ -96,7 +96,9 @@ jobs:
         if: always()
         with:
           name: cairn-android-emulator-check
-          path: android/dist/*.png
+          path: |
+            android/dist/*.png
+            android/dist/android-logcat.txt
           retention-days: 7
 
   publish:
