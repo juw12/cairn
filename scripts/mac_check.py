@@ -21,7 +21,7 @@ MENU_BAR_LAYER = 25
 
 def app_entry() -> dict:
     listing = subprocess.run(["lsappinfo", "list"], capture_output=True, text=True).stdout
-    for block in re.split(r"\n\s*\n", listing):
+    for block in re.split(r'(?m)^(?=\s*\d+\) ")', listing):  # one entry starts with: 12) "Name" ASN:...
         if f'bundleID="{BUNDLE_ID}"' not in block:
             continue
         name = re.search(r'"([^"]*)"', block)
