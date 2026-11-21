@@ -1,6 +1,7 @@
 """cairn publish --site: a plain-HTML public page from publish: true notes, with nothing private in it."""
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,7 +145,11 @@ class SiteTests(unittest.TestCase):
         site.build(self.source, self.out, "Ada Lovelace")
         page = (self.out / "notes/built-x.html").read_text(encoding="utf-8")
         self.assertIn('<meta name="description" content="Built X &amp; shipped it">', page)
-        self.assertIn('<meta property="og:title" content="Built X · Ada Lovelace">', page)
+        self.assertIn("<title>Built X &amp; shipped it · Ada Lovelace</title>", page)  # the claim: words people search for
+        self.assertIn("<h1>Built X</h1>", page)
+        self.assertIn("<title>Other public · Ada Lovelace</title>", (self.out / "Other public.html").read_text(encoding="utf-8"))
+        index = (self.out / "index.html").read_text(encoding="utf-8")
+        self.assertIn("<title>Ada Lovelace · public brain: 1 piece of work with evidence</title>", index)
         other = (self.out / "Other public.html").read_text(encoding="utf-8")
         self.assertIn('<meta name="description" content="back to Built X">', other)
         self.assertNotIn("canonical", page)  # no address was given, so none is claimed
@@ -167,6 +172,35 @@ class SiteTests(unittest.TestCase):
         for bad in ("ada.example/brain", "javascript:alert(1)", 'https://ada.example/"><script>'):
             with self.assertRaises(publish.PublishError):
                 site.build(self.source, self.out, "Ada", bad)
+
+    def test_pages_describe_themselves_in_the_form_search_engines_read(self):
+        (self.source / "tricky.md").write_text(
+            '---\ntitle: "A </script><script>alert(1)</script> title"\npublish: true\n---\nbody\n', encoding="utf-8"
+        )
+        site.build(self.source, self.out, "Ada Lovelace", "https://ada.example/brain/")
+
+        def structured(page: str) -> dict:
+            text = (self.out / page).read_text(encoding="utf-8")
+            blocks = re.findall(r'<script type="application/ld\+json">(.*?)</script>', text, re.S)
+            self.assertEqual(len(blocks), 1, page)
+            return json.loads(blocks[0])
+
+        note = structured("notes/built-x.html")
+        self.assertEqual((note["@type"], note["name"], note["headline"]), ("Article", "Built X", "Built X & shipped it"))
+        self.assertEqual(note["author"], {"@type": "Person", "name": "Ada Lovelace"})
+        self.assertEqual((note["dateModified"], note["keywords"]), ("2026-11-10", "tools"))
+        self.assertEqual(note["url"], "https://ada.example/brain/notes/built-x.html")
+        self.assertEqual(note["citation"], ["https://github.com/me/x", "https://example.org/demo/"])
+        index = structured("index.html")
+        self.assertEqual((index["@type"], index["url"]), ("CollectionPage", "https://ada.example/brain/"))
+        items = index["mainEntity"]["itemListElement"]
+        self.assertEqual(index["mainEntity"]["numberOfItems"], len(items))
+        self.assertIn({"@type": "ListItem", "position": 1, "name": "Built X", "url": "https://ada.example/brain/notes/built-x.html"}, items)
+        # A title cannot end the block and start a script of its own.
+        tricky = (self.out / "tricky.html").read_text(encoding="utf-8")
+        self.assertEqual(structured("tricky.html")["name"], "A </script><script>alert(1)</script> title")
+        self.assertNotIn("<script>alert(1)", tricky)
+        self.assertNotIn("<script>alert(1)", (self.out / "index.html").read_text(encoding="utf-8"))
 
     def test_a_note_named_index_does_not_replace_the_front_page(self):
         (self.source / "index.md").write_text("---\ntitle: My index note\npublish: true\n---\nbody\n", encoding="utf-8")
