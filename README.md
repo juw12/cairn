@@ -344,8 +344,9 @@ and stays paired, so a home-screen bookmark keeps working: live sessions, autopi
 
 ### Let your computers leave messages for each other
 
-One brain, several computers: a laptop at home, one at work, a Mac for the things only a Mac can check. What
-one of them found, left hanging or cannot do itself used to get lost between them. Now it leaves a message.
+One brain, several computers: a laptop at home, one at work, a Mac for the things only a Mac can check, a
+phone. What one of them found, left hanging or cannot do itself used to get lost between them. Now it leaves
+a message.
 
 ```bash
 cairn handoff                                          # what the other computers left for this one
@@ -355,6 +356,7 @@ cairn handoff show "buddy"                             # one conversation in ful
 cairn handoff pickup "buddy"                           # this computer has taken it on
 cairn handoff reply "buddy" "Which macOS do you want it on?"
 cairn handoff done "buddy" "24 of 24 checks pass. The update check fails: see pull request 45."
+cairn handoff close "pull cairn" "Everyone has it."    # over, for every computer
 cairn handoff --all                                    # also what is between other computers, and what is settled
 ```
 
@@ -363,17 +365,30 @@ cairn handoff --all                                    # also what is between ot
   into the brain (a session, its `machines/` note or a message). `cairn vibe device` shows this one's name.
 - **Where it stands:** a conversation is for one computer or many. Each one says `pickup` when it takes it on
   and `done` when its part is finished; anyone can `reply` in between, also a computer it was not for. It is
-  settled when every computer it was for has said `done`, or when the one that started it says `done` itself.
+  settled when every computer it was for has said `done`, when the one that started it says `done` itself, or
+  when anyone says `close`, which calls it off for every computer.
 - **In the app:** the Today page has a block **Between computers**: *For this computer* first, then *This
-  computer is waiting for*, then what is between the others, with **Picked up**, **Done** and an answer box
-  under each conversation, and a form to leave a new message. The web app and a phone are not a computer, so
-  there you read every conversation and answer.
+  computer is waiting for*, then what is between the others, with **Picked up**, **Done**, an answer box and
+  **Close for everyone** under each conversation, and a form to leave a new message.
+- **A phone takes part:** the web app and a phone go by a name kept in that browser (*Phone* until you press
+  **Rename**). A message can be for that name, and the phone picks up, finishes and closes like a computer.
+- **It leaves at once, where the brain is set up for it.** The desktop app with automatic sync on sets that up
+  by itself (`git config cairn.sync auto` in the brain's repository); your own sync script works too
+  (`git config cairn.sync "/path/to/sync.sh"`). Then `cairn handoff send` and an answer push right away and
+  say so, `cairn handoff` fetches before it lists, and while the app is open it asks the remote every 20
+  seconds whether something new is there, so the other computer's message shows without a reload. Without
+  that setting nothing is pushed for you: the message goes with the brain's next sync, and the command says
+  so. `--offline` skips the network for one command.
+- **The order holds when clocks do not.** A message carries the writer's own time, the same moment in UTC
+  (`sent`), and the message it follows (`after`). Two computers in different time zones read the same order,
+  and an answer never shows before what it answers, even from a computer whose clock is wrong.
 - **How it travels:** every message is its own Markdown file in `brain/handoffs/`, written once by the
-  computer that says it and never changed. Two computers never write the same file, so the brain's git remote
-  (or any folder sync) carries the conversation with nothing to merge. A message arrives with the other
-  computer's next sync, not at once.
-- **For assistants:** the agent instructions on the Vibe page tell an assistant to run `cairn handoff` before
-  it starts, and to leave one when it stops with something another computer has to do.
+  device that says it and never changed. Two devices never write the same file, so the brain's git remote
+  (or any folder sync) carries the conversation with nothing to merge.
+- **For assistants:** `cairn mcp` has `handoffs`, `handoff_send` and `handoff_answer`, and tells an assistant
+  to look at the start. The memory skill that `cairn connect` puts into your AI app says the same
+  (`recall.py handoffs`, `remember.py handoff`, `remember.py answer`), and so do the agent instructions on
+  the Vibe page. An assistant that stops with something only another computer can do leaves it there.
 
 ### Get a daily status report in Telegram
 
@@ -672,7 +687,7 @@ cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ a
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
 cairn vibe device                        # the name this computer puts on its sessions (--adopt names older ones)
-cairn handoff                            # what your other computers left for this one (send, show, pickup, reply, done)
+cairn handoff                            # what your other computers left for this one (send, show, pickup, reply, done, close)
 cairn vibe github copy D:/github-copy    # a full copy of every repo of your GitHub accounts on this computer, with issues, releases and wikis
 cairn vibe github copy everywhere        # ask your other computers to keep their own copy too (everywhere off stops asking)
 cairn precedent brief "goal"             # a brief from your own history (learn, queue, next, log, install)
@@ -780,6 +795,7 @@ The **Context** page shows the same snippet, filled in for your machine, when yo
 | `capture`, `log`, `update_note` | Add an idea/task/decision, write to today's journal, change status or tags (refuses to overwrite newer edits) |
 | `precedent_brief`, `queue_next` | The brief for a goal from your own history; the next open `#queue` item |
 | `queue_add`, `precedent_log` | Queue a follow-up instead of asking; record what shipped and what you corrected |
+| `handoffs`, `handoff_send`, `handoff_answer` | See what your other computers left for this one; leave them a message; say picked up, done or closed |
 
 Every note is also a resource (`cairn://brain/<path>`); the `project-brief` prompt starts a session from the context pack
 and the `precedent` prompt hands over a goal. Add `--read-only` to hide the write tools.

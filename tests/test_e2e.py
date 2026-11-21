@@ -2170,14 +2170,16 @@ class EndToEndTests(unittest.TestCase):
 
         page.evaluate(DEVICES_SEED)
         page.wait_for_selector(block)
-        self.assertIn("Nothing is open between your computers.", page.inner_text(block))
+        # The web app is no computer, but it takes part under a name of its own.
+        self.assertIn("Nothing is waiting for this device", page.inner_text(block))
+        self.assertIn("This device is called Web app.", page.inner_text(f"{block} .ho-name"))
 
         # This is the MacBook Pro, and the other computer has left it something.
         page.evaluate("""() => {
           const s = window.cairn.state;
           const core = window.cairn.core;
           const message = core.handoffMessage("ASUS EXPERTBOOK", "Check Buddy on a real Mac", "Run the **self-test** and say what the log says.",
-            "2026-11-20T09:00:00", s.files.map((f) => f.path), { to: ["MacBook Pro"] });
+            "2026-11-20T09:00:00", s.files.map((f) => f.path), { to: ["MacBook Pro"], sent: "2026-11-20T02:00:00Z" });
           s.files.push({ path: message.path, text: message.text, mtime: Date.now() });
           s.vibeHere = "MacBook Pro";
           s.notes = s.files.filter((f) => f.path.endsWith(".md")).map((f) => core.noteFromFile(f.path, f.text, f.mtime));
@@ -2187,7 +2189,10 @@ class EndToEndTests(unittest.TestCase):
         handoffs = lambda: page.evaluate("() => window.cairn.state.files.filter((f) => f.path.startsWith('handoffs/')).map((f) => f.text)")  # noqa: E731
         # The files are listed by name, not by time: find a message by its title.
         message = lambda title: next(text for text in handoffs() if f"title: {title}\n" in text)  # noqa: E731
+        slug_of = lambda title: page.evaluate(  # noqa: E731
+            "(t) => window.cairn.state.notes.find((n) => n.meta.type === 'handoff' && n.title === t).slug", title)
         self.assertIn("for this computer", page.inner_text(f"{block} .ho-head").lower())
+        self.assertEqual(page.locator(f"{block} .ho-name").count(), 0, "a computer is called what its sessions call it")
         self.assertEqual(page.inner_text(f"{block} .ho-row .ho-new"), "New")
         self.assertIn("from ASUS EXPERTBOOK", page.inner_text(f"{block} .ho-row .hr-meta"))
         self.assertIn("1 for this computer", page.text_content(f"{block} .vp-sum"))
@@ -2204,6 +2209,9 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("from: MacBook Pro\n", message("Picked up"))
         self.assertIn("says: picked-up\n", message("Picked up"))
         self.assertIn('thread: "[[2026-11-20-0900-asus-expertbook-check-buddy-on-a-real-mac]]"', message("Picked up"))
+        # Its time is there twice: on this computer's clock, and in UTC for a computer in another time zone.
+        self.assertRegex(message("Picked up"), r"created: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\nsent: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\n")
+        self.assertNotIn("after:", message("Picked up"), "it follows the first message, which the thread names")
         self.assertEqual(page.locator(f'{block} [data-action="handoff-say"][data-says="picked-up"]').count(), 0)
 
         # An answer; what is typed survives the page drawing itself again.
@@ -2213,9 +2221,12 @@ class EndToEndTests(unittest.TestCase):
         page.click(f'{block} .ho-reply button[type="submit"]')
         page.wait_for_function("() => window.cairn.state.files.filter((f) => f.path.startsWith('handoffs/')).length === 3")
         self.assertIn("says: note\n", message("Which Buddy version?"))
+        # It names the message it follows, so a wrong clock cannot put it before that one.
+        self.assertIn(f'after: "[[{slug_of("Picked up")}]]"', message("Which Buddy version?"))
         self.assertEqual(page.input_value("#handoff-reply"), "")
         self.assertEqual(page.locator(f"{block} .ho-msg").count(), 3)
         self.assertEqual(page.locator(f"{block} .ho-msg.own").count(), 2)
+        self.assertEqual(page.eval_on_selector_all(f"{block} .ho-msg .ho-line", "els => els.map((e) => e.textContent)"), ["Which Buddy version?"])
 
         # Done, with a last line: the conversation is settled and leaves the list.
         page.fill("#handoff-reply", "24 of 24 checks pass.")
@@ -2228,6 +2239,7 @@ class EndToEndTests(unittest.TestCase):
         page.click(f'{block} [data-action="handoff-settled"]')
         page.wait_for_selector(f"{block} .ho-row")
         self.assertIn("Check Buddy on a real Mac", page.inner_text(f"{block} .ho-row"))
+        page.click(f'{block} [data-action="handoff-settled"]')
 
         # Leave one for the other computer. With one other computer it is already ticked.
         page.click(f'{block} [data-action="handoff-write"]')
@@ -2249,9 +2261,20 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("this computer is waiting for", page.locator(f"{block} .ho-head").first.inner_text().lower())
         self.assertIn("to ASUS EXPERTBOOK", page.locator(f"{block} .ho-row .hr-meta").first.inner_text())
         self.assertIn("waiting for 1 answer", page.text_content(f"{block} .vp-sum"))
+
+        # Called off: anyone can close a conversation for every computer.
+        page.locator(f"{block} .ho-row").first.click()
+        page.wait_for_selector(f"{block} .ho-reply")
+        self.assertEqual(page.locator(f'{block} [data-action="handoff-say"][data-says="done"]').count(), 0, "nothing was asked of this computer")
+        page.fill("#handoff-reply", "Not needed, it was merged by hand.")
+        page.click(f'{block} [data-action="handoff-say"][data-says="closed"]')
+        page.wait_for_function("() => window.cairn.state.files.filter((f) => f.path.startsWith('handoffs/')).length === 6")
+        self.assertIn("says: closed\n", message("Not needed, it was merged by hand."))
+        page.wait_for_function("(sel) => !document.querySelector(sel)", arg=f"{block} .ho-row")
+        self.assertIn("Show 2 settled", page.inner_text(f'{block} [data-action="handoff-settled"]'))
         self.assertEqual(self.errors, [])
 
-        # On a phone the rows stack and nothing runs off the side.
+        # A phone takes part too: under its own name it has things to pick up, finish and close.
         phone = self.open(viewport=(390, 844))
         phone.evaluate(DEVICES_SEED)
         phone.evaluate("""() => {
@@ -2263,12 +2286,31 @@ class EndToEndTests(unittest.TestCase):
           s.notes = s.files.filter((f) => f.path.endsWith(".md")).map((f) => core.noteFromFile(f.path, f.text, f.mtime));
           window.cairn.rerender();
         }""")
-        phone.wait_for_selector(f"{block} .ho-row")
+        phone.wait_for_selector(f"{block} .ho-row .ho-new")
+        self.assertIn("for this device (web app)", phone.inner_text(f"{block} .ho-head").lower())
+        phone.click(f'{block} [data-action="handoff-rename"]')
+        phone.fill(".modal input", "Juwen's phone")
+        phone.click('.modal button[type="submit"]')
+        phone.wait_for_function("(sel) => document.querySelector(sel)?.textContent.includes(\"Juwen's phone\")", arg=f"{block} .ho-head")
+        self.assertEqual(phone.evaluate("() => localStorage.getItem('cairn.handoffName')"), "Juwen's phone")
         phone.click(f"{block} .ho-row")
         phone.wait_for_selector(f"{block} .ho-reply")
-        # The web app is no computer: it reads and answers, and has nothing to pick up.
-        self.assertEqual(phone.locator(f'{block} [data-action="handoff-say"]').count(), 0)
+        phone.click(f'{block} [data-action="handoff-say"][data-says="picked-up"]')
+        phone.wait_for_selector(f"{block} .ho-row .hr-badge.warn")
+        said = phone.evaluate("() => window.cairn.state.files.filter((f) => f.path.startsWith('handoffs/')).map((f) => f.text)")
+        self.assertTrue(any("from: Juwen's phone\n" in text and "says: picked-up\n" in text for text in said), said)
         self.assertEqual(phone.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth"), True)
+        # A computer can now leave something for the phone by its name.
+        phone.evaluate("""() => {
+          const s = window.cairn.state;
+          const core = window.cairn.core;
+          const message = core.handoffMessage("MacBook Pro", "Approve the release from the phone", "", "2026-11-20T10:00:00", s.files.map((f) => f.path), { to: ["juwen's  PHONE"] });
+          s.files.push({ path: message.path, text: message.text, mtime: Date.now() });
+          s.notes = s.files.filter((f) => f.path.endsWith(".md")).map((f) => core.noteFromFile(f.path, f.text, f.mtime));
+          window.cairn.rerender();
+        }""")
+        phone.wait_for_function("(sel) => document.querySelectorAll(sel).length === 2", arg=f"{block} .ho-section:first-child .ho-row")
+        self.assertIn("2 for this device", phone.text_content(f"{block} .vp-sum"))
 
     def test_home_leads_with_what_needs_you_and_what_runs(self):
         page = self.open()

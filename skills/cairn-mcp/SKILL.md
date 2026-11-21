@@ -23,6 +23,7 @@ Check your tool list first. A server started with `--read-only` has only the rea
 | `code_todos` | `limit` | List `TODO`, `FIXME` and `HACK` comments in the project's code with `file:line`. |
 | `precedent_brief` | `goal`, `k` | Before starting a delegated goal: what the user asked for after similar goals, lessons, a draft definition of done. |
 | `queue_next` | `auto_only` | Get the next open `#queue` task, skipping items tagged `#needs-me`. |
+| `handoffs` | `thread`, `all`, `device` | See what the user's other computers left for this one and what this one is waiting for. Call it at the start. `thread` (a few words of a conversation's name) shows that conversation in full. |
 
 ### Writing (absent in read-only mode)
 
@@ -33,19 +34,22 @@ Check your tool list first. A server started with `--read-only` has only the rea
 | `update_note` | `path` (required), `status`, `add_tags`, `remove_tags`, `append` | Change a note in place: move its status, change tags or append Markdown. It refuses to overwrite a newer edit. |
 | `queue_add` | `text` (required), `auto`, `needs_me` | Queue a follow-up instead of asking the user. `auto`: safe unattended. `needs_me`: blocked until the user acts. |
 | `precedent_log` | `goal` (required), `delivered` (required), `correction`, `queue_path` | When a goal is done: record what was delivered and any correction the user made. `queue_path` also marks that queue task done. |
+| `handoff_send` | `title` (required), `to` (required), `body`, `device` | Leave a message for another of the user's computers: what only it can do or check, or what is unfinished here. `to` is a list of computer names (a few words of a name are enough) or `["all"]`. |
+| `handoff_answer` | `thread` (required), `says`, `text`, `device` | Add to a conversation between computers. `says`: `picked-up` when this computer takes it on, `done` when its part is finished (the result goes in `text`), `note` for a question or an answer, `closed` to end it for every computer. |
 
 Every note is also a resource, `cairn://brain/<path>`. The `project-brief` prompt starts a session from the context pack; the `precedent` prompt hands over a goal.
 
 ## How to work with it
 
-1. **Start** with `context`. Treat decisions with status `accepted` as binding.
+1. **Start** with `context`. Treat decisions with status `accepted` as binding. Then `handoffs`: another computer may have left this one something to do, check or finish. Say `handoff_answer` with `picked-up` when you start on it and `done` with the result when it is finished.
 2. **Look things up** with `search`, then `read_note` on the best hits. Use two or three short queries with different words when the first finds nothing; every word has to match, so long queries miss.
 3. **Answer with sources**: name the note each fact came from, for example `decisions/0007-...`.
 4. **Record as you go** (when writing tools exist):
    - the user settles something: `capture` with `decision:`;
    - work is agreed: `capture` with `todo:`;
    - a step is finished: `log` one plain sentence, and `update_note` to move the task to `doing` or `done`;
-   - something comes up that is not part of the current job: `queue_add`, not a question to the user.
+   - something comes up that is not part of the current job: `queue_add`, not a question to the user;
+   - something only another of the user's computers can do or check (another system, a login it holds, a device plugged into it): `handoff_send`, not only a line in your answer.
 5. **Finish** a delegated goal with `precedent_log`.
 
 ## Mistakes to avoid

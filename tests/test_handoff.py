@@ -7,15 +7,17 @@ import io
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from cairn import cli, core, handoff
-from cairn.brain import Brain
-from cairn.server import make_server
+from cairn import cli, core, handoff, livesync
+from cairn.brain import Brain, SyncError
+from cairn.server import ChangeFeed, make_server
 
 MAC = "MacBook Pro 15,4"
 ASUS = "ASUS EXPERTBOOK P5405CSA"
@@ -32,9 +34,9 @@ class ThreadRuleTests(unittest.TestCase):
     def setUp(self):
         self.files: dict[str, str] = {}
 
-    def say(self, sender, title, minute, to=None, thread="", says="note", body=""):
+    def say(self, sender, title, minute, to=None, thread="", says="note", body="", sent="", after=""):
         stamp = at(minute).strftime("%Y-%m-%dT%H:%M:%S")
-        message = core.handoff_message(sender, title, body, stamp, list(self.files), to=to, thread=thread, says=says)
+        message = core.handoff_message(sender, title, body, stamp, list(self.files), to=to, thread=thread, says=says, sent=sent, after=after)
         self.files[message["path"]] = message["text"]
         return message["path"].rsplit("/", 1)[-1][:-3]
 
@@ -144,6 +146,59 @@ class ThreadRuleTests(unittest.TestCase):
         thread = self.thread(thread_id)
         self.assertEqual([m["says"] for m in thread["messages"]], ["note", "picked-up", "note", "done"])
         self.assertFalse(thread["open"])
+
+    def test_an_answer_never_reads_before_what_it_answers_whatever_the_clocks_say(self):
+        # The ASUS clock is an hour behind. By the clocks its answer came before the question it answers.
+        thread_id = self.say(MAC, "Which build is live?", 30, to=[ASUS])
+        question = self.say(MAC, "And is the cache cleared?", 40, thread=thread_id)
+        answer = self.say(ASUS, "Build 87, and yes", 5, thread=thread_id, after=question)
+        self.say(MAC, "Thanks", 45, thread=thread_id, after=answer)
+        thread = self.thread(thread_id)
+        self.assertEqual([m["title"] for m in thread["messages"]],
+                         ["Which build is live?", "And is the cache cleared?", "Build 87, and yes", "Thanks"])
+        self.assertIn(f'after: "[[{question}]]"', self.files[f"handoffs/{answer}.md"])
+        # An answer to the first message itself needs no `after`: the thread names it.
+        self.assertNotIn("after:", self.files[f"handoffs/{question}.md"])
+
+    def test_messages_that_name_each_other_in_a_ring_are_all_still_shown(self):
+        thread_id = self.say(MAC, "Ring", 1, to=[ASUS])
+        self.files["handoffs/ring-a.md"] = f'---\ntitle: A\ntype: handoff\nfrom: {ASUS}\nthread: "[[{thread_id}]]"\nafter: "[[ring-b]]"\ncreated: 2026-11-20T23:02:00\n---\n'
+        self.files["handoffs/ring-b.md"] = f'---\ntitle: B\ntype: handoff\nfrom: {ASUS}\nthread: "[[{thread_id}]]"\nafter: "[[ring-a]]"\ncreated: 2026-11-20T23:03:00\n---\n'
+        self.assertEqual([m["title"] for m in self.thread(thread_id)["messages"]], ["Ring", "A", "B"])
+
+    def test_two_time_zones_agree_on_the_order_through_the_time_in_utc(self):
+        # Batam is UTC+7, Berlin UTC+1. On their own clocks the Berlin answer looks six hours early.
+        thread_id = self.say(MAC, "From Batam at 23:10", 10, to=[ASUS], sent="2026-11-20T16:10:00Z")
+        self.files["handoffs/berlin.md"] = (
+            f'---\ntitle: From Berlin at 17:20\ntype: handoff\nfrom: {ASUS}\nthread: "[[{thread_id}]]"\n'
+            'created: 2026-11-20T17:20:00\nsent: 2026-11-20T16:20:00Z\n---\n')
+        self.say(MAC, "From Batam at 23:30", 30, thread=thread_id, sent="2026-11-20T16:30:00Z")
+        thread = self.thread(thread_id)
+        self.assertEqual([m["title"] for m in thread["messages"]], ["From Batam at 23:10", "From Berlin at 17:20", "From Batam at 23:30"])
+        self.assertEqual(thread["last"], "2026-11-20T16:30:00Z")
+        self.assertEqual(thread["messages"][1]["sent"], "2026-11-20T16:20:00Z")
+
+    def test_anyone_can_close_a_conversation_for_every_computer(self):
+        named = self.say(MAC, "For two", 1, to=[ASUS, OFFICE])
+        self.say("Phone", "Not needed any more", 2, thread=named, says="closed")
+        thread = self.thread(named)
+        self.assertFalse(thread["open"])
+        self.assertEqual(core.handoff_waits_for(thread, ASUS), "")
+        self.assertEqual([p["state"] for p in thread["parts"]], ["waiting", "waiting"], "nobody did it; it was called off")
+        everyone = self.say(ASUS, "For all", 3)
+        self.say(OFFICE, "Closed", 4, thread=everyone, says="closed")
+        self.assertFalse(self.thread(everyone)["open"])
+        self.assertEqual(core.handoff_inbox(self.threads(), MAC)["settled"], [everyone, named])
+
+    def test_a_phone_takes_part_like_a_computer(self):
+        to_phone = self.say(MAC, "Approve the release on the phone", 1, to=["Phone"])
+        to_all = self.say(ASUS, "Everyone: read this", 2)
+        inbox = core.handoff_inbox(self.threads(), "phone")
+        self.assertEqual(inbox["mine"], [to_all, to_phone])
+        self.say("Phone", "Picked up", 3, thread=to_phone, says="picked-up")
+        self.assertEqual(core.handoff_waits_for(self.thread(to_phone), "Phone"), "picked-up")
+        self.say("Phone", "Approved", 4, thread=to_phone, says="done")
+        self.assertFalse(self.thread(to_phone)["open"])
 
     def test_an_answer_that_arrives_before_its_first_message_still_shows(self):
         text = core.handoff_message(ASUS, "Picked up", "", "2026-11-20T23:02:00", [], thread="not-synced-yet", says="picked-up")
@@ -295,6 +350,28 @@ class HandoffBrainTests(unittest.TestCase):
         self.assertIn("Settled:", out)
         self.assertLess(out.index("Settled:"), out.index("Buddy on the real Mac"))
 
+    def test_close_ends_it_for_every_computer_from_the_command_line(self):
+        self.run_cli(MAC, "send", "Rebuild the pictures", "--to", "asus", "--to", "office")
+        code, out, _ = self.run_cli(OFFICE, "close", "pictures", "They", "were", "rebuilt", "by", "hand.")
+        self.assertEqual(code, 0)
+        self.assertIn("Closed for every computer: brain/handoffs/", out)
+        self.assertIn("Nothing is waiting for this computer.", self.run_cli(ASUS)[1])
+        shown = self.run_cli(MAC, "show", "pictures")[1]
+        self.assertIn("settled", shown)
+        self.assertIn("[closed for everyone]", shown)
+        self.assertIn("They were rebuilt by hand.", shown)
+
+    def test_a_message_carries_its_time_in_utc_and_the_message_it_follows(self):
+        first = handoff.send(self.brain, "Clocks", to=["asus"], sender=MAC, now=self.tick())
+        self.assertRegex(first["meta"]["sent"], r"^2026-11-2\dT\d\d:\d\d:00Z$")
+        self.assertRegex(first["meta"]["created"], r"^2026-11-20T23:01:00$")
+        one = handoff.answer(self.brain, "clocks", "One", sender=ASUS, now=self.tick())
+        two = handoff.answer(self.brain, "clocks", "Two", sender=MAC, now=self.tick())
+        self.assertNotIn("after", one["meta"], "it follows the first message, which the thread already names")
+        self.assertEqual(two["meta"]["after"], f"[[{one['slug']}]]")
+        # shown on this computer's own clock, to the minute
+        self.assertIn("2026-11-20 23:01", handoff.transcript(self.brain, handoff.threads(self.brain)[0]))
+
     def test_the_command_line_says_what_is_missing(self):
         code, _, err = self.run_cli(MAC, "send", "No one named")
         self.assertEqual(code, 2)
@@ -330,6 +407,138 @@ class HandoffBrainTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
         self.assertEqual(info["device"], "Work laptop")
+
+
+def git(folder: Path, *args: str) -> str:
+    done = subprocess.run(["git", "-C", str(folder), *args], capture_output=True, text=True, encoding="utf-8")
+    if done.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)}: {done.stderr or done.stdout}")
+    return done.stdout.strip()
+
+
+@unittest.skipUnless(shutil.which("git"), "git is not installed")
+class AtOnceTests(unittest.TestCase):
+    """Two computers and the remote between them, all on this disk: a message leaves the moment it is
+    written and the other computer has it on its next small look at the remote."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.remote = self.tmp / "remote.git"
+        subprocess.run(["git", "init", "--quiet", "--bare", "--initial-branch=main", str(self.remote)], check=True)
+        self.mac = self.clone("mac", MAC)
+        self.mac.init()
+        for index, device in enumerate((MAC, ASUS)):
+            self.mac.write(f"sessions/2026-11-20-work-{index}.md",
+                           core.serialize_note({"title": f"Work {index}", "type": "session", "status": "done", "machine": device, "started": "2026-11-20T10:00"}, ""))
+        git(self.mac.root, "add", "-A")
+        git(self.mac.root, "commit", "--quiet", "-m", "start")
+        git(self.mac.root, "push", "--quiet", "-u", "origin", "main")
+        self.asus = self.clone("asus", ASUS)
+        git(self.asus.root, "pull", "--quiet", "origin", "main")
+        git(self.asus.root, "branch", "--quiet", "--set-upstream-to=origin/main", "main")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def clone(self, name: str, device: str) -> Brain:
+        folder = self.tmp / name
+        subprocess.run(["git", "init", "--quiet", "--initial-branch=main", str(folder)], check=True)
+        git(folder, "remote", "add", "origin", str(self.remote))
+        git(folder, "config", "user.name", device)
+        git(folder, "config", "user.email", "test@example.com")
+        git(folder, "config", "commit.gpgsign", "false")
+        return Brain(folder)
+
+    def watcher(self, brain: Brain):
+        handler = type("Handler", (), {"brain": brain, "changes": ChangeFeed()})
+        return livesync.LiveSync(handler), handler
+
+    def test_nothing_is_synced_unless_the_brain_says_so(self):
+        self.assertEqual(self.mac.sync_mode(), "")
+        handoff.send(self.mac, "Stays here", to=["asus"], sender=MAC)
+        self.assertEqual(handoff.deliver(self.mac), handoff.NEXT_SYNC)
+        self.assertEqual(handoff.refresh(self.mac), "")
+        with self.assertRaises(SyncError):
+            self.mac.sync_now()
+        live, _ = self.watcher(self.mac)
+        self.assertEqual(live.tick(), "")
+        self.assertTrue(self.mac.handoffs_unsent())
+        self.assertEqual(git(self.remote, "rev-list", "--count", "main"), "1", "nothing left this computer")
+
+    def test_a_message_leaves_at_once_and_arrives_on_the_other_computers_next_look(self):
+        for brain in (self.mac, self.asus):
+            brain.set_sync_mode("auto")
+        self.assertFalse(self.mac.handoffs_unsent())
+        self.assertFalse(self.asus.remote_moved())
+        live, handler = self.watcher(self.asus)
+        self.assertEqual(live.tick(), "", "the first look only notes where the brain stands")
+
+        note = handoff.send(self.mac, "Check the runner", "It stopped at 19:04.", to=["asus"], sender=MAC)
+        self.assertTrue(self.mac.handoffs_unsent())
+        self.assertEqual(handoff.deliver(self.mac), "Sent: it is on the brain's remote now.")
+        self.assertFalse(self.mac.handoffs_unsent())
+        self.assertIn(note["path"], git(self.remote, "ls-tree", "-r", "--name-only", "main"))
+
+        self.assertTrue(self.asus.remote_moved())
+        self.assertEqual(live.tick(), "synced")
+        self.assertFalse(self.asus.remote_moved())
+        self.assertEqual(handoff.threads(self.asus)[0]["title"], "Check the runner")
+        # the open pages are told which note is new, so it shows without a reload
+        self.assertEqual(handler.changes.since(0, handler.changes.epoch, "a page")["paths"], [f"brain/{note['path']}".removeprefix("brain/")])
+        self.assertEqual(live.tick(), "", "nothing new: nothing done")
+
+    def test_the_command_line_sends_and_fetches_by_itself(self):
+        for brain in (self.mac, self.asus):
+            brain.set_sync_mode("auto")
+
+        def run(brain: Brain, device: str, *args: str) -> str:
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"CAIRN_DEVICE": device}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                cli.main(["--root", str(brain.root), "handoff", *args])
+            return out.getvalue()
+
+        self.assertIn("Sent: it is on the brain's remote now.", run(self.mac, MAC, "send", "Check the runner", "--to", "asus"))
+        listed = run(self.asus, ASUS)  # fetched before it is read
+        self.assertIn(f"For this computer ({ASUS}):", listed)
+        self.assertIn("Check the runner", listed)
+        self.assertIn("Sent", run(self.asus, ASUS, "done", "runner", "It", "runs", "again."))
+        self.assertIn("Settled:", run(self.mac, MAC, "--all"))
+        # --offline touches neither the remote nor the other computer's copy
+        self.assertIn("next sync", run(self.mac, MAC, "send", "Later", "--to", "asus", "--offline"))
+        self.assertNotIn("Later", run(self.asus, ASUS, "--offline"))
+
+    def test_a_sync_command_of_the_users_own_is_run_as_it_is(self):
+        marker = self.tmp / "ran.txt"
+        script = self.tmp / "sync.py"
+        script.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\nprint('Brain synced by my own script.')\n", encoding="utf-8")
+        self.mac.set_sync_mode(f'"{sys.executable}" "{script}"')
+        self.assertEqual(self.mac.sync_now(), "Brain synced by my own script.")
+        self.assertEqual(marker.read_text(), "ran")
+        self.mac.set_sync_mode(f'"{sys.executable}" -c "import sys; print(\'two devices edited one note\'); sys.exit(3)"')
+        with self.assertRaisesRegex(SyncError, "two devices edited one note"):
+            self.mac.sync_now()
+        handoff.send(self.mac, "Will wait", to=["asus"], sender=MAC)
+        self.assertIn("Not sent yet: two devices edited one note", handoff.deliver(self.mac))
+        # a failed sync is not tried again every round
+        live, _ = self.watcher(self.mac)
+        self.assertEqual(live.tick(), "failed")
+        self.mac.set_sync_mode(f'"{sys.executable}" "{script}"')
+        marker.unlink()
+        self.assertEqual(live.tick(), "", "it waits before the next try")
+        self.assertFalse(marker.exists())
+        live.wake()  # a message saved in the app asks for a round now
+        self.assertEqual(live.tick(), "synced")
+        self.assertTrue(marker.exists())
+
+    def test_a_pull_made_outside_cairn_reaches_the_open_pages_too(self):
+        live, handler = self.watcher(self.asus)
+        live.tick()
+        self.mac.set_sync_mode("auto")
+        note = handoff.send(self.mac, "Pulled by a script", to=["asus"], sender=MAC)
+        handoff.deliver(self.mac)
+        git(self.asus.root, "pull", "--quiet", "origin", "main")  # the user's own sync script, a terminal
+        self.assertEqual(live.tick(), "changed 1")
+        self.assertEqual(handler.changes.since(0, handler.changes.epoch, "a page")["paths"], [note["path"]])
 
 
 if __name__ == "__main__":

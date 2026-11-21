@@ -4,6 +4,8 @@
     remember.py note "Short title" --body "What to remember." [--tags a,b]
     remember.py decision "Short title" --decision "..." [--context "..."] [--options "..."] [--consequences "..."]
     remember.py check                            is the brain's copy on its git remote up to date?
+    remember.py handoff "Short title" --to "computer" [--to "another"] --body "What it must know or do."
+    remember.py answer "a few words of the conversation" --says picked-up|done|note|closed [--text "..."]
 
 It never overwrites a note, and it refuses text that looks like a password, key or token.
 When this computer has its own folder in the brain, it writes only there.
@@ -173,6 +175,14 @@ def main(argv: list[str] | None = None) -> int:
     decision.add_argument("--consequences", default="")
     decision.add_argument("--tags", default="")
     commands.add_parser("check")
+    handoff = commands.add_parser("handoff")
+    handoff.add_argument("title")
+    handoff.add_argument("--to", action="append", default=[], required=True)
+    handoff.add_argument("--body", default="")
+    answer = commands.add_parser("answer")
+    answer.add_argument("thread")
+    answer.add_argument("--says", default="note", choices=["note", "picked-up", "done", "closed"])
+    answer.add_argument("--text", default="")
     parser.add_argument("--cloud", action="store_true", help="save on GitHub, not in the folder on this computer")
     for command in commands.choices.values():
         command.add_argument("--cloud", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
@@ -183,6 +193,19 @@ def main(argv: list[str] | None = None) -> int:
         if in_cloud:
             return check_github()
         check(common.open_brain())
+        return 0
+    if options.command in ("handoff", "answer"):
+        if in_cloud:
+            raise SystemExit("A message between computers needs the brain's folder on this computer. Save a note "
+                             "instead (remember.py note ...) and tell the user it is for the other computer.")
+        brain = common.open_brain()
+        if options.command == "handoff":
+            # A message for another computer is its own file in handoffs/, never an edit of someone else's note.
+            refuse_secrets(options.title, options.body)
+            print(common.call(brain, "handoff_send", {"title": options.title, "to": options.to, "body": options.body}, read_only=False))
+        else:
+            refuse_secrets(options.text)
+            print(common.call(brain, "handoff_answer", {"thread": options.thread, "says": options.says, "text": options.text}, read_only=False))
         return 0
 
     tags = [tag.strip().lstrip("#") for tag in options.tags.split(",") if tag.strip().lstrip("#")]

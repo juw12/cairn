@@ -2585,6 +2585,8 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .ho-form { margin-top: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
 .ho-reply textarea, .ho-form textarea { height: auto; min-height: 52px; padding: 9px 10px; resize: vertical; font: inherit; line-height: 1.5; }
 .ho-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ho-close { margin-left: auto; }
+.ho-name .link-button { display: inline; font: inherit; font-weight: 600; }
 .ho-to { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .ho-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12.5px; cursor: pointer; }
 .ho-chip:has(input:checked) { border-color: var(--ink); background: var(--ink); color: var(--bg); }

@@ -6,6 +6,8 @@
     recall.py read "path, slug or title"
     recall.py recent [--days 7]
     recall.py brief                              one page: open tasks, decisions, ideas, latest log
+    recall.py handoffs [--all]                   what the user's other computers left for this one
+    recall.py handoffs "a few words"             one of those conversations in full
 
 Add --cloud to read the newest copy on GitHub instead of the folder on this computer. Without a folder on
 this computer that happens by itself.
@@ -40,6 +42,10 @@ def rules(brain) -> str:
     return "\n".join(lines)
 
 
+NEEDS_THE_FOLDER = ("The messages between computers are worked out by Cairn from the brain's folder, which is not on "
+                    "this computer. Their files can be read: recall.py search \"handoff\", recall.py read \"handoffs/...\".")
+
+
 def from_this_computer(options) -> str:
     brain = common.open_brain()
     if options.command == "rules":
@@ -53,6 +59,8 @@ def from_this_computer(options) -> str:
         return common.call(brain, "read_note", {"path": options.note})
     if options.command == "recent":
         return common.call(brain, "recent", {"days": options.days})
+    if options.command == "handoffs":
+        return common.call(brain, "handoffs", {"thread": options.thread, "all": options.all})
     return common.call(brain, "context", {})
 
 
@@ -69,6 +77,8 @@ def from_github(options) -> str:
             return brain.read(options.note)
         if options.command == "recent":
             return brain.recent(options.days)
+        if options.command == "handoffs":
+            return NEEDS_THE_FOLDER
         return brain.brief()
     except cloud.CloudError as error:
         raise SystemExit(str(error))
@@ -89,6 +99,9 @@ def main(argv: list[str] | None = None) -> int:
     recent = commands.add_parser("recent")
     recent.add_argument("--days", type=int, default=7)
     commands.add_parser("brief")
+    handoffs = commands.add_parser("handoffs")
+    handoffs.add_argument("thread", nargs="?", default="")
+    handoffs.add_argument("--all", action="store_true")
     for command in commands.choices.values():
         command.add_argument("--cloud", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     options = parser.parse_args(argv)

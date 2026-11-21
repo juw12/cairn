@@ -36,7 +36,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import __version__, watch
+from . import __version__, livesync, watch
 from .brain import NO_WINDOW, Brain, SyncError, clone_repo, repo_folder_name
 from .phone import PHONE_PORT, PhoneAccess
 from .priority import keep_normal_priority
@@ -447,6 +447,20 @@ class KeepAwake:
         return ctypes.windll.kernel32.SetThreadExecutionState
 
 
+def mark_auto_sync(brain, on: bool) -> None:
+    """Say in the brain's own repository whether Cairn syncs it by itself (`git config cairn.sync auto`), so
+    the command line and the live sync may send a message for another computer at once. A sync command the
+    user put there is left alone."""
+    try:
+        mode = brain.sync_mode()
+        if on and not mode:
+            brain.set_sync_mode("auto")
+        elif not on and mode == "auto":
+            brain.set_sync_mode("")
+    except Exception as error:  # noqa: BLE001 - a nicety; the app's own rounds do not depend on it
+        log(f"could not note the sync setting in the brain's repository: {error}")
+
+
 class DesktopHooks:
     """Backs GET/POST /api/desktop. The GUI parts (window, restart) are injected by the app."""
 
@@ -529,6 +543,7 @@ class DesktopHooks:
             brain.init()
         if self.server is not None:
             switch_brain(self.server, brain)
+            mark_auto_sync(brain, bool(self.config.get("autoSync", True)))
         self.config.remember_folder(folder.resolve())
         log(f"opened {folder}")
         return {"reload": True, "folder": str(folder)}
@@ -559,6 +574,8 @@ class DesktopHooks:
 
     def toggle_auto_sync(self, on: bool) -> dict:
         self.config.set("autoSync", on)
+        if self.server is not None:
+            mark_auto_sync(self.server.RequestHandlerClass.brain, on)
         return {"autoSync": on}
 
     def toggle_vibe_watch(self, on: bool) -> dict:
@@ -1142,6 +1159,10 @@ class DesktopApp:
         port = PORT if wait_for_port(PORT, 15) else 0
         self.server = make_server(brain, port=port, desktop=self.hooks)
         self.autopilot = attach_autopilot(self.server, brain)
+        # A message for another computer leaves at once, and theirs arrive within seconds (livesync.py).
+        mark_auto_sync(brain, bool(self.config.get("autoSync", True)))
+        self.live_sync = livesync.LiveSync(self.server.RequestHandlerClass, log=log).start()
+        self.server.RequestHandlerClass.live_sync = self.live_sync
         self.hooks.server = self.server
         self.hooks.pick_folder = self.pick_folder
         self.hooks.request_restart = self.restart

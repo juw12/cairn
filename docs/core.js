@@ -999,23 +999,29 @@ export function vibeStats(notes, today, days = 14) {
 
 // ------------------------------------------------------------ handoffs (a conversation between computers)
 //
-// One brain is shared by several computers. A handoff is a message one of them leaves for the others: what it
-// found, what is left hanging, what only another computer can do. Every message is its own file in handoffs/,
-// written once by the computer that says it and never edited, so two computers never write the same file and
-// git has nothing to merge. An answer ("picked up", "done", or just a note) is one more file that names the
-// first message in `thread`. Where a conversation stands is worked out from its files, here (and in core.py).
+// One brain is shared by several computers (and a phone). A handoff is a message one of them leaves for the
+// others: what it found, what is left hanging, what only another one can do. Every message is its own file in
+// handoffs/, written once by the device that says it and never edited, so two devices never write the same
+// file and git has nothing to merge. An answer ("picked up", "done", "closed", or just a note) is one more
+// file that names the first message in `thread`. Where a conversation stands is worked out from its files,
+// here (and in core.py).
+//
+// Clocks: `created` is the writer's own clock, as on every note. `sent` is the same moment in UTC, so two
+// devices in different time zones agree on it, and `after` names the last message the writer had seen, so an
+// answer never reads before what it answers even when a clock is wrong.
 
 export const HANDOFF_TYPE = "handoff";
 export const HANDOFF_FOLDER = "handoffs";
-export const HANDOFF_SAYS = ["note", "picked-up", "done"];
+export const HANDOFF_SAYS = ["note", "picked-up", "done", "closed"];
 export const HANDOFF_EVERYONE = "all";
 // Two messages stamped the same second read in the order they make sense: taken on, talked about, finished.
-const HANDOFF_SAME_SECOND = { "picked-up": 0, note: 1, done: 2 };
+const HANDOFF_SAME_SECOND = { "picked-up": 0, note: 1, done: 2, closed: 3 };
 const HANDOFF_SLUG_FROM = 24;
 const HANDOFF_SLUG_TITLE = 44;
 
 const oneSpaced = (text) => String(text ?? "").trim().split(/\s+/).join(" ");
 const trimDashes = (text) => text.replace(/^-+|-+$/g, "");
+const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Two spellings of one computer's name are the same computer: case and spacing do not count. */
 export function deviceKey(name) {
@@ -1041,48 +1047,69 @@ function handoffNames(value) {
 
 export const isHandoff = (note) => note.meta.type === HANDOFF_TYPE;
 
-function handoffThreadId(note) {
-  const raw = note.meta.thread;
+// The file a `thread` or `after` property names: "[[slug]]", "slug", "handoffs/slug.md" all mean slug.
+function handoffLink(raw) {
   let name = typeof raw === "string" ? raw.trim() : "";
   if (name.startsWith("[[") && name.endsWith("]]")) name = name.slice(2, -2).split("|")[0].trim();
-  name = name.split("/").pop().replace(/\.md$/i, "");
-  return name || note.slug;
+  return name.split("/").pop().replace(/\.md$/i, "");
+}
+
+// The first message, then the rest: earliest first, and never before the message it names in `after`.
+function handoffOrder(head, others) {
+  const known = new Set([head.slug, ...others.map((message) => message.slug)]);
+  const pending = [...others].sort((a, b) => byText(a.when, b.when) || HANDOFF_SAME_SECOND[a.says] - HANDOFF_SAME_SECOND[b.says] || byText(a.path, b.path));
+  const placed = [head];
+  const seen = new Set([head.slug]);
+  while (pending.length) {
+    const ready = pending.findIndex((message) => !known.has(message.after) || message.after === message.slug || seen.has(message.after));
+    if (ready < 0) {
+      placed.push(...pending); // messages that name each other in a ring: as the clocks have them
+      break;
+    }
+    const [message] = pending.splice(ready, 1);
+    placed.push(message);
+    seen.add(message.slug);
+  }
+  return placed;
 }
 
 /**
  * The conversations between computers, open ones first, then the one that moved last.
- * Each: { id, title, path, from, to, everyone, messages: [{ path, title, from, says, at }],
+ * Each: { id, title, path, from, to, everyone, messages: [{ path, title, from, says, at, sent }],
  * parts: [{ device, state: waiting | picked-up | done, at }], open, last }.
  * `to` names the computers it is for; none (or "all") means every computer. A named computer's part is done
- * when it says `done`; the conversation is closed when every named computer has, or when the computer that
- * started it says `done` itself.
+ * when it says `done`. The conversation is closed when every named computer has, when the computer that
+ * started it says `done` itself, or when anyone says `closed`.
  */
 export function handoffThreads(notes) {
   const groups = new Map();
   for (const note of notes) {
     if (!isHandoff(note)) continue;
     const meta = note.meta;
+    const at = typeof meta.created === "string" ? meta.created : "";
+    const sent = typeof meta.sent === "string" ? meta.sent : "";
     const message = {
       path: note.path,
       slug: note.slug,
       title: note.title,
       from: oneSpaced(typeof meta.from === "string" ? meta.from : ""),
       says: HANDOFF_SAYS.includes(meta.says) ? meta.says : "note",
-      at: typeof meta.created === "string" ? meta.created : "",
+      at,
+      sent,
+      when: sent || at,
+      after: handoffLink(meta.after),
       to: handoffNames(meta.to),
     };
-    const id = handoffThreadId(note);
+    const id = handoffLink(meta.thread) || note.slug;
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(message);
   }
 
-  const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   const threads = [];
-  for (const [id, messages] of groups) {
-    messages.sort((a, b) => byText(a.at, b.at) || HANDOFF_SAME_SECOND[a.says] - HANDOFF_SAME_SECOND[b.says] || byText(a.path, b.path));
-    const head = messages.find((message) => message.slug === id) || messages[0];
-    messages.splice(messages.indexOf(head), 1); // the first message leads, whatever the clocks of the computers say
-    messages.unshift(head);
+  for (const [id, found] of groups) {
+    found.sort((a, b) => byText(a.when, b.when) || byText(a.path, b.path));
+    const head = found.find((message) => message.slug === id) || found[0];
+    const messages = handoffOrder(head, found.filter((message) => message !== head));
     const sender = deviceKey(head.from);
     const everyone = !head.to.length || head.to.some((name) => deviceKey(name) === HANDOFF_EVERYONE);
     const named = everyone ? [] : head.to.filter((name) => deviceKey(name) !== sender);
@@ -1090,6 +1117,10 @@ export function handoffThreads(notes) {
     const said = new Map();
     for (const message of messages) {
       if (message.says === "note") continue;
+      if (message.says === "closed") {
+        closed = true;
+        continue;
+      }
       const key = deviceKey(message.from);
       if (key === sender) {
         closed = closed || message.says === "done";
@@ -1113,10 +1144,10 @@ export function handoffThreads(notes) {
       from: head.from,
       to: named,
       everyone,
-      messages: messages.map(({ path, title, from, says, at }) => ({ path, title, from, says, at })),
+      messages: messages.map(({ path, title, from, says, at, sent }) => ({ path, title, from, says, at, sent })),
       parts,
       open: !closed && (everyone || !named.length || waitingOnNamed),
-      last: messages.reduce((latest, message) => (message.at > latest ? message.at : latest), ""),
+      last: messages.reduce((latest, message) => (message.when > latest ? message.when : latest), ""),
     });
   }
   return threads.sort((a, b) => Number(!a.open) - Number(!b.open) || byText(b.last, a.last) || byText(a.id, b.id));
@@ -1148,23 +1179,26 @@ export function handoffInbox(threads, device) {
 }
 
 /**
- * { path, text } of a new message. `stamp` is "2026-11-20T23:41:07" (the seconds keep two messages of one
- * minute in order). A first message names who it is for in `to` (none: every computer); an answer names the
- * first message's file in `thread` and what it says.
+ * { path, text } of a new message. `stamp` is the writer's clock, "2026-11-20T23:41:07"; `sent` the same
+ * moment in UTC, "2026-11-20T16:41:07Z". A first message names who it is for in `to` (none: every computer).
+ * An answer names the first message's file in `thread`, what it says, and in `after` the last message its
+ * writer had seen.
  */
-export function handoffMessage(sender, title, body, stamp, existingPaths, { to = [], thread = "", says = "note" } = {}) {
+export function handoffMessage(sender, title, body, stamp, existingPaths, { to = [], thread = "", says = "note", sent = "", after = "" } = {}) {
   sender = oneSpaced(sender);
   title = oneSpaced(title);
   const meta = { title: title || "Untitled", type: HANDOFF_TYPE, from: sender };
   if (thread) {
     meta.thread = `[[${thread}]]`;
     meta.says = HANDOFF_SAYS.includes(says) ? says : "note";
+    if (after && after !== thread) meta.after = `[[${after}]]`;
   } else {
     const names = handoffNames(to || []);
     meta.to = !names.length || names.some((name) => deviceKey(name) === HANDOFF_EVERYONE) ? [HANDOFF_EVERYONE] : names;
   }
   meta.tags = [HANDOFF_TYPE];
   meta.created = stamp;
+  if (sent) meta.sent = sent;
   const prefix = `${stamp.slice(0, 10)}-${stamp.slice(11, 16).replace(":", "")}`;
   const who = sender ? trimDashes(slugify(sender).slice(0, HANDOFF_SLUG_FROM)) : "someone";
   const what = trimDashes(slugify(title).slice(0, HANDOFF_SLUG_TITLE));
