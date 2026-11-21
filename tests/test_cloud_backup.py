@@ -544,7 +544,7 @@ class PageTests(CloudCase):
             page.wait_for_selector(".vibe-cloud .callout")
         self.assertIn("did not finish: TeraBox asks to sign in.", page.locator(".vibe-cloud .callout").inner_text())
         self.assertEqual(page.locator(".vibe-cloud button[disabled]").count(), 0)
-        self.assertEqual(ran, [None])
+        self.assertEqual(ran, [False])  # the first button is the brain alone; "With the repos" is the other one
         page.click('.vibe-panel[data-panel="cloud"] [data-action=vibe-panel-fold]')
         page.wait_for_selector('.vibe-panel.folded[data-panel="cloud"]')
         self.assertEqual(page.locator('.vibe-panel[data-panel="cloud"] .vp-sum').inner_text(), "the last run did not finish")

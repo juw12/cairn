@@ -931,8 +931,8 @@ function cloudStrip() {
       <span class="vm-spec">${cloud.running ? esc(cloud.step || "sending") : `to ${esc(cloud.drive)}, locked on this computer first`}</span>
     </header>
     <div class="gh-push" role="group" aria-label="Back up now">
-      <button type="button" class="btn sm primary" data-action="vibe-cloud-sync" ${busy}>${icon("refresh", "sm")} ${cloud.running ? "Sending…" : "Back up now"}</button>
-      ${cloud.repos ? `<button type="button" class="btn sm" data-action="vibe-cloud-sync" data-repos="1" ${busy}>With the repos</button>` : ""}
+      <button type="button" class="btn sm primary" data-action="vibe-cloud-sync" ${busy} title="The brain, about three minutes">${icon("refresh", "sm")} ${cloud.running ? "Sending…" : "Back up now"}</button>
+      ${cloud.repos ? `<button type="button" class="btn sm" data-action="vibe-cloud-sync" data-repos="1" ${busy} title="The brain, and every repo that was pushed since the last time">With the repos</button>` : ""}
     </div>
     ${failed}
     <ul class="muted small cloud-facts">${lines.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>
