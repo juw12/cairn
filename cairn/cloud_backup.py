@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from . import connect
@@ -322,8 +323,18 @@ def _now() -> str:
     return dt.datetime.now().isoformat(timespec="minutes")
 
 
+_last_stamp = ""
+
+
 def _stamp() -> str:
-    return dt.datetime.now().strftime("%Y-%m-%d %H%M%S")  # to the second: two runs never share a folder name
+    """The date and time a folder on the drive is named by. Never the same twice: a folder name is never reused."""
+    global _last_stamp
+    while True:
+        stamp = dt.datetime.now().strftime("%Y-%m-%d %H%M%S")
+        if stamp != _last_stamp:
+            _last_stamp = stamp
+            return stamp
+        time.sleep(0.2)
 
 
 def _sync_brain(brain: Brain, key: str, log) -> dict:
