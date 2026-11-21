@@ -177,7 +177,7 @@ export function renderSidebarFoot() {
       <button class="btn sm ghost icon-only" data-go="obsidian" aria-label="Tools: all notes, code inbox, Obsidian sync, context pack, plugins" title="Tools: all notes, code inbox, Obsidian sync, context pack, plugins">${icon("puzzle", "sm")}</button>
       ${state.info?.desktop
         ? `<button class="btn sm ghost" data-action="settings">${icon("gear", "sm")} Settings</button>`
-        : `<a class="btn sm ghost" href="${REPO_URL}" target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>`}
+        : `<a class="btn sm ghost" href="${REPO_URL}" data-github target="_blank" rel="noopener">${icon("github", "sm")} GitHub</a>`}
     </div>
     <button class="btn sm ghost foot-versions" data-action="versions" title="Every build and what changed">${icon("history", "sm")} Version history</button>`);
   $("#sidebar-foot").innerHTML = parts.join("");

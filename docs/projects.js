@@ -483,7 +483,7 @@ function card(project) {
     `<span>pushed ${esc(relativeTime(Date.parse(repo.pushed_at || "")))}</span>`,
     repo.private ? `<span>${icon("lock", "sm")} private</span>` : "",
     demo ? `<a href="${esc(demo)}" target="_blank" rel="noopener">${icon("external", "sm")} demo</a>` : "",
-    `<a href="${esc(repo.html_url)}" target="_blank" rel="noopener" title="Open on github.com">${icon("github", "sm")} GitHub</a>`,
+    `<a href="${esc(repo.html_url)}" data-github target="_blank" rel="noopener" title="Open on github.com">${icon("github", "sm")} GitHub</a>`,
   ].filter(Boolean).join("");
   return `
     <li class="proj-card${self ? " self" : ""}${rank <= 3 ? " podium" : ""}" data-project="${esc(repo.full_name)}">

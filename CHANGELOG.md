@@ -3,14 +3,24 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
-## Build 92 (2026-11-21): A repo opens with its Windows, Mac, iPhone and Android versions
+## Build 93 (2026-11-21): A repo opens with its Windows, Mac, iPhone and Android versions
 
-- The Look tab of a repo starts with Versions: four lines, Windows, Mac, iPhone and Android, each with the file to download or the words "not published". GitHub shows a release as a list of files; this answers whether the project can be had on your computer and your phone (#PR)
-- Windows, Mac and Android are read from the releases, the newest release that has a file for them, with its size and age. A download the README links counts too, such as an install script kept on the project's own site (#PR)
-- iPhone is the project's own web app on the home screen: the repo holds a web manifest that opens as its own app and its page has an apple-touch-icon. The line links the live app and says how to add it; when one of the two is missing it says which (#PR)
-- A version that an older release still carries while newer releases dropped it is marked as left behind, with the release that passed it (#PR)
-- In a repo of many apps each app's folder shows its own four, from the releases whose tag starts with the folder's name. The repo's own page says how many apps the releases belong to instead of mixing them (#PR)
+- The Look tab of a repo starts with Versions: four lines, Windows, Mac, iPhone and Android, each with the file to download or the words "not published". The Releases tab lists every release with its files; this answers whether the project can be had on your computer and your phone ([#83](https://github.com/juw12/cairn/pull/83))
+- Windows, Mac and Android are read from the releases, the newest release that has a file for them, with its size and age. A download the README links counts too, such as an install script kept on the project's own site ([#83](https://github.com/juw12/cairn/pull/83))
+- iPhone is the project's own web app on the home screen: the repo holds a web manifest that opens as its own app and its page has an apple-touch-icon. The line links the live app and says how to add it; when one of the two is missing it says which ([#83](https://github.com/juw12/cairn/pull/83))
+- A version that an older release still carries while newer releases dropped it is marked as left behind, with the release that passed it ([#83](https://github.com/juw12/cairn/pull/83))
+- In a repo of many apps each app's folder shows its own four, from the releases whose tag starts with the folder's name. The repo's own page says how many apps the releases belong to instead of mixing them ([#83](https://github.com/juw12/cairn/pull/83))
 - One look costs one more GitHub call, kept for five minutes. Not in this build: whether a version starts was not looked at, only whether it is published
+
+## Build 92 (2026-11-21): Issues, pull requests, releases and branches inside Cairn
+
+- Repo pages have two more tabs. Releases shows each release with its notes and its files to download. Issues and pull requests lists the open ones, with the closed ones one press away; one opens with everything said on it, and a pull request also shows its reviews, the comments left on lines and the files it changes ([#81](https://github.com/juw12/cairn/pull/81))
+- Branches: the branch name under a repo’s title lists its branches. Picking one shows that branch’s pictures, README, pushes and files, and every step from there stays on it ([#81](https://github.com/juw12/cairn/pull/81))
+- A link to github.com anywhere in Cairn (a note, Vibe, Home, a README, the version history) now opens that repo, folder, file, push, pull request, issue or list of releases inside Cairn. Ctrl or Cmd with the click still opens github.com, and so does every button that says GitHub. Downloads, and pages Cairn has no place for, stay on GitHub ([#81](https://github.com/juw12/cairn/pull/81))
+- Pictures and videos: up to six videos lead the grid, so a folder of many covers no longer pushes every video off the first screen, and Pictures or Videos can be shown alone ([#81](https://github.com/juw12/cairn/pull/81))
+- A video’s tile is now a picture taken from the video instead of a live player. A phone gives a page only a few video players, and a grid of videos could use them up before the one you opened ([#81](https://github.com/juw12/cairn/pull/81))
+- A video this browser cannot play (a phone’s own recording opened in another browser, say) now says so and offers to save it, instead of showing an empty box ([#81](https://github.com/juw12/cairn/pull/81))
+- One thing a browser cannot do: save a file of a private repo’s release without github.com. GitHub refuses that request from any web page, so those files download through github.com and the page says so ([#81](https://github.com/juw12/cairn/pull/81))
 
 ## Build 91 (2026-11-21): Your AI app remembers from the cloud when the brain is not on the computer
 
