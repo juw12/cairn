@@ -34,6 +34,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -57,7 +58,8 @@ BATCH_RUNS = 20  # this many one-prompt runs in one folder in one day is a scrip
 REPLY_CHARS = 280
 MACHINE_FOLDER = "machines"
 HISTORY_KEY = "opencode_history"  # watch state: computer -> when its whole OpenCode history was read
-ACTIVITY_KEY = "activity"  # watch state: this computer's use, day by day, between two writes of its note
+ACTIVITY_FILE = "cairn-activity.json"  # this computer's use, day by day, between two writes of its note
+ACTIVITY_SECONDS = 60  # how often the computer is looked at, whatever a pass is busy with
 MACHINE_NOTE_MINUTES = 15  # an unchanged reading is written again after this long, so a reader can tell it is current
 MACHINE_MOVE_POINTS = 10  # CPU or memory moving this many points is worth a new note
 
@@ -963,15 +965,43 @@ def sync_machine(brain: Brain, reading: dict | None = None) -> bool:
 # ------------------------------------------------------------ this computer's day
 
 
+_activity_lock = threading.Lock()  # a pass and the minute-by-minute looks share one file
+
+
+def _activity_path(brain: Brain) -> Path:
+    return _state_path(brain).with_name(ACTIVITY_FILE)
+
+
+def _load_activity(brain: Brain) -> dict | None:
+    """The looks since the note was last written; None when there are none (or the file was lost)."""
+    try:
+        log = json.loads(_activity_path(brain).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return log if isinstance(log, dict) else None
+
+
+def _save_activity(brain: Brain, log: dict) -> None:
+    try:
+        _activity_path(brain).write_text(json.dumps(log, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def sync_activity(brain: Brain, now: dt.datetime | None = None, idle="read", load="read", name: str | None = None) -> bool:
     """Add this look to the day's use of this computer (screen time, processor, memory) and, about twice
     an hour, write it to machines/<computer>-activity.md for the Diary page. True when the note was written.
-    Unlike the load note this runs with no session live: a day at the computer without an assistant counts too."""
+    Unlike the load note this runs with no session live: a day at the computer without an assistant counts too.
+    The looks are kept in a file of their own, so they never wait for (or undo) what a pass keeps in its state."""
+    with _activity_lock:
+        return _sync_activity(brain, now, idle, load, name)
+
+
+def _sync_activity(brain: Brain, now, idle, load, name) -> bool:
     now = dt.datetime.now() if now is None else now
     name = machine.device_name() if name is None else name
     path = activity.note_path(name, MACHINE_FOLDER)
-    state = _load_state(brain)
-    log = state.get(ACTIVITY_KEY)
+    log = _load_activity(brain)
     existing = None
     try:
         if not isinstance(log, dict) and brain.resolve(path).exists():
@@ -993,12 +1023,44 @@ def sync_activity(brain: Brain, now: dt.datetime | None = None, idle="read", loa
                 brain.write(path, text)
             log["written"] = now.isoformat(timespec="seconds")
             written = True
-        except (ConflictError, OSError):  # edited or synced under us: the next pass writes it
+        except (ConflictError, OSError):  # edited or synced under us: the next look writes it
             pass
-    state = _load_state(brain)
-    state[ACTIVITY_KEY] = log
-    _save_state(brain, state)
+    _save_activity(brain, log)
     return written
+
+
+def watch_holder(brain: Brain) -> str:
+    """Who holds the brain's watch right now ("" when nobody does)."""
+    try:
+        held = json.loads(_claim_path(brain).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(held.get("owner") or "") if isinstance(held, dict) else ""
+
+
+def activity_loop(brain_of, stopping: threading.Event, owner: str, wanted=lambda: True,
+                  every: float = ACTIVITY_SECONDS) -> None:
+    """Look at this computer once a minute until `stopping` is set.
+
+    A pass can take many minutes (a big brain, a slow disk, git in the way), and a look that comes more
+    than activity.GAP_SECONDS after the last one adds no time: nobody can tell a busy pass from a
+    sleeping computer. So the looks have a thread of their own. Only the watcher that holds the brain
+    looks, the same as for session notes. `brain_of()` gives the open brain (the app can switch)."""
+    while not stopping.wait(every):
+        try:
+            brain = brain_of()
+            if brain is not None and wanted() and watch_holder(brain) == owner:
+                sync_activity(brain)
+        except Exception:  # a look is a nicety: it must never take the watcher down
+            pass
+
+
+def start_activity_loop(brain_of, owner: str, wanted=lambda: True, every: float = ACTIVITY_SECONDS) -> threading.Event:
+    """Start the looks in the background; set the returned event to stop them."""
+    stopping = threading.Event()
+    threading.Thread(target=activity_loop, args=(brain_of, stopping, owner, wanted, every),
+                     daemon=True, name="cairn-activity").start()
+    return stopping
 
 
 # ------------------------------------------------------------ the loop
@@ -1085,6 +1147,7 @@ def watch(brain: Brain, every: int = EVERY_SECONDS, echo=print, **options) -> No
     echo(f"Watching for AI coding sessions every {every}s (Ctrl+C to stop). Sessions land in brain/sessions/.")
     owner = watch_owner("cli")
     standing_by = False
+    looks = start_activity_loop(lambda: brain, owner) if options.get("laptop") else None
     try:
         while True:
             stamp = dt.datetime.now().strftime("%H:%M")
@@ -1103,6 +1166,8 @@ def watch(brain: Brain, every: int = EVERY_SECONDS, echo=print, **options) -> No
                     echo(f"warning: {error}")
             time.sleep(max(5, every))
     finally:
+        if looks is not None:
+            looks.set()
         release_watch(brain, owner)
 
 

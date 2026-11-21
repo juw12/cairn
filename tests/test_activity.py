@@ -172,11 +172,11 @@ class SyncTests(unittest.TestCase):
             self.look(minute)
         self.assertTrue(self.look(40))  # written again half an hour on (the gap itself adds nothing)
         self.assertEqual(self.days()["2026-03-04"]["awake"], 11)
-        watch._state_path(self.brain).unlink()
+        watch._activity_path(self.brain).unlink()
         self.look(41)
         self.assertEqual(self.days()["2026-03-04"]["awake"], 11, "the day did not start again from nothing")
         self.look(42)
-        self.assertEqual(watch._load_state(self.brain)[watch.ACTIVITY_KEY]["days"]["2026-03-04"]["awake"], 12 * 60)
+        self.assertEqual(watch._load_activity(self.brain)["days"]["2026-03-04"]["awake"], 12 * 60)
 
     def test_a_note_changed_under_the_watcher_is_left_for_the_next_pass(self):
         self.look(0)
@@ -184,6 +184,49 @@ class SyncTests(unittest.TestCase):
             self.assertFalse(self.look(1))
         self.assertTrue(self.look(2))
         self.assertEqual(self.days()["2026-03-04"]["awake"], 2)
+
+    def test_the_looks_go_on_while_a_pass_is_busy_and_only_for_the_watcher_that_holds_the_brain(self):
+        owner = watch.watch_owner("app")
+        clock = iter(START + dt.timedelta(minutes=minute) for minute in range(100))
+        seen = []
+
+        def look(brain):
+            return seen.append(brain) or watch._sync_activity(brain, next(clock), 0, LOAD, self.NAME)
+
+        def run_looks(count, wanted=lambda: True):
+            stopping = mock.Mock()
+            stopping.wait.side_effect = [False] * count + [True]
+            with mock.patch.object(watch, "sync_activity", side_effect=look):
+                watch.activity_loop(lambda: self.brain, stopping, owner, wanted)
+
+        run_looks(3)
+        self.assertEqual(seen, [], "nobody holds the brain yet")
+        watch.claim_watch(self.brain, "cli:1")
+        run_looks(3)
+        self.assertEqual(seen, [], "another watcher holds it: its own looks count")
+        watch.release_watch(self.brain, "cli:1")
+        watch.claim_watch(self.brain, owner)
+        run_looks(3, wanted=lambda: False)
+        self.assertEqual(seen, [], "switched off")
+        run_looks(8)  # eight minutes with no pass finishing: every minute still counts
+        self.assertEqual(len(seen), 8)
+        self.assertEqual(self.days()["2026-03-04"]["awake"], 1, "written at the second look")
+        self.assertEqual(watch._load_activity(self.brain)["days"]["2026-03-04"]["awake"], 7 * 60)
+
+    def test_a_look_that_fails_does_not_stop_the_looks(self):
+        owner = watch.watch_owner("app")
+        watch.claim_watch(self.brain, owner)
+        stopping = mock.Mock()
+        stopping.wait.side_effect = [False, False, True]
+        with mock.patch.object(watch, "sync_activity", side_effect=RuntimeError("no")) as sync:
+            watch.activity_loop(lambda: self.brain, stopping, owner)
+        self.assertEqual(sync.call_count, 2)
+
+    def test_the_looks_and_the_pass_keep_separate_files(self):
+        self.look(0)
+        self.look(1)
+        self.assertNotIn("activity", watch._load_state(self.brain))
+        self.assertTrue(watch._activity_path(self.brain).is_file())
 
     def test_a_pass_notes_the_day_only_when_asked(self):
         with mock.patch.object(watch, "sync_activity", return_value=True) as sync:

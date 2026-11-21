@@ -1045,6 +1045,13 @@ class DesktopApp:
 
     def vibe_watch_loop(self):
         owner = watch.watch_owner("app")
+        # The day's use is looked at once a minute on a thread of its own: a pass can take minutes.
+        threading.Thread(
+            target=watch.activity_loop,
+            args=(lambda: self.server.RequestHandlerClass.brain, self.stopping, owner,
+                  lambda: bool(self.config.get("vibeWatch", True) and self.config.get("vibeWatchLaptop", True))),
+            daemon=True, name="cairn-activity",
+        ).start()
         held = None
         wait = VIBE_WATCH_FIRST_SECONDS
         while not self.stopping.wait(wait):
