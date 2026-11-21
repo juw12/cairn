@@ -950,7 +950,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
     vibe_parser.add_argument("--task", help="start: link a task, e.g. ship-v1")
     vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor")
-    vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest)")
+    vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest one of this computer)")
     vibe_parser.add_argument("--result", default="shipped", choices=["shipped", "partial", "dropped"], help="end: the outcome")
     vibe_parser.add_argument("--once", action="store_true", help="watch: one pass, then exit")
     vibe_parser.add_argument("--every", type=int, default=60, help="watch: seconds between passes (default 60)")
