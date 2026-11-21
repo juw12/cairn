@@ -3,6 +3,17 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 99 (2026-11-22): A second copy of your brain in a cloud drive, locked first
+
+- Vibe has a new block, Cloud backup, with one button: it locks the brain's whole history in an archive on this computer and sends it to a cloud drive (TeraBox), for the day GitHub is the thing that fails. While Cairn is open it also does this once a day by itself
+- It is off until you set it up on a computer: cairn cloud setup checks what it needs (git, 7-Zip, Chrome), makes the key and opens the drive's sign-in window for you. Until then the block shows that one command and nothing else, and on a phone it is not there
+- Every archive is 7-Zip with AES-256 and hidden file names, holding one git bundle: a complete repository in one file. The key is made on your computer and never leaves it. Each folder on the drive says how to get its contents back
+- With cairn cloud setup --repos it keeps every GitHub repo of yours too (forks left out): all of them the first time, then once a week only those that were pushed since
+- Nothing on the drive is replaced under its own name. Each run makes a new dated folder; the two newest copies of the brain are kept and older ones go to the drive's recycle bin only after the new one has been checked
+- Archives are made and sent a few at a time and deleted from this computer once they are up, and a repo that would leave less than 2 GB free waits
+- TeraBox has no upload tool for a personal account, so Cairn steers its own web page in a Chrome profile you sign in to once. When TeraBox changes its page or signs you out, a run stops, says so on the block, and changes nothing
+- From a terminal: cairn cloud (what the drive holds), sync, auto on|off, repos on|off, key --show, window, off
+
 ## Build 97 (2026-11-21): A phone takes a new build at once, and says which build it runs
 
 - Cairn now looks for a newer build by itself, each time it comes back to the front and every ten minutes while it stays open. Before, only the browser’s background worker looked, which on a phone’s home-screen app can be slow and never says anything ([#86](https://github.com/juw12/cairn/pull/86))

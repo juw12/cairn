@@ -706,6 +706,7 @@ cairn todos                              # TODO/FIXME/HACK comments in the code
 cairn context                            # write brain/CONTEXT.md
 cairn mcp                                # MCP server for Claude, Cursor, Copilot, OpenCode (--print-config, --read-only)
 cairn connect                            # make this brain the memory of the AI apps on this computer (--status, --remove, --off)
+cairn cloud                              # a second copy of the brain and your repos in a cloud drive, locked first (setup, sync, auto, key)
 cairn obsidian ~/Documents/MyVault       # import a vault into brain/obsidian/ and sync both ways
 cairn obsidian --watch 10                # keep syncing every 10 s (--dry-run to preview)
 cairn vibe watch                         # detect OpenCode and Vector sessions automatically
@@ -800,6 +801,42 @@ What it will not do: make a folder for an app that is not installed, touch a `ca
 or move the skill to another brain just because you opened that brain (only `cairn connect` by hand does that).
 `remember.py` never overwrites a note and refuses text that looks like a password, key or token. The files it puts
 there are replaced when Cairn updates, so change the skill in Cairn, not in the app's folder.
+
+### Keep a second copy in a cloud drive
+
+GitHub is where a brain usually lives. For the day GitHub, or your account there, is the thing that fails, Cairn
+can keep a second copy in a cloud drive: the brain with its whole history, and every GitHub repo of yours if you
+want. It is **off until you set it up** on a computer, because it needs things only you can give it.
+
+```bash
+cairn cloud setup            # checks git, 7-Zip and Chrome, makes the key, opens the drive's sign-in window
+cairn cloud setup --repos    # the same, and every repo of your GitHub account too (forks are left out)
+cairn cloud sync             # send now (--repos, --brain-only)
+cairn cloud                  # what the drive holds and when it was sent
+cairn cloud key --show       # the key: copy it somewhere that is not this computer
+cairn cloud auto off         # stop the daily run (cairn cloud off switches the whole thing off)
+```
+
+After that the **Vibe** page has a block, **Cloud backup**, with one button; and while Cairn is open it sends the
+brain once a day by itself, the repos once a week, only those that were pushed since.
+
+- **Locked before it leaves.** Each archive is 7-Zip with AES-256, file names hidden, holding one git bundle: a
+  complete repository in one file. The key is made on your computer and stays there (the login keychain on a Mac,
+  a file only you can read elsewhere). Without it the copy cannot be opened, so keep the key in a second place.
+- **To get one back:** `7z x NAME.7z`, then `git clone NAME.bundle NAME`. Each folder on the drive carries a
+  `HOW-TO-RESTORE.txt` and a `CONTENTS.json` with every archive's size, SHA-256 and commit.
+- **Nothing is replaced under its own name.** Every run makes a new dated folder (`brain 2026-11-22 003512`); the
+  two newest copies of the brain are kept, older ones go to the drive's recycle bin only after the new one has
+  been checked. Repos pushed again get a newer archive in a newer folder.
+- **Little disk.** Archives are made and sent a few at a time and deleted here once they are up; a repo that
+  would leave less than 2 GB free waits.
+
+The drive is [TeraBox](https://www.terabox.com) (1 TB free, 30 GB of it for good). It has no upload tool for a
+personal account, so Cairn steers TeraBox's own web page in a Chrome profile that you sign in to once
+(`cairn/cloud_terabox.py`): it presses what you would press and reads no cookie. That is the fragile part: when
+TeraBox changes its page or signs you out, a run stops, says what it could not find, and changes nothing;
+`cairn cloud window` opens the sign-in again. `cairn cloud setup` puts the one extra package this needs
+(Playwright) in an environment of its own, so Cairn itself still has no dependency.
 
 ### Connect your AI assistant (MCP)
 

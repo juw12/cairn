@@ -582,6 +582,20 @@ export async function switchPusher(account) {
   renderView();
 }
 
+// Send the backup to the cloud drive now. The server answers at once and does the work in the background;
+// the page follows it with the same poll that keeps the rest of Vibe live.
+export async function cloudSyncNow(repos) {
+  if (typeof state.store?.cloudSync !== "function") return;
+  for (const button of $$("[data-action=vibe-cloud-sync]")) button.disabled = true;
+  try {
+    state.vibeCloud = await state.store.cloudSync(repos);
+    state.vibeCloudKey = JSON.stringify(state.vibeCloud);
+  } catch (error) {
+    toast(error.message, { error: true });
+  }
+  renderView();
+}
+
 export function copyAgentHook() {
   navigator.clipboard?.writeText(AGENT_HOOK).then(
     () => toast("Copied. Paste it into AGENTS.md, CLAUDE.md or your assistant's instructions."),
@@ -873,6 +887,58 @@ function githubPushSection() {
   </section>`;
 }
 
+// The second copy of the brain (and of the repos) in a cloud drive. Null on a phone and in a browser without the
+// local app: the backup is made and sent by the computer the brain is on.
+function cloudReading() {
+  return state.info?.canMoveRepos ? state.vibeCloud || null : null;
+}
+
+const cloudWhen = (stamp) => (stamp ? stampLabel(String(stamp).replace("T", " ")) || String(stamp).replace("T", " ") : "");
+
+function cloudSummary(cloud) {
+  if (!cloud) return "";
+  if (!cloud.setUp) return "not set up on this computer";
+  if (cloud.running) return cloud.step || "sending";
+  if (cloud.last && !cloud.last.ok) return "the last run did not finish";
+  return cloud.brain ? `brain sent ${cloudWhen(cloud.brain.at)}` : "nothing sent yet";
+}
+
+// One button: lock the brain's whole history in an archive on this computer and send it to the drive. It is off
+// until the person has set it up here (tools, a key, their own sign-in to the drive), and it says so.
+function cloudStrip() {
+  const cloud = cloudReading();
+  if (!cloud) return "";
+  if (!cloud.setUp) {
+    return `<section class="vibe-cloud" aria-label="Cloud backup">
+      <header><h2>Cloud backup</h2><span class="vm-spec">not set up on this computer</span></header>
+      <p class="muted small">A second copy of this brain in a cloud drive (${esc(cloud.drive)}), for the day GitHub is the thing that fails. Every archive is locked with a key that stays on this computer. To switch it on, run this here once and follow what it says:</p>
+      <p><code>cairn cloud setup</code></p>
+    </section>`;
+  }
+  const megabytes = (bytes) => `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+  const lines = [
+    cloud.brain ? `Brain: sent ${cloudWhen(cloud.brain.at)}, ${megabytes(cloud.brain.bytes)}, every commit in one locked file` : "Brain: not sent yet",
+    cloud.repos ? `Repos of ${cloud.owner}: ${cloud.reposHeld} held${cloud.reposAt ? `, last looked at ${cloudWhen(cloud.reposAt)}` : ""}. Only repos pushed since are sent again` : "",
+    cloud.auto ? "Also by itself once a day while Cairn is open (the repos once a week)" : "Only when you press the button (cairn cloud auto on makes it daily)",
+  ].filter(Boolean);
+  const failed = !cloud.running && cloud.last && !cloud.last.ok
+    ? `<p class="callout small" role="status">The run of ${esc(cloudWhen(cloud.last.at))} did not finish: ${esc(cloud.last.message || "")}</p>`
+    : "";
+  const busy = cloud.running ? "disabled" : "";
+  return `<section class="vibe-cloud" aria-label="Cloud backup">
+    <header>
+      <h2>Cloud backup</h2>
+      <span class="vm-spec">${cloud.running ? esc(cloud.step || "sending") : `to ${esc(cloud.drive)}, locked on this computer first`}</span>
+    </header>
+    <div class="gh-push" role="group" aria-label="Back up now">
+      <button type="button" class="btn sm primary" data-action="vibe-cloud-sync" ${busy}>${icon("refresh", "sm")} ${cloud.running ? "Sending…" : "Back up now"}</button>
+      ${cloud.repos ? `<button type="button" class="btn sm" data-action="vibe-cloud-sync" data-repos="1" ${busy}>With the repos</button>` : ""}
+    </div>
+    ${failed}
+    <ul class="muted small cloud-facts">${lines.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>
+  </section>`;
+}
+
 // How much of the month's free GitHub Actions minutes are gone, from the notes the watcher leaves in github-usage/:
 // one meter for the main account and one for every other account that has notes of its own. Under them, where
 // this computer is signed in to several accounts, the one it pushes as.
@@ -1013,6 +1079,13 @@ async function poll() {
   if (pushKey !== (state.vibePushKey || "null")) {
     state.vibePush = data.push || null;
     state.vibePushKey = pushKey;
+    changed = true;
+  }
+  // The cloud backup: a run started here, by the daily turn or from a terminal shows as it goes.
+  const cloudKey = JSON.stringify(data.cloud || null);
+  if (cloudKey !== (state.vibeCloudKey || "null")) {
+    state.vibeCloud = data.cloud || null;
+    state.vibeCloudKey = cloudKey;
     changed = true;
   }
   // Which computer this is, by the name its sessions carry: the device bar marks it.
@@ -1968,6 +2041,7 @@ export function vibeView() {
       label: shownDevice() !== null && shownDevice() !== (state.vibeHere || "") ? "Computer" : "",
     },
     github: { html: githubStrip(), summary: [minutesSummary, pusher ? `pushes as ${pusher}` : ""].filter(Boolean).join(" · ") },
+    cloud: { html: cloudStrip(), summary: cloudSummary(cloudReading()) },
     overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
     figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },
     activity: { html: activity(stats, sessions), summary: "sessions per day" },

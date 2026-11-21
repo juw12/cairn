@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, core, github_move, github_push, machine, mcp, precedent, pro, vibe
+from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, machine, mcp, precedent, pro, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -210,6 +210,8 @@ class Handler(BaseHTTPRequestHandler):
                     "device": machine.device_name(),  # what this computer is called on its session notes
                     # which GitHub account this computer pushes as; None at first, and always on a phone
                     "push": github_push.status_soon() if self.github_moves else None,
+                    # the second copy in a cloud drive: what was sent and when; None on a phone
+                    "cloud": cloud_backup.status() if self.github_moves else None,
                 })
             elif route == "/api/chat":
                 self._send_json(chat.summary())
@@ -310,8 +312,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._github_move()
         if route == "/api/github/push" and self.github_moves:
             return self._github_push()
+        if route == "/api/cloud/sync" and self.github_moves:
+            return self._cloud_sync()
         self._drain()
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+
+    def _cloud_sync(self):
+        """POST /api/cloud/sync {repos?}: send the backup to the cloud drive now, in the background. The page
+        follows it through /api/vibe. Only on the computer itself, and only once `cairn cloud setup` has run."""
+        try:
+            body = self._body()
+            cloud_backup.start(self.brain, True if body.get("repos") is True else None)
+        except (cloud_backup.CloudError, ValueError) as error:
+            return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        self._send_json(cloud_backup.status())
 
     def _github_move(self):
         """POST /api/github/move {repo, from, to}: ask GitHub to hand a private repo to another of
@@ -479,6 +493,8 @@ def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:
     worker = attach_autopilot(server, brain)
     live = livesync.LiveSync(server.RequestHandlerClass, log=lambda text: print(text, flush=True)).start()
     server.RequestHandlerClass.live_sync = live
+    # the cloud backup's daily turn; it does nothing on a computer where it was never set up
+    backup = cloud_backup.start_auto(lambda: server.RequestHandlerClass.brain)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"Cairn {__version__} · {brain.project_name} · brain: {brain.dir}")
     print(f"Open {url}  (Ctrl+C to stop)")
@@ -489,6 +505,7 @@ def serve(brain: Brain, port: int = 4777, open_browser: bool = True) -> None:
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
+        backup.set()
         live.stop()
         worker.shutdown()
         server.server_close()
