@@ -3,6 +3,12 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 89 (2026-11-21): Found on Google by what it does, not only by its name
+
+- Cairn in search results: the title and description now say what Cairn is in the words people type when they have never heard of it (open-source second brain, Markdown, Git repo, task board, decision log, journal), and the description search engines read lists the same
+- Public brain page: a note with a claim is titled by the claim in search results, for example “Built titip: Outlook inbox from a paired phone” instead of “titip”. The heading on the page stays the note’s own title ([[#77](https://github.com/juw12/cairn/pull/77)](https://github.com/juw12/cairn/pull/77))
+- Public brain page: the first page’s title says what it is and how much is on it, and every page describes itself in the form search engines read: what it is, who wrote it, when it last changed, its tags and the links that back it ([[#77](https://github.com/juw12/cairn/pull/77)](https://github.com/juw12/cairn/pull/77))
+
 ## Build 88 (2026-11-21): Your AI app remembers, with nothing to set up
 
 - A new chat in Vector now starts with your brain as its memory on every computer that has Cairn. Each time Cairn opens it puts a small skill, cairn-memory, where Vector reads skills: search the brain before answering, and save what the next chat will need. Nothing to run and nothing to set up ([#71](https://github.com/juw12/cairn/pull/71))
