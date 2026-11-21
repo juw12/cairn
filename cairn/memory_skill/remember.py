@@ -19,6 +19,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # leave no __pycache__ in the AI app's skills folder
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common  # noqa: E402
 
@@ -88,12 +89,17 @@ def save_shared(brain, kind: str, title: str, tags: list[str], body: str, today:
     return brain.dir / note["path"]
 
 
-def git(brain, *arguments: str) -> str:
+def git_in(folder: Path, *arguments: str) -> str:
     try:
-        done = subprocess.run(["git", "-C", str(brain.dir), *arguments], capture_output=True, text=True, timeout=60)
+        done = subprocess.run(["git", "-C", str(folder), *arguments], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=60)
     except (OSError, subprocess.SubprocessError):
         return ""
     return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def git(brain, *arguments: str) -> str:
+    return git_in(brain.dir, *arguments)
 
 
 def check(brain, path: Path | None = None) -> bool:
@@ -106,9 +112,9 @@ def check(brain, path: Path | None = None) -> bool:
     if not remote:
         print("... no git remote: this brain has no copy off this computer.")
         return fine
-    relative = path.resolve().relative_to(Path(git(brain, "rev-parse", "--show-toplevel") or brain.dir).resolve()).as_posix() if path else ""
     if path is not None:
-        waiting = bool(git(brain, "status", "--porcelain", "--", relative))
+        # asked from the note's own folder, so git and the system need not agree on how the path is spelt
+        waiting = bool(git_in(path.parent, "status", "--porcelain", "--", path.name))
         print(f"{'...' if waiting else 'ok '} {'not committed yet: Cairn sends it at its next sync' if waiting else 'committed'}")
     unsent = git(brain, "rev-list", "--count", "@{u}..HEAD") or "?"
     changed = len([line for line in git(brain, "status", "--porcelain").splitlines() if line])

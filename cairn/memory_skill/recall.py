@@ -14,6 +14,7 @@ import argparse
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # leave no __pycache__ in the AI app's skills folder
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common  # noqa: E402
 

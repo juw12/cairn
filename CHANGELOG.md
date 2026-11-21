@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 88 (2026-11-21): Your AI app remembers, with nothing to set up
+
+- A new chat in Vector now starts with your brain as its memory on every computer that has Cairn. Each time Cairn opens it puts a small skill, cairn-memory, where Vector reads skills: search the brain before answering, and save what the next chat will need. Nothing to run and nothing to set up ([#71](https://github.com/juw12/cairn/pull/71))
+- cairn connect does the same for Claude Code, OpenCode and Codex when you name them (cairn connect claude). They are not connected by themselves, because they also run unattended jobs. cairn connect --status shows what is connected, --remove takes it out, --off stops the automatic part ([#71](https://github.com/juw12/cairn/pull/71))
+- On a brain shared by several computers, cairn connect --write-folder devices/laptop makes this computer save its memory only in its own folder, so two computers never write the same note ([#71](https://github.com/juw12/cairn/pull/71))
+- Cairn leaves alone what is not its own: an app that is not installed gets no folder, a cairn-memory skill you wrote yourself is never touched, and opening a second brain does not move the skill away from the first ([#71](https://github.com/juw12/cairn/pull/71))
+- Saving refuses text that looks like a password, key or token, never overwrites a note, and says after each save whether the brain's copy on its git remote is up to date ([#71](https://github.com/juw12/cairn/pull/71))
+- The skill's two scripts leave no extra files in the app's skills folder, and the check after a save no longer depends on how git spells the path
+
 ## Build 87 (2026-11-21): Your computers leave messages for each other
 
 - Today has a new block, Between computers: a conversation between the computers that share one brain. One leaves a message for one, several or all of the others (what it found, what is left hanging, what only another computer can do); the others press Picked up, answer, and press Done ([#75](https://github.com/juw12/cairn/pull/75))
