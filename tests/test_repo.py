@@ -52,7 +52,13 @@ README_HTML = """
 """
 
 # Another branch holds other files.
-NEXT_FILES = {"README.md": b"# Gallery, next\n", "next/only-here.txt": b"written on the next branch\n", "next/shot.png": PNG}
+NEXT_FILES = {
+    "README.md": b"# Gallery, next\n",
+    "next/only-here.txt": b"written on the next branch\n",
+    "next/shot.png": PNG,
+    # Named a film, but not one any browser can play.
+    "next/broken.mp4": b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64,
+}
 
 RELEASES = [
     {
@@ -622,6 +628,16 @@ class RepoPageTests(unittest.TestCase):
         page.click(".repo-tabs button:has-text('Look')")
         page.wait_for_selector(".repo-tile.image img")
         self.assertEqual(page.get_attribute(".repo-tile.image img", "src"), "https://raw.githubusercontent.com/juw12/gallery/next/next/shot.png")
+        # A film the browser cannot play says so and offers to save it, instead of an empty box.
+        page.click(".repo-tile.video")
+        page.wait_for_function("() => /cannot play broken\\.mp4/.test(document.querySelector('.repo-lightbox .repo-lb-wait')?.innerText || '')")
+        with page.expect_download() as saved:
+            page.click(".repo-lightbox [data-repo-download]")
+        self.assertEqual(saved.value.suggested_filename, "broken.mp4")
+        page.keyboard.press("Escape")
+        page.click(".repo-tabs button:has-text('Files')")
+        page.click(".repo-files a:has-text('broken.mp4')")
+        page.wait_for_function("() => /cannot play this file/.test(document.querySelector('.repo-stage')?.innerText || '')")
         # Back on the default branch nothing of the other one shows, and the two are kept apart.
         page.goto(self.url + "?demo=1#/projects/juw12/gallery/files", wait_until="domcontentloaded")
         page.wait_for_selector(".repo-files")

@@ -1318,9 +1318,23 @@ function showInViewer() {
       return;
     }
     media.src = src;
+    if (item.kind !== "video") return;
+    // A video the browser gives up on is tried once more, then said to be unplayable here, with a way to save it
+    // (a phone's own recording played in another browser, say), instead of an empty box.
+    let again = true;
+    media.addEventListener("error", () => {
+      if (!viewer || viewer.turn !== turn) return;
+      if (again) {
+        again = false;
+        media.load();
+        media.play().catch(() => {});
+        return;
+      }
+      stage.innerHTML = `<p class="repo-lb-wait">This browser cannot play ${esc(baseName(item.path))}. <button type="button" class="btn sm" data-repo-download="${esc(item.path)}" data-repo-at="${esc(at)}">${icon("save", "sm")} Download</button></p>`;
+    });
     // Safari sometimes leaves an autoplay video waiting, with nothing loaded. Asking it to play starts it; if the
     // browser refuses (no tap came first), the video's own play button is there.
-    if (item.kind === "video") media.play().catch(() => {});
+    media.play().catch(() => {});
   };
   if (ready) put(ready);
   else blobUrl(entry, item.path, at).then(put);
@@ -1367,10 +1381,10 @@ function openViewer(entry, listId, index) {
 
 // ============================================================ events
 
-async function download(entry, path) {
+async function download(entry, path, at = entry.ref) {
   toast(`Getting ${baseName(path)}…`);
   try {
-    const blob = await limited(() => fileBlob(entry, path, entry.ref));
+    const blob = await limited(() => fileBlob(entry, path, at));
     // Saved, never opened: the type says "a file", so no browser shows it as a page of this site.
     const url = URL.createObjectURL(new Blob([blob], { type: "application/octet-stream" }));
     const a = document.createElement("a");
@@ -1397,6 +1411,8 @@ document.addEventListener("click", (event) => {
       closeViewer();
       return goTo(go.getAttribute("href"));
     }
+    const keep = target.closest("[data-repo-download]");
+    if (keep) return download(viewer.entry, keep.dataset.repoDownload, keep.dataset.repoAt || viewer.entry.ref);
     if (action === "prev") return step(-1);
     if (action === "next") return step(1);
     // A click on the dark surround closes; a click on the picture or the video's controls does not.
@@ -1524,6 +1540,11 @@ export function wireRepo() {
       fill(item.target, entry);
     }
   }, { rootMargin: "300px" });
+  for (const player of document.querySelectorAll("#view .repo-stage video, #view .repo-stage audio")) {
+    player.addEventListener("error", () => {
+      if (player.isConnected && player.src) player.parentElement.innerHTML = `<p class="muted">This browser cannot play this file. Download saves it to this device.</p>`;
+    }, { once: true });
+  }
   for (const el of document.querySelectorAll("#view [data-repo-src], #view [data-repo-poster]")) {
     if (el.hasAttribute("data-repo-now")) fill(el, entry);
     else watcher.observe(el);
