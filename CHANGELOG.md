@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 93 (2026-11-21): A repo opens with its Windows, Mac, iPhone and Android versions
+
+- The Look tab of a repo starts with Versions: four lines, Windows, Mac, iPhone and Android, each with the file to download or the words "not published". The Releases tab lists every release with its files; this answers whether the project can be had on your computer and your phone ([#83](https://github.com/juw12/cairn/pull/83))
+- Windows, Mac and Android are read from the releases, the newest release that has a file for them, with its size and age. A download the README links counts too, such as an install script kept on the project's own site ([#83](https://github.com/juw12/cairn/pull/83))
+- iPhone is the project's own web app on the home screen: the repo holds a web manifest that opens as its own app and its page has an apple-touch-icon. The line links the live app and says how to add it; when one of the two is missing it says which ([#83](https://github.com/juw12/cairn/pull/83))
+- A version that an older release still carries while newer releases dropped it is marked as left behind, with the release that passed it ([#83](https://github.com/juw12/cairn/pull/83))
+- In a repo of many apps each app's folder shows its own four, from the releases whose tag starts with the folder's name. The repo's own page says how many apps the releases belong to instead of mixing them ([#83](https://github.com/juw12/cairn/pull/83))
+- One look costs one more GitHub call, kept for five minutes. Not in this build: whether a version starts was not looked at, only whether it is published
+
 ## Build 92 (2026-11-21): Issues, pull requests, releases and branches inside Cairn
 
 - Repo pages have two more tabs. Releases shows each release with its notes and its files to download. Issues and pull requests lists the open ones, with the closed ones one press away; one opens with everything said on it, and a pull request also shows its reviews, the comments left on lines and the files it changes ([#81](https://github.com/juw12/cairn/pull/81))
