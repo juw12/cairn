@@ -1009,6 +1009,13 @@ def build_parser() -> argparse.ArgumentParser:
     autopilot_parser.add_argument("action", nargs="?", default="status", choices=["status", "on", "off", "add", "run", "set"])
     autopilot_parser.add_argument("text", nargs="*")
     autopilot_parser.add_argument("--workdir", default="", help="add: where the agent works (default: a new folder per goal)")
+    pro_parser = sub.add_parser(
+        "pro",
+        help="Cairn Pro: the licence key that lets the autopilot take more than the one free goal",
+        description="status | activate KEY | remove",
+    )
+    pro_parser.add_argument("action", nargs="?", default="status", choices=["status", "activate", "remove"])
+    pro_parser.add_argument("key", nargs="?", default="")
     handoff_parser = sub.add_parser(
         "handoff",
         help="leave a message for your other computers, and see what they left for this one",
@@ -1142,6 +1149,28 @@ def cmd_precedent(brain: Brain, args) -> int:
     return 2
 
 
+def cmd_pro(brain: Brain, args) -> int:
+    from . import pro
+
+    try:
+        if args.action == "activate":
+            pro.activate(args.key)
+        elif args.action == "remove":
+            pro.remove()
+            print("Key removed from this computer. The subscription itself is managed on Polar.")
+    except pro.ProError as error:
+        print(error, file=sys.stderr)
+        return 1
+    state = pro.status()
+    if state["active"]:
+        print(f"Cairn Pro is on (key {state['key']}, checked {state['checked']}). The autopilot takes any number of goals.")
+    elif state["trial_left"]:
+        print(f"Cairn Pro is off. Your first autopilot goal is free; after that: {state['price']}.\n{state['checkout']}")
+    else:
+        print(f"Cairn Pro is off and the free goal is used. {state['price']}:\n{state['checkout']}\nThen: cairn pro activate <key>")
+    return 0
+
+
 def cmd_autopilot(brain: Brain, args) -> int:
     from . import autopilot
 
@@ -1158,7 +1187,11 @@ def cmd_autopilot(brain: Brain, args) -> int:
         if not text:
             print('Usage: cairn autopilot add "goal"', file=sys.stderr)
             return 2
-        job = autopilot.create_job(text, args.workdir)
+        try:
+            job = autopilot.new_goal(text, args.workdir)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 1
         print(f"Queued job {job['id']}: {job['goal']}\nWorking folder: {job['workdir']}")
         return 0
     if args.action == "set":
@@ -1218,6 +1251,7 @@ def main(argv: list[str] | None = None) -> int:
         "connect": cmd_connect,
         "precedent": cmd_precedent,
         "autopilot": cmd_autopilot,
+        "pro": cmd_pro,
         "serve": cmd_serve,
         "desktop": cmd_desktop,
         "pair": cmd_pair,

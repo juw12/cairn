@@ -33,7 +33,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import precedent
+from . import precedent, pro
 from .brain import Brain
 
 DEFAULT_SETTINGS = {
@@ -204,6 +204,14 @@ def create_job(goal: str, workdir: str = "", source: str = "app", queue_path: st
         job_list.append(job)
         _save_jobs(job_list)
     append_log(job["id"], f"[{_now()}] Goal received: {goal}\nWorking folder: {job['workdir']}\n")
+    return job
+
+
+def new_goal(goal: str, workdir: str = "", source: str = "app", queue_path: str = "") -> dict:
+    """A goal from you or the queue. The first one is free; later ones need Cairn Pro (pro.py)."""
+    pro.check()
+    job = create_job(goal, workdir, source, queue_path)
+    pro.goal_started()
     return job
 
 
@@ -542,11 +550,13 @@ class Autopilot:
         return None
 
     def pull_from_queue(self) -> dict | None:
+        if not pro.allowed():
+            return None
         taken = {job.get("queue_path") for job in jobs() if job.get("queue_path")}
         item = precedent.queue_next(self.brain, auto_only=True, exclude=taken)
         if not item:
             return None
-        return create_job(item["text"], source="queue", queue_path=item["path"])
+        return new_goal(item["text"], source="queue", queue_path=item["path"])
 
     def work_on(self, job: dict) -> None:
         config = settings()
@@ -628,6 +638,7 @@ def state(worker: Autopilot | None = None) -> dict:
         "worker": worker.status() if worker else {"current": None, "worker": "idle"},
         "engine_found": bool(shutil.which("opencode")) if settings()["engine"] == "opencode" else True,
         "state_dir": str(state_dir()),
+        "pro": pro.status(),
     }
 
 
