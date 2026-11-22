@@ -582,6 +582,42 @@ export async function switchPusher(account) {
   renderView();
 }
 
+// Let another computer do the work of this computer's chats, or take it back. Without a session it is the
+// switch for all of them: nothing is sent, each chat is told at its next step and hands its own work over.
+// With a session, that chat's work is handed now: Cairn writes the handoff from its log, so that is asked first.
+export async function handWork(to, session = "") {
+  const hand = state.vibeHand;
+  if (!hand || typeof state.store?.vibeHand !== "function") return;
+  const back = !to;
+  if (session && !back) {
+    const note = state.notes.find((entry) => entry.type === "session" && entry.slug === session);
+    const sure = await ask({
+      title: `Hand this chat's work to ${to}?`,
+      text: note ? note.title : session,
+      list: [
+        `Cairn leaves a handoff for ${to} now, with this session's goal and its log so far.`,
+        `A chat on ${to} carries it on when it picks the handoff up. The conversation itself stays in the AI app on this computer: what moves is the work.`,
+        "The chat here is told at its next step. It stops, and adds what a log cannot show (a branch that is not pushed, files only on this computer).",
+        "Take back on the same row returns it.",
+      ],
+      confirm: `Hand to ${to}`,
+      noInput: true,
+    });
+    if (!sure) return;
+  }
+  for (const button of $$("[data-action=vibe-hand]")) button.disabled = true;
+  try {
+    const { message, files, ...now } = await state.store.vibeHand(back ? "here" : to, session);
+    for (const file of files || []) upsertFile(file.path, file.text, file.mtime);
+    state.vibeHand = now;
+    state.vibeHandKey = JSON.stringify(now);
+    toast(message);
+  } catch (error) {
+    toast(error.message, { error: true });
+  }
+  renderView();
+}
+
 // Send the backup to the cloud drive now. The server answers at once and does the work in the background;
 // the page follows it with the same poll that keeps the rest of Vibe live.
 export async function cloudSyncNow(repos) {
@@ -887,6 +923,63 @@ function githubPushSection() {
   </section>`;
 }
 
+// Where the work of this computer's chats goes. Null in a browser without the local app (there is no
+// computer behind the page to hand from), in a read-only brain, and while no other computer shares the brain.
+function handChoice() {
+  const hand = state.vibeHand;
+  return hand && !readOnly() && Array.isArray(hand.others) && (hand.others.length || hand.to) ? hand : null;
+}
+
+const handWhen = (stamp) => (stamp ? stampLabel(String(stamp)) || String(stamp).replace("T", " ") : "");
+
+function handSummary(hand) {
+  if (!hand) return "";
+  const single = hand.sessions.filter((entry) => entry.live).length;
+  const one = single ? ` · ${plural(single, "chat")} handed over` : "";
+  return hand.to ? `goes to ${hand.to}` : `done on this computer${one}`;
+}
+
+// One press: the assistants on this computer stop doing the work themselves and leave it for the other
+// computer; the same press on "This computer" takes it back. Under it, the chats handed over one by one.
+function handStrip() {
+  const hand = handChoice();
+  if (!hand) return "";
+  const chip = (name, label, on, title) =>
+    `<button type="button" class="chip${on ? " on" : ""}" data-action="vibe-hand" data-to="${esc(name)}" aria-pressed="${on}" title="${esc(title)}">${esc(label)}</button>`;
+  const chips = [
+    chip("", "This computer", !hand.to, hand.to ? "Take the work back: the chats on this computer do it themselves again" : "The chats on this computer do their own work"),
+    ...hand.others.map((name) => chip(name, name, sameAccount(name, hand.to), sameAccount(name, hand.to) ? `The work of this computer's chats goes to ${name}` : `Let ${name} do the work of this computer's chats`)),
+  ].join("");
+  const how = hand.to
+    ? `Every chat on this computer leaves its work for ${hand.to} as a handoff, follows the answers and checks the result. It is told at its next step, a new chat when it starts. What only this computer can do is still done here. ${hand.to} does the work when a chat there picks the handoff up.`
+    : "Press a computer and the assistants here stop doing the work themselves: each chat hands its own work over at its next step, a new chat when it starts. For one chat alone, use Hand to on its row in the live recap.";
+  const rows = hand.sessions
+    .map((entry) => `<li><span class="hand-what">${esc(entry.title)}</span> <span class="muted small">to ${esc(entry.to)}${entry.at ? `, ${esc(handWhen(entry.at))}` : ""}${entry.live ? "" : ", session ended"}</span>
+        <button type="button" class="btn sm" data-action="vibe-hand" data-to="" data-session="${esc(entry.session)}" title="This computer does it again; the other computer is told to stop">Take back</button></li>`)
+    .join("");
+  return `<section class="vibe-hand" aria-label="Which computer does the work of this computer's chats">
+    <header>
+      <h2>Chats' work</h2>
+      <span class="vm-spec">${hand.to ? `goes to ${esc(hand.to)}${hand.since ? ` since ${esc(handWhen(hand.since))}` : ""}` : "done on this computer"}</span>
+    </header>
+    <div class="gh-push" role="group" aria-label="Done by">${chips}</div>
+    <p class="muted small gh-note">${esc(how)}</p>
+    ${rows ? `<ul class="hand-list">${rows}</ul>` : ""}
+  </section>`;
+}
+
+// On a live row of this computer: hand that one chat's work to another computer, or take it back.
+function handButtons(note) {
+  const hand = handChoice();
+  if (!hand || note.status !== "live" || !["", state.vibeHere || ""].includes(deviceOf(note))) return [];
+  const handed = String(note.meta.handed_to || "").trim();
+  if (handed) {
+    return [`<button type="button" class="btn sm" data-action="vibe-hand" data-to="" data-session="${esc(note.slug)}" title="${esc(`Handed to ${handed}. This computer does it again; ${handed} is told to stop`)}">Take back from ${esc(handed)}</button>`];
+  }
+  const targets = hand.to ? [hand.to] : hand.others.slice(0, 3);
+  return targets.map((name) => `<button type="button" class="btn sm" data-action="vibe-hand" data-to="${esc(name)}" data-session="${esc(note.slug)}" title="${esc(`Leave this chat's work for ${name}, with its goal and log`)}">Hand to ${esc(name)}</button>`);
+}
+
 // The second copy of the brain (and of the repos) in a cloud drive. Null on a phone and in a browser without the
 // local app: the backup is made and sent by the computer the brain is on.
 function cloudReading() {
@@ -1079,6 +1172,13 @@ async function poll() {
   if (pushKey !== (state.vibePushKey || "null")) {
     state.vibePush = data.push || null;
     state.vibePushKey = pushKey;
+    changed = true;
+  }
+  // Where the work of this computer's chats goes: a switch made in a terminal or by an assistant shows here too.
+  const handKey = JSON.stringify(data.hand || null);
+  if (handKey !== (state.vibeHandKey || "null")) {
+    state.vibeHand = data.hand || null;
+    state.vibeHandKey = handKey;
     changed = true;
   }
   // The cloud backup: a run started here, by the daily turn or from a terminal shows as it goes.
@@ -1527,18 +1627,18 @@ function recapWhen(at) {
 }
 
 function recapActions(entry) {
-  if (!chatReady()) return "";
   const note = entry.note;
   const external = String(note.meta.external || "");
   const folder = folderName(note);
-  const canContinue = sessionSource(note) === "opencode" && external && !external.startsWith("batch-") && entry.key !== "working";
+  const canContinue = chatReady() && sessionSource(note) === "opencode" && external && !external.startsWith("batch-") && entry.key !== "working";
   const buttons = [
     canContinue
       ? `<button type="button" class="btn sm${entry.key === "finished" || entry.key === "error" ? " primary" : ""}" data-action="vibe-continue" data-path="${esc(note.path)}" title="Send the next prompt to this OpenCode session">${icon("chat", "sm")} Continue</button>`
       : "",
-    folder
+    folder && chatReady()
       ? `<button type="button" class="btn sm ghost" data-action="vibe-newchat" data-path="${esc(note.path)}" title="Start a fresh chat in ${esc(folder)}">${icon("plus", "sm")} New chat</button>`
       : "",
+    ...handButtons(note),
   ].filter(Boolean);
   return buttons.length ? `<div class="rc-actions">${buttons.join("")}</div>` : "";
 }
@@ -1552,6 +1652,7 @@ function recapRow(entry, alone = false) {
     group.key === "other" ? "" : esc(group.label),
     folderName(note) ? esc(folderName(note)) : "",
     severalDevices && shownDevice() === null && deviceOf(note) ? `<span class="rc-device" title="Computer">${esc(deviceOf(note))}</span>` : "",
+    note.meta.handed_to ? `<span class="rc-handed" title="Its work was handed over in Cairn${note.meta.handed_at ? `, ${esc(handWhen(note.meta.handed_at))}` : ""}">handed to ${esc(String(note.meta.handed_to))}</span>` : "",
     entry.model ? `<span class="rc-model" title="Model">${esc(entry.model)}</span>` : "",
     entry.effort ? `<span class="rc-effort" title="Reasoning effort">${esc(entry.effort)} effort</span>` : "",
     entry.tokens ? `<span class="rc-tokens" title="${entry.tokens.toLocaleString()} tokens in and out">${compact(entry.tokens)} tokens</span>` : "",
@@ -2042,6 +2143,7 @@ export function vibeView() {
     },
     github: { html: githubStrip(), summary: [minutesSummary, pusher ? `pushes as ${pusher}` : ""].filter(Boolean).join(" · ") },
     cloud: { html: cloudStrip(), summary: cloudSummary(cloudReading()) },
+    hand: { html: handStrip(), summary: handSummary(handChoice()) },
     overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
     figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },
     activity: { html: activity(stats, sessions), summary: "sessions per day" },

@@ -76,6 +76,8 @@ cairn obsidian <vault folder>             # import an Obsidian vault and keep it
 cairn connect --status                    # which AI apps on this computer use this brain as their memory (changes nothing)
 cairn connect claude                      # put the cairn-memory skill in one app: vector, claude, opencode, codex (--remove takes it out)
 cairn connect vector --cloud owner/repo   # the same on a computer that has no folder of the brain: the skill reads and saves on GitHub
+cairn vibe hand                           # which computer does the work of this computer's chats (changes nothing)
+cairn vibe hand "<computer>"              # the user's switch: every chat here leaves its work for that computer; `hand here` takes it back. Only when the user says so
 cairn cloud                               # the second copy in a cloud drive: what it holds and when it was sent (changes nothing)
 cairn cloud sync                          # send the brain there now, locked first; only after the user ran `cairn cloud setup` (--repos: their GitHub repos too)
 cairn serve --port 4777                   # open the app in the browser (the default command)

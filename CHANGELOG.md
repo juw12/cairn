@@ -3,6 +3,14 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 101 (2026-11-22): Let another computer do the work of this one's chats, and take it back
+
+- Vibe has a new block, Chats' work, with one chip per computer of your brain. Press another computer and the assistants on this one stop doing the work themselves: each chat leaves its work for that computer as a handoff, follows the answers and checks the result. Press This computer and they do it themselves again
+- Nothing is interrupted and nothing is sent by the switch itself. A running chat is told at its next step (cairn vibe log says so), a new chat when it starts (the memory skill's rules begin with it). What only this computer can do is still done here
+- One chat alone: a live session of this computer has Hand to on its row in the live recap. Cairn writes the handoff itself, from the session's goal and its log so far, and marks the session, which every device then shows as handed. Take back on the same row closes that conversation so the other computer stops
+- What moves is the work, not the conversation: an AI app keeps its chats to itself. The other computer does the work when a chat there picks the handoff up
+- From a terminal: cairn vibe hand (where the work goes), cairn vibe hand NAME, cairn vibe hand here, and --session NAME for one session
+
 ## Build 100 (2026-11-22): Cairn for Mac
 
 - The desktop app can now be had on a Mac: one line pasted in Terminal installs it, with no admin rights and no password, and puts Cairn.app in your Applications folder. It is the same app as on Windows: your notes open by themselves, one Sync button, and it updates itself

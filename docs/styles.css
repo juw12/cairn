@@ -1641,8 +1641,8 @@ button.heat:hover, button.heat:focus-visible { outline: 2px solid var(--ink); ou
 .dist-row .star-label .icon { width: 11px; height: 11px; fill: currentColor; }
 .session-row .meta .check-pass .icon, .session-row .meta .check-fail .icon { width: 12px; height: 12px; stroke-width: 2.2; vertical-align: -1px; }
 /* vibe: secondary text one step louder than the app-wide --muted, still quieter than --ink-2 */
-.vibe-recap, .vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-overview, .vibe-live, .vibe-figures, .vibe-board, .vibe-hook { --muted: #59544b; }
-:root[data-theme="dark"] :is(.vibe-recap, .vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-overview, .vibe-live, .vibe-figures, .vibe-board, .vibe-hook) { --muted: #a9a296; }
+.vibe-recap, .vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand, .vibe-overview, .vibe-live, .vibe-figures, .vibe-board, .vibe-hook { --muted: #59544b; }
+:root[data-theme="dark"] :is(.vibe-recap, .vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand, .vibe-overview, .vibe-live, .vibe-figures, .vibe-board, .vibe-hook) { --muted: #a9a296; }
 .vibe-figures .figure .label { font-size: 13px; }
 @media (max-width: 600px) {
   :is(.vibe-log-form, .fb-form, .fb-row, .vibe-end) :is(.input, .select, .btn) { min-height: 40px; }
@@ -2416,9 +2416,9 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .mu-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .mu-bar i { display: block; height: 100%; min-width: 2px; border-radius: 2px; background: var(--accent); }
 /* The computer under the sessions: which one it is and how loaded it is right now (or when a watcher last noted it) */
-.vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud { padding: 0 0 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
-:is(.vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud) > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 8px; }
-:is(.vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud) > header h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand { padding: 0 0 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+:is(.vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand) > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 8px; }
+:is(.vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand) > header h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .vm-spec { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .vm-meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 24px; }
 .vm-meter { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; }
@@ -2448,6 +2448,11 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .gh-moving { font-size: 12.5px; color: var(--muted); }
 /* which of your accounts this computer pushes as: a chip for each, the one in use pressed */
 .gh-push { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.hand-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.hand-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.hand-list .hand-what { font-weight: 500; }
+.hand-list .btn { margin-left: auto; }
+.rc-handed { color: var(--accent); font-weight: 500; }
 .cloud-facts { margin: 8px 0 0; padding-left: 18px; }
 .cloud-facts li { margin: 2px 0; }
 .vibe-cloud code { user-select: all; }
@@ -2542,7 +2547,7 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .vp-body { padding-bottom: 14px; }
 /* The block's own heading repeats the panel title, and its rule repeats the panel's. */
 .vp-body > :is(.vibe-recap, .vibe-overview, .column-block) > header > h2 { display: none; }
-.vp-body > :is(.vibe-recap, .vibe-overview, .vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .figures, .vibe-hook) { margin: 0; border-bottom: 0; }
+.vp-body > :is(.vibe-recap, .vibe-overview, .vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand, .figures, .vibe-hook) { margin: 0; border-bottom: 0; }
 /* a second account's meter under the first */
 .vibe-github + :is(.vibe-github, .vibe-ghpush), .vp-body > .vibe-github + :is(.vibe-github, .vibe-ghpush) { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .vp-body > .column-block { padding-top: 0; }

@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, machine, mcp, precedent, pro, vibe
+from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, handoff, handover, machine, mcp, precedent, pro, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -212,6 +212,8 @@ class Handler(BaseHTTPRequestHandler):
                     "push": github_push.status_soon() if self.github_moves else None,
                     # the second copy in a cloud drive: what was sent and when; None on a phone
                     "cloud": cloud_backup.status() if self.github_moves else None,
+                    # where the work of this computer's chats goes: here, or another computer of this brain
+                    "hand": handover.status_soon(brain),
                 })
             elif route == "/api/chat":
                 self._send_json(chat.summary())
@@ -314,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._github_push()
         if route == "/api/cloud/sync" and self.github_moves:
             return self._cloud_sync()
+        if route == "/api/vibe/hand":
+            return self._vibe_hand()
         self._drain()
         self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
 
@@ -327,6 +331,39 @@ class Handler(BaseHTTPRequestHandler):
         except (cloud_backup.CloudError, ValueError) as error:
             return self._error(HTTPStatus.BAD_REQUEST, str(error))
         self._send_json(cloud_backup.status())
+
+    def _vibe_hand(self):
+        """POST /api/vibe/hand {to, session?}: let another computer do the work of this computer's chats
+        (cairn.handover). Without `session` it is the switch for all of them, and `to` "here" takes it
+        back. With `session` that one session is handed now (a handoff is written from its log) or taken
+        back. Answers with the new state, a sentence and the notes it wrote; the brain is sent on its way
+        in the background, so the other computer has the handoff within seconds where the brain syncs by
+        itself."""
+        try:
+            body = self._body()
+            to = str(body.get("to", ""))
+            session = str(body.get("session", "")).strip()
+            written: list[str] = []
+            if not session:
+                message = handover.switch(self.brain, to)["message"]
+            elif core.device_key(to) in handover.HERE_WORDS and to.strip():
+                result = handover.take_back(self.brain, session)
+                message, written = result["message"], [result["path"]]
+            else:
+                result = handover.hand_session(self.brain, session, to)
+                message, written = result["message"], [result["path"], result["handoff"]]
+        except (handover.HandoverError, ValueError, OSError) as error:
+            return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        files = []
+        for path in written:
+            self.changes.record(path, self._client())
+            try:
+                files.append(self.brain.read(path))
+            except (OSError, PathError):
+                pass
+        if written:
+            threading.Thread(target=handoff.deliver, args=(self.brain,), daemon=True).start()
+        self._send_json({**handover.status(self.brain), "message": message, "files": files})
 
     def _github_move(self):
         """POST /api/github/move {repo, from, to}: ask GitHub to hand a private repo to another of

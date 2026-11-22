@@ -17,7 +17,9 @@ Run the two scripts with this Python, the one Cairn runs on:
 ## When a chat starts
 
 1. Read the standing decisions and follow them: `recall.py rules`. Open one that touches the task with
-   `recall.py read "<path or title>"`.
+   `recall.py read "<path or title>"`. When the answer begins with HAND-OVER IS ON, the user has switched this
+   computer's chats over to another computer in Cairn: do what it says before anything else. Leave the work
+   for that computer with `remember.py handoff`, follow its answers, and do here only what needs this computer.
 2. Search the brain for the subject of the request before answering, and before asking the user something
    they may already have answered:
 
