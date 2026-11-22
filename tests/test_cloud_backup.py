@@ -304,6 +304,21 @@ class RepoTests(CloudCase):
         self.assertTrue((base / first / "beta.7z").is_file())  # the older archive stays where it was
         self.assertIn("1 repo(s) sent, 2 of 3 held", third["message"])
 
+    def test_the_mirror_is_gone_before_the_archive_is_made(self):
+        seen: list[bool] = []
+        real = cloud_backup._run
+        scratch = self.tmp / "scratch"  # where this run's mirrors and bundles are made, apart from anyone else's
+        scratch.mkdir()
+
+        def watch(*command):
+            if "-t7z" in command:
+                seen.append(any(scratch.glob("cairn-backup-*/*.git")))
+            return real(*command)
+
+        with mock.patch.object(cloud_backup, "_run", watch), mock.patch.object(tempfile, "tempdir", str(scratch)):
+            cloud_backup.sync(self.brain, log=lambda line: None)
+        self.assertEqual(seen, [False, False, False])  # the brain's archive, then alpha's and beta's: no mirror beside any
+
     def test_a_full_disk_makes_a_repo_wait_and_batches_keep_the_disk_light(self):
         with mock.patch.object(cloud_backup, "free_gb", lambda folder: 1.0):
             outcome = cloud_backup.sync(self.brain, log=lambda line: None)
@@ -426,6 +441,37 @@ class HelperTests(unittest.TestCase):
             cloud_terabox.trim_profile()
             left = sorted(path.relative_to(profile).as_posix() for path in profile.rglob("file"))
         self.assertEqual(left, ["Default/Network/file"])  # where Chrome keeps the sign-in
+
+    def test_while_one_run_is_sending_another_is_turned_away(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        agent = {"value": "Mozilla/5.0 HeadlessChrome/157.0.0.0 Safari/537.36"}
+
+        class Chrome(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                body = json.dumps({"Browser": "Chrome/157", "User-Agent": agent["value"]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Chrome)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        with mock.patch.dict(os.environ, {"CAIRN_TERABOX_PORT": str(server.server_address[1]), "CAIRN_HOME": tempfile.mkdtemp()}):
+            self.assertEqual(cloud_terabox.answering(), "hidden")
+            with self.assertRaises(cloud_terabox.Stop) as caught:
+                cloud_terabox.start_window(hidden=False)
+            self.assertIn("being sent right now", str(caught.exception))
+            agent["value"] = "Mozilla/5.0 Chrome/157.0.0.0 Safari/537.36"
+            self.assertEqual(cloud_terabox.answering(), "window")
+            self.assertFalse(cloud_terabox.start_window(hidden=True))  # the person's window is used, and left open
+        with mock.patch.dict(os.environ, {"CAIRN_TERABOX_PORT": "1"}):
+            self.assertEqual(cloud_terabox.answering(), "")
 
     def test_it_answers_in_one_line_also_when_it_cannot_start(self):
         env = {**os.environ, "CAIRN_HOME": tempfile.mkdtemp(), "CAIRN_CHROME": "", "PATH": ""}

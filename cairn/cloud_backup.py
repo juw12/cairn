@@ -229,8 +229,10 @@ def free_gb(folder: Path) -> float:
     return shutil.disk_usage(folder).free / 1e9
 
 
-def pack(source: Path, name: str, folder: Path, key: str) -> dict:
-    """One repository (or, without git in it, one folder) -> folder/NAME.7z, or NAME.7z.001, .002 ... when big."""
+def pack(source: Path, name: str, folder: Path, key: str, drop_source: bool = False) -> dict:
+    """One repository (or, without git in it, one folder) -> folder/NAME.7z, or NAME.7z.001, .002 ... when big.
+    With drop_source (a mirror fetched only for this) the repository is deleted as soon as its bundle is made
+    and checked, so the disk never holds the mirror, the bundle and the archive at once."""
     folder.mkdir(parents=True, exist_ok=True)
     for old in folder.glob(f"{name}.7z*"):
         old.unlink()
@@ -248,6 +250,8 @@ def pack(source: Path, name: str, folder: Path, key: str) -> dict:
             heads = _run(git(), "-C", str(source), "bundle", "list-heads", str(bundle)).splitlines()
             entry.update({"kind": "git bundle", "refs": len(heads),
                           "head": next((line.split()[0] for line in heads if line.endswith(" HEAD")), heads[0].split()[0] if heads else "")})
+            if drop_source:
+                shutil.rmtree(source, ignore_errors=True)
             _run(*lock, str(bundle))
     else:
         entry["kind"] = "folder"
@@ -394,7 +398,7 @@ def _sync_repos(owner: str, key: str, log) -> dict:
 
     for repo in changed:
         name = repo["name"]
-        need = repo["kb"] / 1e6 * 3  # the mirror, its bundle and the archive, for a moment
+        need = repo["kb"] / 1e6 * 2  # two of the three at a time: the mirror and its bundle, then the bundle and the archive
         if free_gb(home()) - need < KEEP_FREE_GB:
             waiting += 1
             log(f"Not enough room on this disk for {name} ({repo['kb'] / 1024:.0f} MB on GitHub): it waits")
@@ -406,7 +410,7 @@ def _sync_repos(owner: str, key: str, log) -> dict:
             if not _run(git(), "-C", str(mirror), "for-each-ref", "--count=1"):
                 held[name] = {"pushed": repo["pushed"], "at": _now(), "empty": True, "files": []}
                 continue
-            entry = pack(mirror, name, work, key)
+            entry = pack(mirror, name, work, key, drop_source=True)
         batch.append((repo, entry))
         if len(batch) >= BATCH_FILES or sum(part["bytes"] for _, item in batch for part in item["files"]) >= BATCH_BYTES:
             flush()
