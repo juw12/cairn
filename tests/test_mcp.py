@@ -100,7 +100,8 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(
             set(tools),
             {"search", "read_note", "list_notes", "context", "recent", "code_todos", "capture", "update_note", "log",
-         "precedent_brief", "queue_next", "queue_add", "precedent_log", "handoffs", "handoff_send", "handoff_answer"},
+         "precedent_brief", "queue_next", "queue_add", "precedent_log", "handoffs", "handoff_send", "handoff_answer",
+             "priority"},
         )
         for tool in tools.values():
             self.assertEqual(tool["inputSchema"]["type"], "object")
@@ -169,6 +170,46 @@ class McpServerTests(unittest.TestCase):
         text, error = reader.call("handoffs", device=mac, all=True)
         self.assertIn("Check Buddy on the Windows laptop", text)
         reader.close()
+
+    def test_a_session_that_never_runs_cairn_vibe_learns_its_place_in_the_order(self):
+        """The watcher lists another app's runs as a session (source: opencode, with the folder it works in).
+        That app never runs `cairn vibe`, so nothing told it its place: it asks the `priority` tool."""
+        sessions = self.project / "brain" / "sessions"
+        sessions.mkdir()
+        now = dt.datetime.now()
+        day, clock = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+
+        def session(name: str, title: str, more: str = "") -> None:
+            (sessions / f"{name}.md").write_text(
+                f"---\ntitle: \"{title}\"\ntype: session\nstatus: live\ntags: []\ncreated: {day}\nstarted: {day}T{clock}\n{more}---\n"
+                f"## Goal\n\n{title}\n\n## Log\n\n- {clock} start: {title}\n", encoding="utf-8")
+
+        session(f"{day}-lab-automated-runs", "lab: automated runs", "agent: opencode\nsource: opencode\nexternal: batch-1\nfolder: E:/Lab/run\n")
+        session(f"{day}-neon-coast", "Neon Coast touch controls", "agent: vector\n")
+        text, error = self.client.call("priority", folder="E:/Lab/run")
+        self.assertFalse(error)
+        self.assertIn("has not put the running sessions in order", text)
+
+        (self.project / "brain" / "CAIRN-PRIORITY.md").write_text(f"1. {day}-neon-coast\n2. {day}-lab-automated-runs\n", encoding="utf-8")
+        text, error = self.client.call("priority", folder="e:\\lab\\run\\")  # as Windows writes the same folder
+        self.assertFalse(error)
+        self.assertIn("PRIORITY (set in Cairn): this chat is number 2 of 2 running sessions.", text)
+        self.assertIn("Before it: 1. Neon Coast touch controls", text)
+        self.assertIn(f"This session: {day}-lab-automated-runs", text)
+        text, error = self.client.call("priority", session=f"{day}-neon-coast")
+        self.assertIn("number 1 of 2 running sessions, the most important one", text)
+
+        text, error = self.client.call("priority", folder="E:/Somewhere/else")
+        self.assertFalse(error)
+        self.assertIn("No running session of this computer works in", text)
+        self.assertIn("1. Neon Coast touch controls", text)
+        self.assertNotIn("Move one:", text, "the order is the user's: an assistant is not told how to change it")
+        before = (self.project / "brain" / "CAIRN-PRIORITY.md").read_text(encoding="utf-8")
+        reader = McpClient(self.project, "--read-only")
+        reader.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        self.assertIn("priority", {tool["name"] for tool in reader.request("tools/list")["result"]["tools"]})
+        reader.close()
+        self.assertEqual((self.project / "brain" / "CAIRN-PRIORITY.md").read_text(encoding="utf-8"), before, "the tool only reads")
 
     def test_capture_search_and_read_a_decision(self):
         text, error = self.client.call(

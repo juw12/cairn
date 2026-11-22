@@ -290,6 +290,38 @@ def _tool_queue_next(brain: Brain, args: dict) -> str:
     return f"brain/{item['path']} [{item['status']}]{flags}\n\n{item['text']}"
 
 
+def _same_folder(one: str, other: str) -> bool:
+    """Two ways of writing one folder: E:\\Lab\\run and e:/lab/run/ are the same place."""
+    tidy = lambda text: str(text).replace("\\", "/").rstrip("/").lower()  # noqa: E731
+    return bool(tidy(one)) and tidy(one) == tidy(other)
+
+
+def _tool_priority(brain: Brain, args: dict) -> str:
+    """The place of one running session in the user's order. For an assistant that never runs `cairn vibe`
+    (a session the watcher found by itself is ordered on the page and was never told its place)."""
+    from . import rank
+
+    reading = rank.status(brain)
+    if not reading["sessions"]:
+        return "No session is running, so there is no order."
+    if not reading["ranked"]:
+        return "The user has not put the running sessions in order: no session gives way to another."
+    wanted, folder = rank._name(str(args.get("session", ""))), str(args.get("folder", "")).strip()
+    mine = next((entry for entry in reading["sessions"] if wanted and entry["session"] == wanted), None)
+    if mine is None and folder:  # the watcher writes the folder an app works in into its session note
+        notes = {note["slug"]: note for note in rank.running(brain)}
+        here = [entry for entry in reading["sessions"]
+                if entry["here"] and _same_folder(notes.get(entry["session"], {}).get("meta", {}).get("folder", ""), folder)]
+        mine = here[0] if len(here) == 1 else None
+    if mine is None:
+        why = (f"No running session is called {wanted!r}." if wanted else
+               f"No running session of this computer works in {folder!r}." if folder else
+               "Say which session with `session` (its name) or `folder` (the folder you work in).")
+        return why + "\n\n" + rank.summary(reading).split("\nMove one:")[0]
+    told = rank.notice(brain, mine["session"])
+    return (told or f"PRIORITY: {mine['title']} is the only running session.") + f"\n  This session: {mine['session']}"
+
+
 def _tool_queue_add(brain: Brain, args: dict) -> str:
     from . import precedent
 
@@ -470,6 +502,19 @@ TOOLS: list[dict] = [
         "inputSchema": {"type": "object", "properties": {"auto_only": {"type": "boolean", "description": "Only items marked safe to run unattended (#auto)"}}},
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
         "handler": _tool_queue_next,
+    },
+    {
+        "name": "priority",
+        "description": "Your place in the user's order of the running sessions (set in Cairn, Vibe, Priority). Ask at the start of a turn when you do not log your steps with cairn vibe: where sessions need the same thing (the user's answer, a repo, this computer's processor, memory or disk, build minutes) the lower number goes first and the others give way. Answers that no order is set when the user has not placed any session.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session": {"type": "string", "description": "The name of your session note, when you know it"},
+                "folder": {"type": "string", "description": "The folder you work in: your session is found by it when you do not know its name"},
+            },
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+        "handler": _tool_priority,
     },
     {
         "name": "queue_add",
