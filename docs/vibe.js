@@ -978,6 +978,8 @@ function handChoice() {
   return hand && !readOnly() && Array.isArray(hand.others) && (hand.others.length || hand.to) ? hand : null;
 }
 
+const HAND_PICK_OPEN = 6; // up to this many live chats the list to pick from is open; a longer one starts folded
+
 const handWhen = (stamp) => (stamp ? stampLabel(String(stamp)) || String(stamp).replace("T", " ") : "");
 
 function handSummary(hand) {
@@ -1000,11 +1002,24 @@ function handStrip() {
   ].join("");
   const how = hand.to
     ? `Every chat on this computer leaves its work for ${hand.to} as a handoff, follows the answers and checks the result. It is told at its next step, a new chat when it starts. What only this computer can do is still done here. ${hand.to} does the work when a chat there picks the handoff up.`
-    : "Press a computer and the assistants here stop doing the work themselves: each chat hands its own work over at its next step, a new chat when it starts. For one chat alone, use Hand to on its row in the live recap.";
+    : "Press a computer and the assistants here stop doing the work themselves: each chat hands its own work over at its next step, a new chat when it starts. For one chat alone, use Hand to on its row below or in the live recap.";
   const rows = hand.sessions
     .map((entry) => `<li><span class="hand-what">${esc(entry.title)}</span> <span class="muted small">to ${esc(entry.to)}${entry.at ? `, ${esc(handWhen(entry.at))}` : ""}${entry.live ? "" : ", session ended"}</span>
         <button type="button" class="btn sm" data-action="vibe-hand" data-to="" data-session="${esc(entry.session)}" title="This computer does it again; the other computer is told to stop">Take back</button></li>`)
     .join("");
+  // The chats to pick from are listed here too, newest first: the live recap can be folded away, or far down.
+  const handed = new Set(hand.sessions.map((entry) => entry.session));
+  const mine = liveSessions().filter((note) => !handed.has(note.slug) && handButtons(note).length && !String(note.meta.handed_to || "").trim());
+  const open = foldOpen("hand-pick", mine.length <= HAND_PICK_OPEN);
+  const pick = mine.length
+    ? `<details class="hand-pick" data-block="hand-pick"${open ? " open" : ""}>
+        <summary>Or one chat alone <span class="muted small">${plural(mine.length, "live chat")} on this computer</span></summary>
+        <ul class="hand-list">${mine
+          .map((note) => `<li><span class="hand-what">${esc(note.title)}</span> <span class="muted small">${esc([groupOf(note).key === "other" ? "" : groupOf(note).label, note.meta.started ? `since ${handWhen(note.meta.started)}` : ""].filter(Boolean).join(", "))}</span>
+            <span class="hand-do">${handButtons(note).join("")}</span></li>`)
+          .join("")}</ul>
+      </details>`
+    : "";
   return `<section class="vibe-hand" aria-label="Which computer does the work of this computer's chats">
     <header>
       <h2>Chats' work</h2>
@@ -1012,7 +1027,8 @@ function handStrip() {
     </header>
     <div class="gh-push" role="group" aria-label="Done by">${chips}</div>
     <p class="muted small gh-note">${esc(how)}</p>
-    ${rows ? `<ul class="hand-list">${rows}</ul>` : ""}
+    ${rows ? `<ul class="hand-list hand-out">${rows}</ul>` : ""}
+    ${pick}
   </section>`;
 }
 
@@ -1281,7 +1297,7 @@ export function wireVibe() {
   // Empty side blocks fold on phones; remember when someone opens one so live updates keep it open.
   // Recorded on click (which also fires for Enter/Space on the summary), not on "toggle": toggle fires a task
   // later, and a live re-render in between would close the block again.
-  for (const fold of $$("details.vibe-fold, details.rc-fold, details.ov-fold")) {
+  for (const fold of $$("details.vibe-fold, details.rc-fold, details.ov-fold, details.hand-pick")) {
     fold.querySelector("summary")?.addEventListener("click", () => setFold(fold.dataset.block, !fold.open));
   }
   // The last message is clamped to three lines; a tap opens it in full and live updates keep it open.

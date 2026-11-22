@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 103,
+      "date": "2026-11-22",
+      "title": "Pick the chat to hand over in the Chats' work block itself",
+      "changes": [
+        "Chats' work on Vibe now lists the live chats of this computer under the switch, newest first, each with Hand to. Before, that button was only on the chat's row in the live recap, which is out of sight when that block is folded or far down the page (#100)",
+        "With more than six live chats the list starts folded to one line, Or one chat alone, and stays the way you leave it (#100)"
+      ]
+    },
+    {
       "build": 102,
       "date": "2026-11-22",
       "title": "Let another computer do the work of this one's chats, and take it back",

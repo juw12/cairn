@@ -445,6 +445,27 @@ class PageTests(HandoverCase):
             page.wait_for_function("document.querySelector('.vibe-hand .chip.on')?.textContent !== 'This computer'")
         self.assertEqual(self.errors, [])
 
+    def test_the_block_lists_this_computers_live_chats_to_pick_from(self):
+        second = self.slug(vibe.start(self.brain, "Bits and Tickers interview", agent="vector"))
+        page = self.open()
+        pick = page.locator(".vibe-hand .hand-pick")
+        self.assertIn("2 live chats on this computer", pick.locator("summary").inner_text())
+        self.assertTrue(pick.evaluate("node => node.open"), "a short list is open")
+        # both started in this minute, so which is first is not said; that both are there is
+        self.assertEqual(sorted(pick.locator(".hand-what").all_inner_texts()), ["Bits and Tickers interview", "Neon Coast 1.6: touch controls"])
+        self.assertNotIn("Lab writer", pick.inner_text(), "another computer's chat is not in it")
+
+        pick.locator("li", has_text="Bits and Tickers").locator("[data-action=vibe-hand]").click()
+        page.get_by_role("button", name=f"Hand to {ASUS}", exact=True).last.click()
+        page.wait_for_selector(".vibe-hand .hand-out li")
+        self.assertEqual([entry["session"] for entry in handover.status(self.brain)["sessions"]], [second])
+        self.assertEqual(page.locator(".vibe-hand .hand-pick .hand-what").all_inner_texts(), ["Neon Coast 1.6: touch controls"])
+        self.assertIn("Bits and Tickers interview", page.locator(".vibe-hand .hand-out").inner_text())
+        page.locator(".vibe-hand .hand-out [data-action=vibe-hand]").click()
+        page.wait_for_function("!document.querySelector('.vibe-hand .hand-out')")
+        self.assertEqual(len(page.locator(".vibe-hand .hand-pick .hand-what").all_inner_texts()), 2)
+        self.assertEqual(self.errors, [])
+
     def test_a_row_is_handed_after_a_confirmation_and_taken_back(self):
         for viewport in ((1280, 1200), (390, 844)):
             with self.subTest(viewport=viewport):
@@ -466,7 +487,7 @@ class PageTests(HandoverCase):
                 mine = page.locator(".rc-row", has_text="Neon Coast 1.6")
                 self.assertEqual(mine.locator(".rc-handed").inner_text(), f"handed to {ASUS}")
                 self.assertEqual(mine.locator("[data-action=vibe-hand]").all_inner_texts(), [f"Take back from {ASUS}"])
-                self.assertEqual(page.locator(".vibe-hand .hand-list li").count(), 1)
+                self.assertEqual(page.locator(".vibe-hand .hand-out li").count(), 1)
                 # nothing runs off the side of a phone
                 self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), viewport[0])
 

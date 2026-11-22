@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 103 (2026-11-22): Pick the chat to hand over in the Chats' work block itself
+
+- Chats' work on Vibe now lists the live chats of this computer under the switch, newest first, each with Hand to. Before, that button was only on the chat's row in the live recap, which is out of sight when that block is folded or far down the page ([#100](https://github.com/juw12/cairn/pull/100))
+- With more than six live chats the list starts folded to one line, Or one chat alone, and stays the way you leave it ([#100](https://github.com/juw12/cairn/pull/100))
+
 ## Build 102 (2026-11-22): Let another computer do the work of this one's chats, and take it back
 
 - Vibe has a new block, Chats' work, with one chip per computer of your brain. Press another computer and the assistants on this one stop doing the work themselves: each chat leaves its work for that computer as a handoff, follows the answers and checks the result. Press This computer and they do it themselves again ([#98](https://github.com/juw12/cairn/pull/98))
