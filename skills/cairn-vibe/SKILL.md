@@ -64,6 +64,18 @@ cairn vibe device --adopt    # once, on the computer that made them: name older 
 - A watcher only opens and closes the sessions of its own computer. Leave sessions with another `machine:` alone, and never change that field by hand.
 - Another computer is only as current as its last sync into the brain, so say "as of its last sync" when you report its numbers.
 
+### When the work is handed to another computer
+
+The user can let another computer do the work of this computer's chats for a while (the Vibe page, **Chats' work**), all of them or one session. You are told after a step: `cairn vibe start`, `log` and `check` then print a block that begins with `HAND-OVER IS ON` or `THIS CHAT'S WORK WAS HANDED TO`.
+
+```bash
+cairn vibe hand              # where the work of this computer's chats goes (changes nothing)
+```
+
+- `HAND-OVER IS ON`: do not do the work here. Leave it for the computer it names with `cairn handoff send "title" --to "<computer>" --file details.md`, saying what done looks like and what must not be done without the user. Then follow the answers with `cairn handoff` and check the result. Still do what only this computer can: its files, its apps, a sign-in only it has.
+- `THIS CHAT'S WORK WAS HANDED TO`: Cairn has already left the handoff, written from this session's log. Stop, and add what a log does not show (a branch that is not pushed, files only on this computer) with the `cairn handoff reply` line it prints.
+- The switch is the user's. `cairn vibe hand "<computer>"`, `cairn vibe hand here` and `--session` change it: run them only when the user says so.
+
 ## What a session file looks like
 
 ```markdown

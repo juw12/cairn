@@ -25,13 +25,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common  # noqa: E402
 
 
+def handed_over(brain) -> str:
+    """Set in Cairn (Vibe, Chats' work): the work of this computer's chats goes to another computer for now.
+    A chat has to know that before anything else, so it stands above the decisions. "" when it is off."""
+    try:
+        from cairn import handover
+
+        text = handover.notice(brain)
+    except Exception:  # noqa: BLE001 - an older Cairn, or a setting that cannot be read: the rules still print
+        return ""
+    return text + "\n\n" if text else ""
+
+
 def rules(brain) -> str:
     """The decisions to follow: this computer's own when it has a folder, else every accepted one."""
+    first = handed_over(brain)
     folder = common.write_folder(brain)
     decisions = folder / "decisions" if folder else None
     if decisions is None or not decisions.is_dir():
-        return common.call(brain, "list_notes", {"type": "decision", "status": "accepted", "limit": 50})
-    lines = [f"Decisions made on this computer ({decisions}):"]
+        return first + common.call(brain, "list_notes", {"type": "decision", "status": "accepted", "limit": 50})
+    lines = [f"{first}Decisions made on this computer ({decisions}):"]
     for note in sorted(decisions.glob("*.md")):
         title = note.stem
         for line in note.read_text(encoding="utf-8", errors="replace").splitlines()[:10]:

@@ -285,6 +285,17 @@ stand by and take over within five minutes of it stopping.
   accounts signed in on this computer, only for private repos, only from Cairn on the computer itself (never
   from a paired phone), and never without a confirmation. Mind GitHub's terms on how many free accounts one
   person may hold.
+- **Which computer does the work:** where several computers share the brain, the Vibe page shows **Chats' work**
+  with a chip per computer (or `cairn vibe hand [NAME]`, `cairn vibe hand here`). Press another computer and
+  the assistants on this one stop doing the work themselves: each chat leaves its work for that computer as a
+  handoff that says what done looks like, follows the answers and checks the result, and still does what only
+  this computer can. Nothing is interrupted: a running chat is told at its next step (`cairn vibe log` prints
+  it), a new chat when it starts (the memory skill's `recall.py rules` begins with it). For one chat alone, a
+  live session of this computer has **Hand to** on its row (`cairn vibe hand NAME --session SESSION`): Cairn
+  writes the handoff itself from the session's goal and log, and marks the session; **Take back** closes that
+  conversation so the other computer stops. What moves is the work, not the conversation, which stays in the
+  AI app; the other computer does it when a chat there picks the handoff up. The switch for all chats is a
+  setting of the one computer (`handover.json` in Cairn's folder), not a note.
 - **Which account this computer pushes as:** where the GitHub CLI is signed in to several accounts, the Vibe
   page shows **Pushes from this computer** with a chip per account, the one in use pressed (or
   `cairn vibe github push-as [NAME]`). A press runs `gh auth switch`; the first press also runs

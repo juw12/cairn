@@ -329,6 +329,7 @@ def cmd_vibe(brain: Brain, args) -> int:
                 print(f"{len(others)} other session(s) are live too. In this terminal, point every command at this one:")
                 print(f"  {'$env:CAIRN_SESSION = ' + repr(slug) if os.name == 'nt' else 'export CAIRN_SESSION=' + slug}"
                       f"   (or add --session {slug})")
+            _say_handed_over(brain, note["path"])
         elif args.action in ("log", "skill"):
             text = " ".join(args.text)
             kind = "skill" if args.action == "skill" else args.kind
@@ -338,11 +339,13 @@ def cmd_vibe(brain: Brain, args) -> int:
                     return 2
                 # The app reads "[40%] ..." as the agent's own progress and paces the time left from it.
                 text = f"[{args.progress}%] {text}".strip()
-            vibe.log(brain, text, kind=kind, session=args.session or "")
+            saved = vibe.log(brain, text, kind=kind, session=args.session or "")
             print("Logged.")
+            _say_handed_over(brain, saved["path"])
         elif args.action == "check":
-            code, _ = vibe.check(brain, args.text, session_slug=args.session or "")
+            code, saved = vibe.check(brain, args.text, session_slug=args.session or "")
             print(f"{'PASS' if code == 0 else 'FAIL'} logged to the live session.")
+            _say_handed_over(brain, saved["path"])
             return code
         elif args.action == "end":
             note = vibe.end(brain, args.result, " ".join(args.text), session_slug=args.session or "")
@@ -351,6 +354,8 @@ def cmd_vibe(brain: Brain, args) -> int:
             return _vibe_watch(brain, args)
         elif args.action == "github":
             return _vibe_github(brain, args)
+        elif args.action == "hand":
+            return _vibe_hand(brain, args)
         elif args.action == "device":
             from . import machine
 
@@ -456,6 +461,46 @@ def _vibe_github_copy(brain: Brain, args, account: str) -> int:
         pass  # the copy is made; its note is written again by the next run
     print(github_copy.summary(folder, state, others, asked=others is not None and github_copy.everywhere(brain)))
     return 1 if state["problems"] or github_copy.counts(state)["failed"] or github_copy.extras_counts(state)["failed"] else 0
+
+
+def _say_handed_over(brain: Brain, session_path: str = "") -> None:
+    """After a step: tell the assistant when its work goes to another computer (cairn/handover.py)."""
+    from . import handover
+
+    try:
+        text = handover.notice(brain, session_path)
+    except Exception:  # noqa: BLE001 - a step that is logged must never fail on this
+        return
+    if text:
+        print("\n" + text)
+
+
+def _vibe_hand(brain: Brain, args) -> int:
+    """`cairn vibe hand`: where the work of this computer's chats goes.
+    `cairn vibe hand COMPUTER` hands the work of every chat to that computer, `cairn vibe hand here` takes
+    it back. With `--session NAME` it is that one session: handed now, with a handoff written from its log."""
+    from . import handoff, handover
+
+    wanted = " ".join(args.text).strip() or (args.to or "").strip()
+    session = (args.session or "").strip()
+    try:
+        if session:
+            if core.device_key(wanted) in handover.HERE_WORDS and wanted:
+                print(handover.take_back(brain, session)["message"])
+            else:
+                result = handover.hand_session(brain, session, wanted)
+                print(result["message"])
+                print(f"Left for {result['to']}: brain/{result['handoff']}")
+            print(handoff.deliver(brain))
+            return 0
+        if not wanted:
+            print(handover.summary(handover.status(brain)))
+            return 0
+        print(handover.switch(brain, wanted)["message"])
+    except handover.HandoverError as error:
+        print(error, file=sys.stderr)
+        return 1
+    return 0
 
 
 def _vibe_github_push(args) -> int:
@@ -940,11 +985,11 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     vibe_parser = sub.add_parser(
         "vibe",
-        help="track a coding session live: start, log, check, end, status (and github: the month's Actions minutes, and which account this computer pushes as)",
+        help="track a coding session live: start, log, check, end, status (and github: the month's Actions minutes, and which account this computer pushes as; hand: let another computer do the work of this computer's chats)",
         description="Live progress for AI-assisted coding, kept in brain/sessions/. Tell your assistant to run "
         "`cairn vibe log` after each step and `cairn vibe check -- <tests>` to record results; the app shows it as it happens.",
     )
-    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github", "device"])
+    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github", "device", "hand"])
     vibe_parser.add_argument("text", nargs="*", help="goal / log text / end summary; for check, the command after --")
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")

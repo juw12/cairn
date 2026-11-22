@@ -171,6 +171,12 @@ export class ServerStore {
     return this.request("POST", "api/github/push", { account });
   }
 
+  // Let `to`, another computer of this brain, do the work of this computer's chats ("here": take it back).
+  // With `session` it is that one session: handed now, with a handoff written from its log, or taken back.
+  async vibeHand(to, session = "") {
+    return this.request("POST", "api/vibe/hand", session ? { to, session } : { to });
+  }
+
   // Send the backup to the cloud drive now (set up on this computer with `cairn cloud setup`).
   async cloudSync(repos = false) {
     return this.request("POST", "api/cloud/sync", repos ? { repos: true } : {});
