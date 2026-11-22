@@ -1125,7 +1125,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--processor", type=int, metavar="PCT", help="limit: the processor's average use in percent a computer may reach over --minutes (default 75)")
     vibe_parser.add_argument("--minutes", type=int, metavar="N", help="limit: the stretch that average is taken over (default 60)")
     vibe_parser.add_argument("--memory", type=int, metavar="PCT", help="limit: memory in use in percent that may not stay for 15 minutes (default 90)")
-    vibe_parser.add_argument("--restart-hours", type=int, metavar="N", help="limit: hours since the last restart after which a computer is due for one (default 72; 0: never said)")
+    vibe_parser.add_argument("--restart-hours", type=int, metavar="N", help="limit: a computer that is over the limit and has been up this many hours is due for a restart (default 72; 0: never said)")
     vibe_parser.add_argument("--yes", action="store_true", help="github move: do not ask first")
     vibe_parser.add_argument("--at", metavar="WHEN", help="github: when GitHub showed that figure, e.g. 2026-11-16T14:51 (default: now)")
     vibe_parser.add_argument("--api", type=int, metavar="MINUTES", help="github: what the billing rows summed to at that moment, for a figure that is not fresh")

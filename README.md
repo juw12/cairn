@@ -307,9 +307,9 @@ stand by and take over within five minutes of it stopping.
   never runs `cairn vibe`) is ordered on the page like the others, and is not told. The live recap follows it and numbers its rows, a new
   session joins at the bottom, and one that ended leaves the list by itself.
 - **How hard a computer may be worked:** every computer of the brain follows one **load limit**: the
-  processor's average use over an hour (75% unless changed), memory that stays 90% full for 15 minutes, and
-  72 hours since the last restart. A load level describes a moment and can read "medium" for days; the limit
-  describes the stretch. Each computer measures itself with the watcher's look once a minute. Over the limit,
+  processor's average use over an hour (75% unless changed), or memory that stays 90% full for 15 minutes. A
+  computer that is over it and has also been up 72 hours is due for a restart. A load level describes a moment
+  and can read "medium" for days; the limit describes the stretch. Each computer measures itself with the watcher's look once a minute. Over the limit,
   the assistants there are told at their next step to start nothing heavy (`cairn vibe start`, `log` and
   `check` print a block that begins with `LOAD LIMIT`; the MCP tool `priority` says the same), Cairn starts no
   work another computer left for an app of this one, and the computer's card on Vibe says **Over its load

@@ -95,11 +95,16 @@ class TheJudgement(unittest.TestCase):
         reading = limit.judge({"looks": looks(60, 84, memory=94)}, LIMIT, NOW)
         self.assertEqual(len(reading["why"]), 2)
 
-    def test_a_restart_is_due_after_the_hours_named_whatever_the_load(self):
-        reading = limit.judge({"looks": looks(60, 10), "uptime_h": 100}, LIMIT, NOW)
-        self.assertEqual((reading["state"], reading["restart"]), ("ok", "up 100 h since restart (due after 72 h)"))
-        self.assertEqual(limit.judge({"looks": looks(60, 10), "uptime_h": 71}, LIMIT, NOW)["restart"], "")
-        self.assertEqual(limit.judge({"looks": looks(60, 10), "uptime_h": 900}, {**LIMIT, "restart_hours": 0}, NOW)["restart"], "")
+    def test_a_restart_is_due_when_it_is_over_and_has_been_up_for_the_hours_named(self):
+        reading = limit.judge({"looks": looks(60, 84), "uptime_h": 100}, LIMIT, NOW)
+        self.assertEqual((reading["state"], reading["restart"]), ("over", "up 100 h since restart (due after 72 h)"))
+        self.assertEqual(limit.judge({"looks": looks(60, 84), "uptime_h": 71}, LIMIT, NOW)["restart"], "")
+        self.assertEqual(limit.judge({"looks": looks(60, 84), "uptime_h": 900}, {**LIMIT, "restart_hours": 0}, NOW)["restart"], "")
+
+    def test_a_computer_that_idles_for_two_weeks_is_not_nagged_about_a_restart(self):
+        """Hours up do no harm by themselves: the Mac was up 315 hours at a quarter of its processor."""
+        reading = limit.judge({"looks": looks(60, 23), "uptime_h": 315}, LIMIT, NOW)
+        self.assertEqual((reading["state"], reading["restart"]), ("ok", ""))
 
     def test_nothing_is_claimed_when_nobody_has_looked_lately(self):
         """Cairn was closed or the computer slept: an hour-old average says nothing about now."""
@@ -238,12 +243,14 @@ class WhatIsSaid(BrainCase):
         code, out, _ = self.run_cli("vibe", "log", "carrying on")
         self.assertNotIn("LOAD LIMIT", out)
 
-    def test_a_restart_that_is_due_is_said_without_calling_it_over(self):
-        self.work(60, cpu=10, uptime=100)
+    def test_a_restart_that_is_due_is_said_with_it(self):
+        self.work(60, cpu=84, uptime=100)
         text = limit.notice(self.brain)
-        self.assertIn("RESTART DUE (set in Cairn): this computer is up 100 h since restart (due after 72 h).", text)
+        self.assertIn("LOAD LIMIT (set in Cairn)", text)
+        self.assertIn("RESTART DUE (set in Cairn): this computer is over its limit and up 100 h since restart (due after 72 h).", text)
         self.assertIn("Do not restart it yourself.", text)
-        self.assertNotIn("LOAD LIMIT", text)
+        self.work(60, cpu=10, uptime=100)
+        self.assertEqual(limit.notice(self.brain), "", "under its limit nothing is said, however long it has been up")
 
     def test_an_assistant_that_never_logs_asks_the_mcp_tool(self):
         self.assertNotIn("LOAD LIMIT", mcp._tool_priority(self.brain, {}))
@@ -265,7 +272,7 @@ class WhatIsSaid(BrainCase):
         code, out, _ = self.run_cli("vibe", "limit")
         self.assertEqual(code, 0)
         self.assertIn("Load limit (CAIRN-LIMIT.md, the same for every computer of this brain): on", out)
-        self.assertIn("processor 75% on average over 60 min · memory 90% for 15 min · restart after 72 h", out)
+        self.assertIn("processor 75% on average over 60 min · memory 90% for 15 min · restart due when over it and up 72 h", out)
         self.assertIn(f"This computer ({MAC}): OVER its limit since ", out)
         self.assertIn(f"{ASUS}: OVER its limit since 2026-11-22 09:03: processor 82% busy on average over the last 60 min (limit 75%); "
                       "due for a restart: up 100 h since restart (due after 72 h) (its note of 2026-11-22 16:14)", out)

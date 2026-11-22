@@ -3,8 +3,8 @@
 Assistants do not get tired, and a laptop does. One that ran several of them for 100 hours at about 80% of
 its processor, with its memory nearly all promised, lost its drive in the middle of the work: the load note
 called every one of those hours "medium", so nothing ever said stop. A level describes a moment. The limit
-describes a stretch of time: the processor's average over the last hour, memory that stays full, and the
-hours since the last restart.
+describes a stretch of time: the processor's average over the last hour and memory that stays full. A
+computer that is over it and has also been up for days is due for a restart.
 
 The limit is one small file in the brain, CAIRN-LIMIT.md, so every computer of the brain follows the same
 one and any device can change it (`cairn vibe limit`, or by hand):
@@ -69,7 +69,7 @@ here, or with `cairn vibe limit`.
 
 - processor: the processor's average use in percent, over the minutes below
 - memory: memory in use in percent (RAM, or RAM plus page file promised to apps) that stays there 15 minutes
-- restart hours: hours since the last restart after which the computer is due for one (0: never said)
+- restart hours: a computer that is over the limit and has been up this many hours is due for a restart (0: never said)
 """
 
 
@@ -175,7 +175,8 @@ def _looks(log, now: dt.datetime) -> list[tuple[dt.datetime, int | None, int | N
 def judge(log, limit: dict, now: dt.datetime) -> dict:
     """What the looks say against the limit: {state: off | ok | over, known, why, since, cpu_avg, restart}.
     `known` is False while nobody has looked lately (Cairn was closed, the computer slept): then nothing
-    is claimed. `since` is when it went over; `restart` is a sentence once a restart is due."""
+    is claimed. `since` is when it went over; `restart` is a sentence when it is over and has also been up
+    longer than the limit names."""
     reading = {"state": "ok" if limit["on"] else "off", "known": False, "why": [], "since": "", "cpu_avg": None,
                "restart": "", "limits": dict(limit)}
     looks = _looks(log, now)
@@ -205,8 +206,10 @@ def judge(log, limit: dict, now: dt.datetime) -> dict:
     if reading["why"]:
         reading["state"] = "over"
         reading["since"] = str((log or {}).get("over_since") or now.strftime("%Y-%m-%dT%H:%M"))
+    # Hours up do a computer no harm by themselves: one that idles for two weeks is not nagged about.
+    # A restart is due when it is over its limit and has also been up that long.
     hours = _number((log or {}).get("uptime_h"))
-    if limit["restart_hours"] and hours is not None and hours >= limit["restart_hours"]:
+    if reading["state"] == "over" and limit["restart_hours"] and hours is not None and hours >= limit["restart_hours"]:
         reading["restart"] = f"up {hours} h since restart (due after {limit['restart_hours']} h)"
     return reading
 
@@ -308,7 +311,7 @@ def notice(brain: Brain, now: dt.datetime | None = None) -> str:
                      "  work another computer can do goes there as a handoff (cairn handoff send).\n"
                      "  `cairn vibe limit` shows the figures. The limit is the user's: change it only when they say so.")
     if reading["restart"]:
-        lines.append(f"RESTART DUE (set in Cairn): this computer is {reading['restart']}.\n"
+        lines.append(f"RESTART DUE (set in Cairn): this computer is over its limit and {reading['restart']}.\n"
                      "  Tell the user, once. Do not restart it yourself.")
     return "\n".join(lines)
 
@@ -338,7 +341,7 @@ def summary(brain: Brain, device: str = "", now: dt.datetime | None = None) -> s
     """The limit, this computer against it, and what the notes of the brain's computers say."""
     reading = status(brain, now)
     limit = reading["limits"]
-    restart = f"after {limit['restart_hours']} h" if limit["restart_hours"] else "never said"
+    restart = f"due when over it and up {limit['restart_hours']} h" if limit["restart_hours"] else "never said"
     lines = [
         f"Load limit ({FILE}, the same for every computer of this brain): {'on' if limit['on'] else 'OFF'}",
         f"  processor {limit['processor']}% on average over {limit['minutes']} min · memory {limit['memory']}% for "

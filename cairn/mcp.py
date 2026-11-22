@@ -518,7 +518,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "priority",
-        "description": "Your place in the user's order of the running sessions (set in Cairn, Vibe, Priority). Ask at the start of a turn when you do not log your steps with cairn vibe: where sessions need the same thing (the user's answer, a repo, this computer's processor, memory or disk, build minutes) the lower number goes first and the others give way. Answers that no order is set when the user has not placed any session. Also says when this computer is over the load limit the user set for every computer (processor average over an hour, memory, hours since restart): then start nothing heavy on it until it has rested.",
+        "description": "Your place in the user's order of the running sessions (set in Cairn, Vibe, Priority). Ask at the start of a turn when you do not log your steps with cairn vibe: where sessions need the same thing (the user's answer, a repo, this computer's processor, memory or disk, build minutes) the lower number goes first and the others give way. Answers that no order is set when the user has not placed any session. Also says when this computer is over the load limit the user set for every computer (processor average over an hour, memory that stays full): then start nothing heavy on it until it has rested.",
         "inputSchema": {
             "type": "object",
             "properties": {
