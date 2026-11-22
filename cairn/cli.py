@@ -330,6 +330,7 @@ def cmd_vibe(brain: Brain, args) -> int:
                 print(f"  {'$env:CAIRN_SESSION = ' + repr(slug) if os.name == 'nt' else 'export CAIRN_SESSION=' + slug}"
                       f"   (or add --session {slug})")
             _say_handed_over(brain, note["path"])
+            _say_place(brain, note["path"])
         elif args.action in ("log", "skill"):
             text = " ".join(args.text)
             kind = "skill" if args.action == "skill" else args.kind
@@ -342,10 +343,12 @@ def cmd_vibe(brain: Brain, args) -> int:
             saved = vibe.log(brain, text, kind=kind, session=args.session or "")
             print("Logged.")
             _say_handed_over(brain, saved["path"])
+            _say_place(brain, saved["path"])
         elif args.action == "check":
             code, saved = vibe.check(brain, args.text, session_slug=args.session or "")
             print(f"{'PASS' if code == 0 else 'FAIL'} logged to the live session.")
             _say_handed_over(brain, saved["path"])
+            _say_place(brain, saved["path"])
             return code
         elif args.action == "end":
             note = vibe.end(brain, args.result, " ".join(args.text), session_slug=args.session or "")
@@ -356,6 +359,8 @@ def cmd_vibe(brain: Brain, args) -> int:
             return _vibe_github(brain, args)
         elif args.action == "hand":
             return _vibe_hand(brain, args)
+        elif args.action == "rank":
+            return _vibe_rank(brain, args)
         elif args.action == "device":
             from . import machine
 
@@ -473,6 +478,43 @@ def _say_handed_over(brain: Brain, session_path: str = "") -> None:
         return
     if text:
         print("\n" + text)
+
+
+def _say_place(brain: Brain, session_path: str = "") -> None:
+    """After a step: tell the assistant its place among the running sessions, once the user has put them
+    in order (cairn/rank.py)."""
+    from . import rank
+
+    try:
+        text = rank.notice(brain, session_path)
+    except Exception:  # noqa: BLE001 - a step that is logged must never fail on this
+        return
+    if text:
+        print("\n" + text)
+
+
+def _vibe_rank(brain: Brain, args) -> int:
+    """`cairn vibe rank`: the running sessions in the user's order, the most important first.
+    `cairn vibe rank SESSION --to top|up|down|bottom|N` moves one (its name or a few words of it), and
+    `cairn vibe rank --reset` forgets the order."""
+    from . import rank
+
+    wanted = " ".join(args.text).strip() or (args.session or "").strip()
+    try:
+        if args.reset:
+            print(rank.reset(brain)["message"])
+        elif wanted or args.to:
+            if not wanted:
+                raise rank.RankError("Which session? Give its name, or a few words of it.")
+            result = rank.move(brain, wanted, args.to or "")
+            print(result["message"])
+            print(rank.summary(result))
+        else:
+            print(rank.summary(rank.status(brain)))
+    except rank.RankError as error:
+        print(error, file=sys.stderr)
+        return 1
+    return 0
 
 
 def _vibe_hand(brain: Brain, args) -> int:
@@ -985,11 +1027,11 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--dry-run", action="store_true", help="show what would change")
     vibe_parser = sub.add_parser(
         "vibe",
-        help="track a coding session live: start, log, check, end, status (and github: the month's Actions minutes, and which account this computer pushes as; hand: let another computer do the work of this computer's chats)",
+        help="track a coding session live: start, log, check, end, status (and github: the month's Actions minutes, and which account this computer pushes as; hand: let another computer do the work of this computer's chats; rank: put the running sessions in your order of importance)",
         description="Live progress for AI-assisted coding, kept in brain/sessions/. Tell your assistant to run "
         "`cairn vibe log` after each step and `cairn vibe check -- <tests>` to record results; the app shows it as it happens.",
     )
-    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github", "device", "hand"])
+    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github", "device", "hand", "rank"])
     vibe_parser.add_argument("text", nargs="*", help="goal / log text / end summary; for check, the command after --")
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
@@ -1011,7 +1053,8 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--no-copy", action="store_true", help="watch: do not keep this computer's copy of your repos up to date (see github copy)")
     vibe_parser.add_argument("--github-account", action="append", metavar="NAME", help="watch: also note the Actions minutes of this other account the GitHub CLI is signed in to, in github-usage/NAME/ (repeat for more)")
     vibe_parser.add_argument("--account", metavar="NAME", help="github: the figure of another account you are signed in to; with move, the account that owns the repo")
-    vibe_parser.add_argument("--to", metavar="NAME", help="github move REPO: the account of yours that takes the private repo, so its minutes count there")
+    vibe_parser.add_argument("--to", metavar="NAME", help="github move REPO: the account of yours that takes the private repo, so its minutes count there; rank SESSION: where it goes (top, up, down, bottom, or a number)")
+    vibe_parser.add_argument("--reset", action="store_true", help="rank: forget the order, so the running sessions are listed as they started")
     vibe_parser.add_argument("--yes", action="store_true", help="github move: do not ask first")
     vibe_parser.add_argument("--at", metavar="WHEN", help="github: when GitHub showed that figure, e.g. 2026-11-16T14:51 (default: now)")
     vibe_parser.add_argument("--api", type=int, metavar="MINUTES", help="github: what the billing rows summed to at that moment, for a figure that is not fresh")

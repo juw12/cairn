@@ -3,6 +3,14 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 104 (2026-11-22): Put the running sessions in your order of importance
+
+- Vibe has a new block, Priority: the running sessions of every computer in one list. Put the most important one at the top and the others under it in order, with Top, up and down on each row, or by dragging its handle ([#101](https://github.com/juw12/cairn/pull/101))
+- The order is kept in the brain (CAIRN-PRIORITY.md), so the desktop app, the web app and the phone show the same list and any of them can change it. A change made elsewhere shows within seconds ([#101](https://github.com/juw12/cairn/pull/101))
+- An assistant that logs its steps is told its place at its next one: cairn vibe start, log and check print which number its session is, which ones come before it, and that the lower number goes first where chats need the same thing (your answer, a repo, the computer's processor, memory or disk, build minutes). Nothing is stopped or slowed by Cairn, and a session a watcher found by itself (an OpenCode chat) is ordered on the page and is not told ([#101](https://github.com/juw12/cairn/pull/101))
+- The live recap follows your order once there is one, and each running row carries its number. A new session joins at the bottom until you move it; a session that ended leaves the list by itself. Forget the order puts the list back to the order the sessions started in ([#101](https://github.com/juw12/cairn/pull/101))
+- From a terminal: cairn vibe rank (the list), cairn vibe rank SESSION --to top, up, down, bottom or a number, and cairn vibe rank --reset ([#101](https://github.com/juw12/cairn/pull/101))
+
 ## Build 103 (2026-11-22): Pick the chat to hand over in the Chats' work block itself
 
 - Chats' work on Vibe now lists the live chats of this computer under the switch, newest first, each with Hand to. Before, that button was only on the chat's row in the live recap, which is out of sight when that block is folded or far down the page ([#100](https://github.com/juw12/cairn/pull/100))

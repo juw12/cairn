@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, handoff, handover, machine, mcp, precedent, pro, vibe
+from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, handoff, handover, machine, mcp, precedent, pro, rank, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -214,6 +214,8 @@ class Handler(BaseHTTPRequestHandler):
                     "cloud": cloud_backup.status() if self.github_moves else None,
                     # where the work of this computer's chats goes: here, or another computer of this brain
                     "hand": handover.status_soon(brain),
+                    # the running sessions in the user's order of importance: the file itself, None while there is none
+                    "rank": rank.file(brain),
                 })
             elif route == "/api/chat":
                 self._send_json(chat.summary())

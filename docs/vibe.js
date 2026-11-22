@@ -13,6 +13,7 @@ import { QUIET_MIN, compact, minutesText, recap, sessionState } from "./recap.js
 import { chatReady } from "./chat.js";
 import { openShare } from "./share.js";
 import { boardHtml, openPanel } from "./vibelayout.js";
+import { RANK_FILE, canRank, rankBusy, rankTarget, ranking, saveRank } from "./rank.js";
 
 const POLL_MS = 3000;
 const RESULT_LABEL = { shipped: "Shipped", partial: "Partial", dropped: "Dropped", done: "Done" };
@@ -1044,6 +1045,148 @@ function handButtons(note) {
   return targets.map((name) => `<button type="button" class="btn sm" data-action="vibe-hand" data-to="${esc(name)}" data-session="${esc(note.slug)}" title="${esc(`Leave this chat's work for ${name}, with its goal and log`)}">Hand to ${esc(name)}</button>`);
 }
 
+// ------------------------------------------------------------ priority
+
+const RANK_SUMMARY_TITLE = 60; // the folded block names the most important session: this much of its title
+
+// The running sessions of every computer in the user's order (rank.js): the device bar does not narrow it,
+// because it is one order for all of them.
+const rankNow = () => ranking(state.notes, stamp());
+
+function prioritySummary() {
+  const { rows, ranked } = rankNow();
+  if (rows.length < 2) return "";
+  if (!ranked) return `${rows.length} running · not arranged yet`;
+  const title = rows[0].note.title;
+  return `1. ${title.length > RANK_SUMMARY_TITLE ? `${title.slice(0, RANK_SUMMARY_TITLE - 1).trimEnd()}…` : title} · ${rows.length} running`;
+}
+
+// One list for the running sessions, the most important at the top: Top, up and down (or dragging the
+// handle) arrange it. Shown from two running sessions on; with one there is nothing to put in order.
+function priorityStrip() {
+  const { rows, ranked } = rankNow();
+  if (rows.length < 2) return "";
+  const can = canRank();
+  const now = core.stampMinutes(stamp());
+  const move = (row, to, label, sign, off) =>
+    `<button type="button" class="vp-move rank-move" data-action="vibe-rank" data-session="${esc(row.note.slug)}" data-to="${to}" ${off ? "disabled" : ""} aria-label="${esc(`${label}: ${row.note.title}`)}" title="${esc(label)}">${sign}</button>`;
+  const items = rows
+    .map((row, index) => {
+      const note = row.note;
+      const group = groupOf(note);
+      const facts = [
+        group.key === "other" ? "" : group.label,
+        severalDevices ? deviceOf(note) : "",
+        sessionState(note, now).label,
+        ranked && !row.listed ? "new, not placed yet" : "",
+      ].filter(Boolean);
+      const tools = can
+        ? `<span class="rank-tools">
+            ${move(row, "top", "Most important", "&#10514;", index === 0)}
+            ${move(row, "up", "More important", "&uarr;", index === 0)}
+            ${move(row, "down", "Less important", "&darr;", index === rows.length - 1)}
+            <span class="rank-grip" draggable="true" data-session="${esc(note.slug)}" title="Drag to move" aria-hidden="true">&#8942;&#8942;</span>
+          </span>`
+        : "";
+      return `<li class="rank-row${ranked && row.listed ? "" : " unplaced"}" data-session="${esc(note.slug)}">
+          <span class="rank-no" title="${ranked ? "Its place in your order" : "Not arranged yet: the order they started in"}">${row.place}</span>
+          <a class="rank-what" href="#" data-open="${esc(note.path)}" title="Open this session">
+            <span class="rank-title">${esc(note.title)}</span>
+            <span class="rank-facts muted small">${esc(facts.join(" · "))}</span></a>
+          ${tools}
+        </li>`;
+    })
+    .join("");
+  const how = !can
+    ? ranked ? "The order set for this brain, the most important first." : "No order is set for these yet."
+    : ranked
+      ? "The most important first. An assistant that logs its steps (cairn vibe log) is told its place at its next one, and gives way to the ones above it where they need the same thing. Nothing is stopped or slowed. A new session joins at the bottom."
+      : "Put the most important one at the top and the others under it in order. Every device then shows this order, and an assistant that logs its steps (cairn vibe log) is told its place at its next one.";
+  return `<section class="vibe-rank" aria-label="The running sessions in your order of importance">
+    <header>
+      <h2>Priority</h2>
+      <span class="vm-spec">${rows.length} running${ranked ? " · most important first" : " · not arranged yet"}</span>
+    </header>
+    <ol class="rank-list">${items}</ol>
+    <p class="muted small gh-note">${esc(how)}${can && ranked ? ` <button type="button" class="btn sm ghost" data-action="vibe-rank-reset" title="The sessions are listed in the order they started again, and no assistant is told a place">Forget the order</button>` : ""}</p>
+  </section>`;
+}
+
+function rankFailed(error) {
+  toast(`The order was not saved: ${error?.message || "the brain could not be written"}`, { error: true });
+  if (state.view === "vibe") renderView();
+}
+
+function keepRank(names, focus = "") {
+  saveRank(names, rankFailed);
+  renderView();
+  if (!focus) return;
+  const row = $(`.rank-row[data-session="${CSS.escape(focus.session)}"]`);
+  (row?.querySelector(`[data-to="${focus.to}"]:not(:disabled)`) || row?.querySelector(".rank-move:not(:disabled)"))?.focus({ preventScroll: true });
+}
+
+// Move one running session: to the top, or one place up or down. The whole order is kept from then on.
+export function moveRank(session, to) {
+  if (!canRank()) return;
+  const names = rankNow().rows.map((row) => row.note.slug);
+  const at = names.indexOf(session);
+  if (at < 0) return;
+  names.splice(rankTarget(to, at, names.length), 0, names.splice(at, 1)[0]);
+  keepRank(names, { session, to });
+}
+
+// Forget the order: the sessions are listed as they started again, and no assistant is told a place.
+export function resetRank() {
+  if (canRank()) keepRank([]);
+}
+
+// Drag a row by its handle and drop it on another: above that row's middle puts it before, below after.
+let rankDragged = null;
+function wireRank() {
+  const list = $(".rank-list");
+  if (!list) return;
+  const clear = () => $$(".rank-row.drop-before, .rank-row.drop-after", list).forEach((el) => el.classList.remove("drop-before", "drop-after"));
+  const sideOf = (row, event) => {
+    const box = row.getBoundingClientRect();
+    return event.clientY < box.top + box.height / 2 ? "before" : "after";
+  };
+  list.addEventListener("dragstart", (event) => {
+    const grip = event.target.closest?.(".rank-grip");
+    if (!grip) return;
+    rankDragged = grip.dataset.session;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", rankDragged);
+    grip.closest(".rank-row").classList.add("dragging");
+  });
+  list.addEventListener("dragover", (event) => {
+    const row = event.target.closest?.(".rank-row");
+    if (!rankDragged || !row || row.dataset.session === rankDragged) return;
+    event.preventDefault();
+    clear();
+    row.classList.add(`drop-${sideOf(row, event)}`);
+  });
+  list.addEventListener("dragleave", (event) => {
+    if (!list.contains(event.relatedTarget)) clear();
+  });
+  list.addEventListener("drop", (event) => {
+    const row = event.target.closest?.(".rank-row");
+    if (!rankDragged || !row || row.dataset.session === rankDragged) return;
+    event.preventDefault();
+    const names = rankNow().rows.map((entry) => entry.note.slug).filter((name) => name !== rankDragged);
+    const at = names.indexOf(row.dataset.session);
+    names.splice(sideOf(row, event) === "after" ? at + 1 : at, 0, rankDragged);
+    rankDragged = null;
+    keepRank(names);
+  });
+  list.addEventListener("dragend", () => {
+    // A live update that came while a row was held was not drawn (it would have dropped the row): draw it now.
+    const held = rankDragged !== null;
+    rankDragged = null;
+    clear();
+    if (held && state.view === "vibe") renderView();
+  });
+}
+
 // The second copy of the brain (and of the repos) in a cloud drive. Null on a phone and in a browser without the
 // local app: the backup is made and sent by the computer the brain is on.
 function cloudReading() {
@@ -1222,6 +1365,13 @@ async function poll() {
       changed = true;
     }
   }
+  // The order of importance: a change made on another device, in a terminal or by hand shows here too. A
+  // choice of this device that is still on its way to the brain is not overwritten by the copy before it.
+  const order = data.rank;
+  if (order && !rankBusy() && fileByPath(RANK_FILE)?.mtime !== order.mtime) {
+    upsertFile(RANK_FILE, order.text, order.mtime);
+    changed = true;
+  }
   const gitKey = JSON.stringify(data.git);
   if (gitKey !== state.vibeGitKey) {
     state.vibeGit = data.git;
@@ -1255,7 +1405,7 @@ async function poll() {
   // Which computer this is, by the name its sessions carry: the device bar marks it.
   if ((data.device || "") !== (state.vibeHere || "") && severalDevices) changed = true;
   state.vibeHere = data.device || "";
-  if (changed && state.view === "vibe") {
+  if (changed && state.view === "vibe" && rankDragged === null) {
     renderNav();
     renderView();
   } else {
@@ -1269,6 +1419,7 @@ async function poll() {
 
 export function wireVibe() {
   wireEffortBlocks();
+  wireRank();
   if (canPoll() && !pollTimer) {
     pollTimer = setInterval(poll, pollMs());
     poll();
@@ -1708,7 +1859,7 @@ function recapActions(entry) {
 }
 
 // `alone`: the only live session opens by itself, so its log form is one click away as it always was.
-function recapRow(entry, alone = false) {
+function recapRow(entry, alone = false, place = 0) {
   const note = entry.note;
   const live = note.status === "live";
   const group = groupOf(note);
@@ -1742,6 +1893,7 @@ function recapRow(entry, alone = false) {
   return `<li class="rc-row s-${entry.key}${slow ? " slow" : ""}${open ? " open" : ""}" data-path="${esc(note.path)}" data-state="${entry.key}">
       <div class="rc-head">
         <button type="button" class="rc-toggle" data-action="vibe-row" data-path="${esc(note.path)}" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} the steps of ${esc(note.title)}" title="${open ? "Hide" : "Show"} its steps">${icon("chevron", "sm")}</button>
+        ${place ? `<span class="rc-rank" title="Its place in your order of importance (Priority)">${place}</span>` : ""}
         <span class="rc-state s-${entry.key}">${esc(entry.label)}</span>
         <a class="rc-title" href="#" data-open="${esc(note.path)}">${esc(note.title)}</a>
         ${when}
@@ -1764,14 +1916,23 @@ function recapFold(key, summary, body, fallback = false, section = false) {
     </details>`;
 }
 
+// A running session's place in the user's order, by its path; empty until the order was set.
+function rankPlaces() {
+  const { rows, ranked } = rankNow();
+  return new Map(ranked ? rows.map((row) => [row.note.path, row.place]) : []);
+}
+
 function recapBand() {
   const data = recap(vibeNotes(), stamp());
+  // The user's own order beats the recap's (stopped ones first, then the newest step).
+  const places = rankPlaces();
+  if (places.size) data.live.sort((a, b) => (places.get(a.note.path) ?? Infinity) - (places.get(b.note.path) ?? Infinity));
   const chips = Object.keys(RECAP_CHIPS)
     .filter((key) => data.counts[key])
     .map((key) => `<span class="rc-chip s-${key}"><b>${data.counts[key]}</b> ${RECAP_CHIPS[key]}</span>`)
     .join("");
   const alone = data.live.length + data.stale.length === 1;
-  const rows = (entries) => entries.map((entry) => recapRow(entry, alone)).join("");
+  const rows = (entries) => entries.map((entry) => recapRow(entry, alone, places.get(entry.note.path))).join("");
   const running = data.live.length
     ? recapFold(
         "rc-running",
@@ -2207,6 +2368,7 @@ export function vibeView() {
     },
     github: { html: githubStrip(), summary: [minutesSummary, pusher ? `pushes as ${pusher}` : ""].filter(Boolean).join(" · ") },
     cloud: { html: cloudStrip(), summary: cloudSummary(cloudReading()) },
+    priority: { html: priorityStrip(), summary: prioritySummary() },
     hand: { html: handStrip(), summary: handSummary(handChoice()) },
     overview: { html: overview(sessions), summary: `${plural(sessions.length, "session")}${live.length ? ` · ${live.length} live now` : ""}` },
     figures: { html: figures(stats), summary: `${plural(stats.sessions, "session")} · ${stats.shipped} ${OUTCOMES.shipped}` },

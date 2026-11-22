@@ -2,6 +2,18 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 104,
+      "date": "2026-11-22",
+      "title": "Put the running sessions in your order of importance",
+      "changes": [
+        "Vibe has a new block, Priority: the running sessions of every computer in one list. Put the most important one at the top and the others under it in order, with Top, up and down on each row, or by dragging its handle (#101)",
+        "The order is kept in the brain (CAIRN-PRIORITY.md), so the desktop app, the web app and the phone show the same list and any of them can change it. A change made elsewhere shows within seconds (#101)",
+        "An assistant that logs its steps is told its place at its next one: cairn vibe start, log and check print which number its session is, which ones come before it, and that the lower number goes first where chats need the same thing (your answer, a repo, the computer's processor, memory or disk, build minutes). Nothing is stopped or slowed by Cairn, and a session a watcher found by itself (an OpenCode chat) is ordered on the page and is not told (#101)",
+        "The live recap follows your order once there is one, and each running row carries its number. A new session joins at the bottom until you move it; a session that ended leaves the list by itself. Forget the order puts the list back to the order the sessions started in (#101)",
+        "From a terminal: cairn vibe rank (the list), cairn vibe rank SESSION --to top, up, down, bottom or a number, and cairn vibe rank --reset (#101)"
+      ]
+    },
+    {
       "build": 103,
       "date": "2026-11-22",
       "title": "Pick the chat to hand over in the Chats' work block itself",

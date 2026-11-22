@@ -46,7 +46,7 @@ const CAPTURE_PREFIXES = {
   fb: "feedback",
 };
 
-export const SPECIAL_FILES = ["CONTEXT.md", "README.md", "CAIRN-LAYOUT.md"];
+export const SPECIAL_FILES = ["CONTEXT.md", "README.md", "CAIRN-LAYOUT.md", "CAIRN-PRIORITY.md"];
 // Files a brain holds: Markdown notes and Obsidian canvases (JSON Canvas, jsoncanvas.org).
 export const isNotePath = (path) => /\.md$/i.test(path);
 export const isCanvasPath = (path) => /\.canvas$/i.test(path);
