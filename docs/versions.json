@@ -2,6 +2,18 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 113,
+      "date": "2026-11-22",
+      "title": "Projects no longer stop at Couldn't load the repos on the computer itself",
+      "changes": [
+        "Fixed: Projects showed Couldn't load the repos. Without a sign-in in the page, Cairn asked GitHub anonymously, and GitHub gives 60 such answers an hour to everyone behind the same internet address. On the computer Cairn runs on, the page now reads GitHub through the GitHub CLI's sign-in of that computer (the account picked under Pushes from this computer on Vibe), which gets 5,000 an hour. The same goes for a repo's own page and for People (#110)",
+        "The status line of the ranking says whose sign-in was used: asked GitHub as NAME (this computer's sign-in). With it the owner's private repos that account was let into are ranked too, and tests and CI are looked up for 60 repos per refresh instead of 12 (#110)",
+        "Reads only: the local server passes on a short list of GitHub reads (users, orgs, repos, repository search), nothing that changes anything. The page never holds the token, and a paired phone does not get this: it asks GitHub itself, as before. A sign-in in the page still comes first, and without a GitHub CLI sign-in everything works as it did (#110)",
+        "When GitHub cannot be asked at all (its hourly limit, no network), Projects shows the list of your last visit and says how old it is, instead of an empty page (#110)",
+        "CAIRN_NO_GITHUB_READ=1 switches the reading through the computer's sign-in off (#110)"
+      ]
+    },
+    {
       "build": 112,
       "date": "2026-11-22",
       "title": "A session that never runs cairn vibe can ask for its place in your order",

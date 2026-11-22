@@ -8,11 +8,17 @@ import hashlib
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import re
 from urllib.parse import unquote, urlparse
 
 DOCS = Path(__file__).resolve().parents[1] / "docs"
+
+# A page served by `cairn serve` reads GitHub through the GitHub CLI's sign-in of the computer it runs on
+# (cairn/github_read.py). Browser tests answer GitHub themselves, so on a developer's computer that is
+# signed in they must not go around those answers to the real GitHub. tests/test_github_read.py turns it on.
+os.environ.setdefault("CAIRN_NO_GITHUB_READ", "1")
 
 
 class QuietHandler(SimpleHTTPRequestHandler):

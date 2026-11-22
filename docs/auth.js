@@ -12,6 +12,11 @@
 //   - Signing out removes it from both storages (and the home-screen cookie, see session()).
 //   - authFetch() only ever attaches the token to https://api.github.com/ URLs.
 //   - A 401 from GitHub ends the session and tells the app why.
+//
+// Without a sign-in in the browser there is one more way to read: on the computer Cairn runs on, the
+// local server can ask GitHub with the GitHub CLI's sign-in (cairn/github_read.py). Reads then go to
+// api/github/read instead of straight to GitHub, so they are not held to 60 anonymous answers an hour.
+// The page never sees that token, and a sign-in in the browser always comes first.
 
 export const API = "https://api.github.com";
 export const SCOPE = "public_repo";
@@ -100,9 +105,47 @@ export function isGitHubApi(url) {
   return String(url).startsWith(`${API}/`);
 }
 
+// ------------------------------------------------------------ reading through this computer's sign-in
+
+let throughComputer = false;
+
+// Switched on by the app when the local server says it can read GitHub (info.githubRead).
+export function useComputerSignIn(on) {
+  throughComputer = Boolean(on);
+}
+
+// True when a read goes out as the GitHub CLI's account of this computer, not anonymously.
+export function readsThroughComputer() {
+  return throughComputer && !session();
+}
+
+// One GET through the local server, or null when it could not ask GitHub (no CLI sign-in, GitHub not
+// reached from there, a path it does not pass on): the caller then asks GitHub itself, as before.
+async function computerFetch(url, headers) {
+  const passed = { "X-Cairn": "1" };
+  if (headers.Accept && headers.Accept !== "application/vnd.github+json") passed["X-GitHub-Accept"] = headers.Accept;
+  if (headers["If-None-Match"]) passed["If-None-Match"] = headers["If-None-Match"];
+  let response;
+  try {
+    response = await fetch(`api/github/read?path=${encodeURIComponent(url.slice(API.length))}`, { headers: passed, cache: "no-store" });
+  } catch {
+    return null;
+  }
+  if (![400, 404, 502, 503].includes(response.status)) return response;
+  // The server's own refusals carry { error }; GitHub's carry { message } and are the real answer.
+  const refusal = await response.clone().json().catch(() => null);
+  if (typeof refusal?.error !== "string") return response;
+  if (response.status === 503 || response.status === 404) throughComputer = false; // no sign-in there, or an older server
+  return null;
+}
+
 export async function authFetch(url, options = {}) {
   const headers = { Accept: "application/vnd.github+json", ...(options.headers || {}) };
   const current = session();
+  if (!current && throughComputer && isGitHubApi(url) && (options.method || "GET").toUpperCase() === "GET") {
+    const answer = await computerFetch(String(url), headers);
+    if (answer) return answer;
+  }
   if (current && isGitHubApi(url)) headers.Authorization = `Bearer ${current.token}`;
   let response;
   try {
