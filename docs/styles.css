@@ -2058,6 +2058,33 @@ button.ov-tile[aria-pressed="true"]:not(:disabled) { border-color: var(--ink); b
 .proj-bar.solid .proj-bar-track span { background: var(--task); }
 .proj-bar.potential .proj-bar-track span { background: var(--accent); }
 .proj-foot { margin-top: 16px; font-size: 12.5px; max-width: 760px; }
+/* Filter, A to Z and categories */
+.proj-cat { font-size: 11.5px; background: transparent; border: 1px solid var(--line-strong); color: var(--ink-2); cursor: help; }
+.proj-filters { display: grid; gap: 8px; margin: 0 0 14px; }
+.proj-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.proj-filter-row .input { flex: 0 1 280px; min-width: 0; }
+.proj-filter-label { flex: none; width: 66px; font-size: 12px; color: var(--muted); }
+.proj-filter-row .chip b { font-weight: 500; font-variant-numeric: tabular-nums; opacity: .7; }
+.proj-filter-count { font-size: 12.5px; color: var(--ink-2); margin-left: 4px; }
+.proj-group { border-top: 1px solid var(--line); }
+.proj-group + .proj-group { margin-top: 6px; }
+.proj-group > summary { display: flex; align-items: baseline; gap: 8px; padding: 10px 0; cursor: pointer; list-style: none; font-size: 14px; font-weight: 600; color: var(--ink); }
+.proj-group > summary::-webkit-details-marker { display: none; }
+.proj-group > summary::before { content: ""; flex: none; align-self: center; width: 6px; height: 6px; margin: 0 4px 2px 2px; border-right: 1.5px solid var(--ink-2); border-bottom: 1.5px solid var(--ink-2); transform: rotate(-45deg); transition: transform .15s; }
+.proj-group[open] > summary::before { transform: rotate(45deg); }
+.proj-group > summary .count { font-weight: 500; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.proj-group > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.proj-group > .proj-list { padding-bottom: 12px; }
+@media (max-width: 700px) {
+  /* On a phone thirteen categories would fill the screen: each row of chips is one line that scrolls sideways. */
+  .proj-filter-row[role="group"] { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -16px; padding-right: 16px; }
+  .proj-filter-row[role="group"]::-webkit-scrollbar { display: none; }
+  .proj-filter-row[role="group"] .chip { flex: none; }
+  .proj-filter-label { position: sticky; left: 0; z-index: 1; width: auto; padding-right: 8px; background: var(--bg); align-self: stretch; display: flex; align-items: center; }
+  /* 16 px: Safari on an iPhone zooms the page in when a smaller field is tapped. */
+  .proj-filter-row .input { flex: 1 1 100%; }
+  .proj-filter-row .input, .proj-toolbar .input { font-size: 16px; }
+}
 @media (max-width: 760px) {
   .proj-card { grid-template-columns: 40px minmax(0, 1fr); }
   .proj-scores { grid-column: 1 / -1; }
@@ -2590,6 +2617,11 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .vp-body > .column-block { padding-top: 0; }
 .vp-body > .vibe-hook { margin-top: 0; }
 .vibe-layout-note { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+/* Blocks taken off the page: one chip each, a press shows the block again. */
+.vp-hide { font-size: 17px; line-height: 1; }
+.vibe-hidden { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.vibe-hidden .chip b { font-weight: 500; opacity: .7; }
+.vibe-hidden + .vibe-layout-note { border-top: 0; padding-top: 0; }
 /* Dashboard and Recap blocks shared by the pages built from blocks (Projects, People, Proof). */
 .figures.page-figures { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 4px 20px; }
 .figures.page-figures .figure, .figures.page-figures .figure + .figure { padding: 6px 0 10px; border: 0; }
@@ -2637,6 +2669,20 @@ details.rc-section > summary .muted { margin-left: 4px; }
 @media (hover: none) and (pointer: coarse) {
   .vp-tools { opacity: 1; }
   .vp-grip { display: none; }
+  /* a finger needs more than the 26 px a mouse does */
+  .vp-move { width: 40px; height: 40px; font-size: 15px; }
+  .vp-hide { font-size: 20px; }
+  .vibe-hidden .chip, .vibe-hidden .btn, .vibe-layout-note .btn { min-height: 40px; }
+  /* Found by the phone check on the Projects list: links 19 px tall, pills under 12 px. */
+  .proj-meta a { min-height: 32px; padding: 0 2px; }
+  .proj-title a { display: inline-flex; align-items: center; min-height: 32px; }
+  .proj-tier, .proj-cat, .proj-self { font-size: 12px; }
+  .proj-group > summary { min-height: 44px; align-items: center; }
+  .proj-auto { min-height: 32px; }
+  /* Found on the way: Safari zooms the page in when a field under 16 px is tapped, and three links on the
+     welcome page were 19 px tall. */
+  .capture input, .explore-row input { font-size: 16px; }
+  .choice .sub-link { min-height: 32px; }
   /* no dragging with a finger: the three buttons move a session, and each is big enough to hit */
   .rank-grip { display: none; }
   .rank-move { width: 44px; height: 44px; font-size: 16px; }
