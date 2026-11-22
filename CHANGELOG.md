@@ -3,6 +3,10 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 109 (2026-11-22): A Mac copy installed without Git says that it does not update itself
+
+- On a Mac without Git the installer unpacks an archive, and that copy never takes a new build. Settings and Version history now say so, with the install line and a button that copies it, where Settings said updates come with your package manager ([#106](https://github.com/juw12/cairn/pull/106))
+
 ## Build 108 (2026-11-22): A step names its session when several are live, and a message is never called sent on a guess
 
 - cairn vibe log, skill, check and end without --session: with several sessions live on this computer the step is refused and the sentence names them, where it went into the newest one, which was another chat's as often as not ([#105](https://github.com/juw12/cairn/pull/105))
