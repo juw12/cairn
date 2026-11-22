@@ -501,6 +501,17 @@ class HelperTests(unittest.TestCase):
             cloud_terabox.listing(Page([]), "/Cairn backup/brain")
         self.assertIn("did not show what is in /Cairn backup/brain", str(caught.exception))
 
+        # signed in, the sign-in form, and a page that never drew are three different answers
+        self.assertTrue(cloud_terabox.signed_in(Page([])))
+        form = Page([])
+        form.url = "https://www.terabox.com/login"
+        self.assertFalse(cloud_terabox.signed_in(form))
+        blank = Page([])
+        blank.get_by_text = lambda text, exact=False: Counted(0)
+        with self.assertRaises(cloud_terabox.Stop) as caught:
+            cloud_terabox.signed_in(blank)
+        self.assertIn("did not load", str(caught.exception))
+
     def test_while_one_run_is_sending_another_is_turned_away(self):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
