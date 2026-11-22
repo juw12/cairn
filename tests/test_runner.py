@@ -26,6 +26,7 @@ class RunnerCase(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         for patch in (
             mock.patch.dict(os.environ, {"CAIRN_DEVICE": MAC, "CAIRN_HOME": str(self.tmp / "home")}),
+            mock.patch.dict(os.environ, {"CAIRN_NO_RUNNER": ""}),
             mock.patch.object(handoff, "deliver", return_value=""),
             mock.patch.object(handoff, "refresh", return_value=""),
             mock.patch.object(runner, "program", side_effect=lambda agent: f"/bin/{agent}"),
@@ -74,6 +75,20 @@ class Waiting(RunnerCase):
         done = handoff.body_of(self.brain, self.thread()["messages"][-1]["path"])
         self.assertIn("Built. 12 tests pass.", done)
 
+    def test_while_one_run_is_at_work_no_other_starts(self):
+        handover.hand_session(self.brain, self.session, ASUS, agent="opencode")
+        mark = self.tmp / "home" / "runner.busy"
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        mark.write_text("another run", encoding="utf-8")
+        with self.on(ASUS), mock.patch.object(runner.subprocess, "Popen") as started:
+            self.assertEqual(runner.start_soon(self.brain), 0)
+            self.assertEqual(runner.run_waiting(self.brain, self.run_fake()), [])
+            started.assert_not_called()
+            old = runner.time.time() - (runner.RUN_MINUTES + 11) * 60
+            os.utime(mark, (old, old))  # a run that died: its mark stops counting
+            self.assertEqual(len(runner.run_waiting(self.brain, self.run_fake())), 1)
+        self.assertFalse(mark.exists())
+
     def test_an_app_that_cannot_be_started_is_left_for_its_chat(self):
         handover.hand_session(self.brain, self.session, ASUS, agent="vector")
         with self.on(ASUS):
@@ -109,13 +124,13 @@ class Waiting(RunnerCase):
 
     def test_the_watcher_s_pass_starts_it(self):
         handover.hand_session(self.brain, self.session, ASUS, agent="opencode")
-        with self.on(ASUS), mock.patch.object(runner, "run_waiting") as started:
+        with self.on(ASUS), mock.patch.object(runner.subprocess, "Popen") as started:
             lines = watch.watch_once(self.brain, opencode=False, vector=False)
-            for thread in __import__("threading").enumerate():
-                if thread.name == "cairn-runner":
-                    thread.join(5)
         self.assertIn("Handoffs: starting the app asked for on 1 left for this computer", lines)
-        started.assert_called_once()
+        command = started.call_args.args[0]
+        self.assertEqual(command[1:3] + command[-3:], ["-m", "cairn", "handoff", "run", "--offline"], "a process of its own: a pass that ends does not end the app")
+        self.assertEqual(command[command.index("--root") + 1], str(self.brain.root))
+        self.assertIn(str(Path(runner.__file__).resolve().parent.parent), started.call_args.kwargs["env"]["PYTHONPATH"])
         with self.on(ASUS), mock.patch.dict(os.environ, {"CAIRN_NO_RUNNER": "1"}), mock.patch.object(runner, "start_soon") as soon:
             watch.watch_once(self.brain, opencode=False, vector=False)
         soon.assert_not_called()
