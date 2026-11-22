@@ -3,6 +3,10 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 107 (2026-11-22): Claude Code is no longer one of the apps to choose
+
+- Chats' work on Vibe offers Vector and OpenCode for a handed chat, and OpenCode for prompts from the phone. Claude Code is taken out: it is not used here. A choice of Claude Code made before falls back to OpenCode ([#104](https://github.com/juw12/cairn/pull/104))
+
 ## Build 106 (2026-11-22): An app started for a handoff keeps running when the watcher's pass ends
 
 - Fixed: on a computer whose watcher makes one pass and ends (cairn vibe watch --once from a timer, as on the Mac), an app started for a handoff was ended with it, after picked-up had been said. The app now runs in a process of its own (cairn handoff run), on every computer ([#103](https://github.com/juw12/cairn/pull/103))
