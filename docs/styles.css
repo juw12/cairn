@@ -2788,6 +2788,17 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .hc-bar[aria-pressed="true"] > i { background: var(--accent); }
 .hc-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .hc-axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--muted); }
+.hc-scroll { display: grid; gap: 8px; min-width: 0; }
+/* A finger needs 24 px to hit one day's bar (found by Tilik: 30 bars were 12 px wide on a phone, 90 bars 4 px).
+   On a touch screen each bar keeps 24 px and a chart of more than 14 days is slid sideways. */
+@media (hover: none) and (pointer: coarse) {
+  .hc-scroll { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .hc-scroll::-webkit-scrollbar { display: none; }
+  .hc-scroll > .hc-plot, .hc-scroll > .hc-axis { min-width: calc(var(--bars) * 24px); }
+  .hc-scroll[data-wide] > .hc-plot { touch-action: pan-x pan-y; }
+  /* a link written as a button inside a line of text was 20 px high */
+  .link-button { padding-block: 5px; }
+}
 .hc-key { margin: 0; line-height: 18px; }
 .hc-key i { display: inline-block; width: 9px; height: 9px; margin: 0 3px 0 0; border-radius: 2px; background: var(--line-strong); vertical-align: -1px; }
 .hc-key i.k-part { margin-left: 8px; background: var(--journal); }

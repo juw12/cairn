@@ -366,8 +366,10 @@ function chartBlock(d) {
         <div class="hc-opts" role="group" aria-label="How far back">${RANGES.map((value) => toggle("home-chart-range", "range", value, `${value}d`, value === range)).join("")}</div>
       </div>
       <p class="hc-total"><strong>${esc(countText(total, metric))}</strong> in ${range} days <span class="muted">· ${active} active ${active === 1 ? "day" : "days"} · most in a day ${esc(metric === "tokens" ? compact(top) : String(top))}</span></p>
-      <div class="hc-plot" style="--bars:${range}" aria-label="${esc(METRICS[metric].label)} per day, last ${range} days">${bars}</div>
-      <div class="hc-axis" aria-hidden="true">${ticks}</div>
+      <div class="hc-scroll" style="--bars:${range}"${range > 14 ? " data-wide" : ""}>
+        <div class="hc-plot" style="--bars:${range}" aria-label="${esc(METRICS[metric].label)} per day, last ${range} days">${bars}</div>
+        <div class="hc-axis" aria-hidden="true">${ticks}</div>
+      </div>
       ${metric === "sessions" ? `<p class="hc-key muted small"><i class="k-all"></i> sessions <i class="k-part"></i> of them shipped · tap or drag across the bars for a day</p>` : `<p class="hc-key muted small">Tap or drag across the bars for a day</p>`}
       <div class="home-day" id="home-day" aria-live="polite">${dayDetail(d, prefs.day)}</div>
     </div>`,
@@ -508,6 +510,10 @@ export function wireHome() {
   hydrateAssets(board, "");
   const plot = $(".hc-plot", board);
   if (!plot) return;
+  // On a phone a bar is at least 24 px wide, so 30 or 90 days are wider than the screen: the chart is
+  // slid sideways there, and it opens at today, its right end.
+  const scroller = plot.closest(".hc-scroll");
+  if (scroller) scroller.scrollLeft = scroller.scrollWidth;
   // Drag (or slide a finger) across the bars: the day under the pointer is the one shown.
   let dragging = false;
   const at = (event) => document.elementFromPoint(event.clientX, plot.getBoundingClientRect().bottom - 2)?.closest?.(".hc-bar");
