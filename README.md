@@ -306,6 +306,19 @@ stand by and take over within five minutes of it stopping.
   nothing; the order is what the assistants go by. A session a watcher found by itself (an OpenCode chat that
   never runs `cairn vibe`) is ordered on the page like the others, and is not told. The live recap follows it and numbers its rows, a new
   session joins at the bottom, and one that ended leaves the list by itself.
+- **How hard a computer may be worked:** every computer of the brain follows one **load limit**: the
+  processor's average use over an hour (75% unless changed), or memory that stays 90% full for 15 minutes. A
+  computer that is over it and has also been up 72 hours is due for a restart. A load level describes a moment
+  and can read "medium" for days; the limit describes the stretch. Each computer measures itself with the watcher's look once a minute. Over the limit,
+  the assistants there are told at their next step to start nothing heavy (`cairn vibe start`, `log` and
+  `check` print a block that begins with `LOAD LIMIT`; the MCP tool `priority` says the same), Cairn starts no
+  work another computer left for an app of this one, and the computer's card on Vibe says **Over its load
+  limit** with the figures, on every device. It counts as rested once the average is 5 points under the limit.
+  `cairn vibe limit` shows the limit and every computer against it, `cairn vibe limit --processor 70 --minutes
+  45 --memory 90 --restart-hours 72` changes it and `cairn vibe limit off` switches it off; the numbers are one
+  small file, `brain/CAIRN-LIMIT.md`. Cairn stops and slows no program and reads no temperature: it limits the
+  work that makes the heat. Holding busy programs back is what [Spry](https://github.com/juw12/spry) does, with
+  a limit of the same shape.
 - **Which account this computer pushes as:** where the GitHub CLI is signed in to several accounts, the Vibe
   page shows **Pushes from this computer** with a chip per account, the one in use pressed (or
   `cairn vibe github push-as [NAME]`). A press runs `gh auth switch`; the first press also runs

@@ -24,12 +24,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, github_read, handoff, handover, machine, mcp, precedent, pro, rank, vibe
+from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, github_read, handoff, handover, limit, machine, mcp, precedent, pro, rank, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
 
 PACKAGE_DIR = Path(__file__).resolve().parent
+
+
+def _with_limit(reading: dict | None, brain) -> dict | None:
+    """A reading of this computer with where it stands against the brain's load limit (cairn/limit.py)."""
+    if not reading:
+        return reading
+    try:
+        return {**reading, "limit": limit.status(brain)}
+    except Exception:  # noqa: BLE001 - the page shows the load whatever happens to the limit
+        return reading
 WEB_CANDIDATES = [PACKAGE_DIR / "web", PACKAGE_DIR.parent / "docs"]
 MAX_BODY = 5_000_000
 
@@ -208,7 +218,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({
                     "files": vibe.vibe_files(brain),
                     "git": vibe.git_activity_soon(brain, since, base),  # None until git has answered once
-                    "machine": machine.snapshot_soon(),  # this computer and its load; None at first or where it cannot be read
+                    # this computer and its load, with where it stands against the brain's load limit;
+                    # None at first or where it cannot be read
+                    "machine": _with_limit(machine.snapshot_soon(), brain),
                     "device": machine.device_name(),  # what this computer is called on its session notes
                     # which GitHub account this computer pushes as; None at first, and always on a phone
                     "push": github_push.status_soon() if self.github_moves else None,

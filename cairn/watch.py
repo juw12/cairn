@@ -38,7 +38,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import activity, core, github_copy, github_usage, machine, vibe
+from . import activity, core, github_copy, github_usage, limit, machine, vibe
 from .brain import Brain, ConflictError
 
 IDLE_MINUTES = 30
@@ -892,6 +892,7 @@ def machine_note(reading: dict) -> tuple[str, str]:
     reasons = "; ".join(reading.get("reasons") or [])
     top = "; ".join(reading.get("top") or [])
     net = reading.get("net") or {}
+    held = limit.note_fields(reading.get("limit"))
     meta = {
         "title": name,
         "type": "note",
@@ -914,6 +915,8 @@ def machine_note(reading: dict) -> tuple[str, str]:
         "net_reach": text(net.get("reach")),
         "net_speed": text(net.get("speed")),
         "net_why": text(net.get("why")),
+        # Against the load limit of the brain (cairn/limit.py): over, ok or off, and why. Empty until measured.
+        **held,
     }
     lines = [
         "Written by the Cairn session watcher while an AI coding session is live, so the Vibe page can show",
@@ -927,6 +930,7 @@ def machine_note(reading: dict) -> tuple[str, str]:
     lines += [f"- Using the most: {top}"] if top else []
     lines += [f"- Network: {meta['net_link']}"] if meta["net_link"] else []
     lines += [f"- {'; '.join(part for part in (meta['net_reach'], meta['net_speed']) if part)}"] if meta["net_reach"] else []
+    lines += [f"- {limit.note_line(held)}"] if limit.note_line(held) else []
     path = f"{MACHINE_FOLDER}/{core.slugify(name) or 'this-computer'}.md"
     return path, core.serialize_note(meta, "\n".join(lines) + "\n")
 
@@ -938,6 +942,9 @@ def _machine_changed(old: dict, reading: dict) -> bool:
     net = reading.get("net") or {}
     if str(old.get("net", "")) != str(net.get("level") or ""):
         return True  # the internet went, came back or turned slow: said at once, not at the next rewrite
+    held = limit.note_fields(reading.get("limit"))
+    if str(old.get("limit") or "") != held["limit"] or bool(old.get("limit_restart")) != bool(held["limit_restart"]):
+        return True  # over its limit, rested, or due for a restart: said at once as well
     for key, now in (("load_cpu", reading.get("cpu_pct")), ("load_ram", reading.get("ram_pct"))):
         try:
             if now is not None and abs(int(old.get(key)) - int(now)) >= MACHINE_MOVE_POINTS:
@@ -961,6 +968,8 @@ def sync_machine(brain: Brain, reading: dict | None = None) -> bool:
     reading = machine.snapshot(net_wait=MACHINE_NET_WAIT_SECONDS) if reading is None else reading
     if not reading:
         return False
+    if "limit" not in reading:
+        reading = {**reading, "limit": limit.status(brain)}
     path, text = machine_note(reading)
     try:
         if not brain.resolve(path).exists():
@@ -1022,8 +1031,12 @@ def _sync_activity(brain: Brain, now, idle, load, name) -> bool:
             log = {"days": activity.seed_days(existing["text"])}
     except OSError:
         pass
-    log = activity.add_look(log, now, activity.idle_seconds() if idle == "read" else idle,
-                            machine.load_now() if load == "read" else load)
+    load = machine.load_now() if load == "read" else load
+    log = activity.add_look(log, now, activity.idle_seconds() if idle == "read" else idle, load)
+    try:
+        limit.look(brain, load, now)  # the same look, kept for the hours the load limit is judged over
+    except Exception:  # noqa: BLE001 - the day's use is written whatever happens to the limit's own file
+        pass
     written = False
     if activity.note_due(log, now):
         try:
@@ -1136,9 +1149,13 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
     if handoffs and not os.environ.get("CAIRN_NO_RUNNER"):
         from . import runner  # work another computer left for an app this one can start by itself
 
-        started = runner.start_soon(brain)
-        if started:
-            messages.append(f"Handoffs: starting the app asked for on {started} left for this computer")
+        if limit.over(brain):
+            if not runner.busy() and runner.waiting(brain):
+                messages.append("Handoffs: work left for this computer waits, it is over its load limit (cairn vibe limit)")
+        else:
+            started = runner.start_soon(brain)
+            if started:
+                messages.append(f"Handoffs: starting the app asked for on {started} left for this computer")
     return messages
 
 

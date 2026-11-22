@@ -91,6 +91,20 @@ An assistant that does not log its steps with `cairn vibe` (a session the watche
 - The order says what goes first, not that the rest stops. Keep working on what is yours.
 - The order is the user's. `cairn vibe rank "<session>" --to top|up|down|bottom|N` and `--reset` change it: run them only when the user says so, and never to move your own session up.
 
+### When the computer is over its load limit
+
+Every computer of the brain follows one load limit, set by the user: the processor's average use over an hour, and memory that stays full. Each computer measures itself. When yours is over it, `cairn vibe start`, `log` and `check` print a block that begins with `LOAD LIMIT`, with the figures (the MCP tool `priority` says the same to an assistant that does not log its steps).
+
+```bash
+cairn vibe limit             # the limit, and every computer of the brain against it (changes nothing)
+```
+
+- Start nothing heavy on this computer until the block is gone: no build, test run, render, big download, browser fleet or second assistant. Light steps (reading, a small edit, writing a note) go on.
+- Let what already runs finish, or pause it. Work that can wait, waits: log that you wait, and for what.
+- Work another computer can do goes there as a handoff (`cairn handoff send`). Cairn itself starts no handed-over work on a computer that is over its limit.
+- A block that begins with `RESTART DUE` means the computer is over its limit and has also been up longer than the user allows. Tell the user, once. Do not restart it yourself.
+- The limit is the user's. `cairn vibe limit --processor N`, `--minutes`, `--memory`, `--restart-hours`, `off` and `on` change it for every computer: run them only when the user says so, and never to get your own work through.
+
 ## What a session file looks like
 
 ```markdown
