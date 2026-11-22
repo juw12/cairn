@@ -87,9 +87,15 @@ class VibeCliTests(unittest.TestCase):
         self.assertIn("CAIRN_SESSION", out)
         live = vibe.live_sessions(self.brain)
         self.assertEqual([n["title"] for n in live], ["Map tiles", "Share link"])
-        older = live[0]["slug"]
-        # Default: the newest; --session or $CAIRN_SESSION picks another.
-        run_cli(self.root, "vibe", "log", "newest gets this")
+        older, newer = live[0]["slug"], live[1]["slug"]
+        # Two live here: a step must name its session (--session or $CAIRN_SESSION), or nothing is written.
+        code, _, err = run_cli(self.root, "vibe", "log", "whose step is this")
+        self.assertEqual(code, 2)
+        self.assertIn("2 sessions are live on this computer", err)
+        self.assertIn("--session", err)
+        self.assertIn(older, err)
+        self.assertNotIn("whose step is this", "".join(n["body"] for n in self.brain.notes() if n["type"] == "session"))
+        run_cli(self.root, "vibe", "log", "newest gets this", "--session", newer)
         run_cli(self.root, "vibe", "skill", "/refine 6.5 -> 8.7", "--session", older)
         os.environ["CAIRN_SESSION"] = older
         try:
@@ -134,6 +140,23 @@ class VibeCliTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CAIRN_DEVICE": "Desk PC"}):  # and the desk PC still finds its own, older one
             self.assertEqual(run_cli(self.root, "vibe", "log", "next lab step")[0], 0)
             self.assertIn("next lab step", self.brain.read(theirs["path"])["text"])
+
+    def test_a_step_without_a_named_session_never_lands_in_a_session_the_watcher_keeps(self):
+        """The watcher lists another app's runs as sessions of this computer (source: opencode). Only
+        the watcher writes those: a step that names no session goes to the chat's own, or nowhere."""
+        self.brain.init()
+        watched = {"title": "lab: automated runs", "type": "session", "status": "live", "tags": [], "created": "2026-01-02",
+                   "started": "2099-01-02T09:00", "agent": "opencode", "source": "opencode", "external": "batch-1"}
+        self.brain.write("sessions/2026-01-02-lab-automated-runs.md", core.serialize_note(watched, "## Log\n\n- 09:00 start: lab\n"), None)
+        before = self.brain.read("sessions/2026-01-02-lab-automated-runs.md")["text"]
+        code, _, err = run_cli(self.root, "vibe", "log", "a chat's step")
+        self.assertEqual(code, 2)
+        self.assertIn("No live session", err)
+        run_cli(self.root, "vibe", "start", "The chat's own work")
+        self.assertEqual(run_cli(self.root, "vibe", "log", "a chat's step")[0], 0, "one own session: no name needed")
+        self.assertEqual(self.brain.read("sessions/2026-01-02-lab-automated-runs.md")["text"], before)
+        by_title = {n["title"]: n for n in self.brain.notes() if n["type"] == "session"}
+        self.assertIn("a chat's step", by_title["The chat's own work"]["body"])
 
     def test_a_session_that_names_no_computer_is_this_computers(self):
         self.brain.init()

@@ -105,7 +105,8 @@ def elsewhere(note: dict) -> bool:
 
 
 def live_session(brain: Brain, slug: str = "") -> dict | None:
-    """The session to write to: `slug` (or $CAIRN_SESSION) if given, else the newest live one of this computer.
+    """The session meant: `slug` (or $CAIRN_SESSION) if given, else the newest live one of this computer.
+    A step that is written (log, skill, end) goes further: with several live here it must name one.
 
     Never another computer's unless it is named. A brain that several computers share holds their live
     sessions too, and a line written into one of those is an edit to a note its own computer keeps
@@ -115,8 +116,15 @@ def live_session(brain: Brain, slug: str = "") -> dict | None:
     wanted = (slug or os.environ.get("CAIRN_SESSION", "")).strip().removesuffix(".md").rsplit("/", 1)[-1]
     if wanted:
         return next((n for n in live if n["slug"] == wanted), None)
-    here = [n for n in live if not elsewhere(n)]
+    here = own_sessions(live)
     return here[-1] if here else None
+
+
+def own_sessions(live: list[dict]) -> list[dict]:
+    """The live sessions an assistant on this computer can mean when it names none: this computer's,
+    and not the ones the watcher keeps for another app's runs (`source: opencode`), which are written
+    by the watcher alone."""
+    return [n for n in live if not elsewhere(n) and n["meta"].get("source") != "opencode"]
 
 
 def _reopen(brain: Brain, slug: str) -> dict | None:
@@ -147,10 +155,16 @@ def _drop_properties(text: str, keys: tuple[str, ...]) -> str:
 
 
 def _require_live(brain: Brain, slug: str = "") -> dict:
+    wanted = slug or os.environ.get("CAIRN_SESSION", "")
+    if not wanted:
+        mine = own_sessions(live_sessions(brain))
+        if len(mine) > 1:  # several chats work here at once: the newest one is somebody else's as often as not
+            raise VibeError(
+                f"{len(mine)} sessions are live on this computer: {', '.join(n['slug'] for n in mine)}. "
+                "Say which one with --session <name> (or set CAIRN_SESSION); nothing was written.")
     session = live_session(brain, slug)
     if session:
         return session
-    wanted = slug or os.environ.get("CAIRN_SESSION", "")
     if wanted:
         session = _reopen(brain, wanted)
         if session:

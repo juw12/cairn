@@ -306,7 +306,12 @@ class SkillScriptsTests(ConnectCase):
         marker = self.tmp / "synced.txt"
         script = self.tmp / "sync.py"
         script.write_text(
-            f"from pathlib import Path\np = Path({str(marker)!r})\np.write_text((p.read_text() if p.exists() else '') + 'x')\nprint('synced by the test')\n",
+            "import os, subprocess\nfrom pathlib import Path\n"
+            f"p = Path({str(marker)!r})\np.write_text((p.read_text() if p.exists() else '') + 'x')\n"
+            "if os.environ.get('SYNC_SENDS_NOTHING') != '1':\n"  # a sync that works commits what was written
+            "    subprocess.run(['git', 'add', '-A'], check=True)\n"
+            "    subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'sync'], check=True)\n"
+            "print('synced by the test')\n",
             encoding="utf-8")
         subprocess.run(["git", "init", "-q", "-b", "main", str(self.brain.root)], check=True, capture_output=True)
         self.brain.set_sync_mode(f'"{sys.executable}" "{script}"')
@@ -328,6 +333,13 @@ class SkillScriptsTests(ConnectCase):
         self.assertEqual(left.returncode, 0, left.stderr)
         self.assertIn("Sent: it is on the brain's remote now.", left.stdout)
         self.assertEqual(marker.read_text(), "xx", "it was sent at once")
+
+        # a sync command that ends well and sent nothing: the writer is not told it left
+        with mock.patch.dict(os.environ, {"SYNC_SENDS_NOTHING": "1"}):
+            kept = self.run_script("remember.py", "handoff", "Read the second log too", "--to", "other", "--body", "It is longer.")
+        self.assertEqual(kept.returncode, 0, kept.stderr)
+        self.assertIn("Not sent yet", kept.stdout)
+        self.assertNotIn("Sent: it is on the brain's remote now.", kept.stdout)
 
     def test_a_secret_is_refused(self):
         self.connect("vector")

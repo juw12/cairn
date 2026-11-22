@@ -463,16 +463,21 @@ class Brain:
         return sorted(name[len(prefix):] for name in listed.split("\0") if name and name.startswith(prefix))
 
     def handoffs_unsent(self) -> bool:
-        """A message for another computer is written here and not committed (or committed and not pushed)."""
+        """A message for another computer is written here and not committed (or committed and not pushed).
+        Also True when git did not answer in time: "unknown" must never read as "sent"."""
         folder = f"{self._brain_pathspec().rstrip('/')}/{core.HANDOFF_FOLDER}" if self._brain_pathspec() != "." else core.HANDOFF_FOLDER
-        try:
-            if self._git("status", "--porcelain", "--untracked-files=all", "--", folder).stdout.strip():
-                return True
-            if not self._upstream():
+        for limit in (20, 90):  # a busy computer: ask once more with a longer limit before giving up
+            try:
+                if self._git("status", "--porcelain", "--untracked-files=all", "--", folder, timeout=limit).stdout.strip():
+                    return True
+                if not self._upstream():
+                    return False
+                return bool(self._git("diff", "--name-only", "@{u}", "HEAD", "--", folder, timeout=limit).stdout.strip())
+            except subprocess.TimeoutExpired:
+                continue
+            except OSError:
                 return False
-            return bool(self._git("diff", "--name-only", "@{u}", "HEAD", "--", folder).stdout.strip())
-        except (subprocess.TimeoutExpired, OSError):
-            return False
+        return True  # git never answered: not known to be sent, so it counts as unsent and is tried again
 
     def remote_moved(self) -> bool:
         """The remote has commits this computer has not fetched: one small question to the remote.
