@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 106 (2026-11-22): An app started for a handoff keeps running when the watcher's pass ends
+
+- Fixed: on a computer whose watcher makes one pass and ends (cairn vibe watch --once from a timer, as on the Mac), an app started for a handoff was ended with it, after picked-up had been said. The app now runs in a process of its own (cairn handoff run), on every computer ([#103](https://github.com/juw12/cairn/pull/103))
+- One run at a time across processes: a second pass does not start another while one is at work ([#103](https://github.com/juw12/cairn/pull/103))
+
 ## Build 105 (2026-11-22): Choose the computer and the AI app for one chat, and for prompts from the phone
 
 - A chat's work is done on the computer the chat was started on. Chats' work on Vibe no longer has a switch that hands every chat over: nothing is handed by itself, one chat is handed with Hand to on its row ([#102](https://github.com/juw12/cairn/pull/102))

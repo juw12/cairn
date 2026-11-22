@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 106,
+      "date": "2026-11-22",
+      "title": "An app started for a handoff keeps running when the watcher's pass ends",
+      "changes": [
+        "Fixed: on a computer whose watcher makes one pass and ends (cairn vibe watch --once from a timer, as on the Mac), an app started for a handoff was ended with it, after picked-up had been said. The app now runs in a process of its own (cairn handoff run), on every computer (#103)",
+        "One run at a time across processes: a second pass does not start another while one is at work (#103)"
+      ]
+    },
+    {
       "build": 105,
       "date": "2026-11-22",
       "title": "Choose the computer and the AI app for one chat, and for prompts from the phone",

@@ -8,7 +8,8 @@ watch`, and the desktop app), says "picked-up", runs the app on the whole conver
 chat in that app picks the handoff up, as before.
 
 Nothing is started for a conversation this computer has already answered, so each one is run once. One
-runs at a time.
+runs at a time, in a process of its own (`cairn handoff run`): a watcher that makes one pass and ends
+(`cairn vibe watch --once`, which some computers run from a timer) must not take the app down with it.
 
 `ask` is the other end: leave such a handoff and wait for its answer. The phone desk of Vector Relay
 uses it when prompts from the phone go to another computer (`cairn vibe hand phone`).
@@ -21,11 +22,12 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 
-from . import core, handoff, handover
+from . import connect, core, handoff, handover
 from .brain import Brain
 
 RUN_MINUTES = 45  # one piece of work may take this long
@@ -48,6 +50,19 @@ The conversation between the computers is below, the oldest message first. Do wh
 """
 
 _running = threading.Lock()
+
+
+def _busy_file() -> Path:
+    return connect.cairn_home() / "runner.busy"
+
+
+def busy() -> bool:
+    """True while a run is at work on this computer, in this process or another. A run that died leaves
+    its mark behind; it counts until a piece of work could not still be going."""
+    try:
+        return time.time() - _busy_file().stat().st_mtime < (RUN_MINUTES + 10) * 60
+    except OSError:
+        return False
 
 
 def program(agent: str) -> str:
@@ -161,21 +176,38 @@ def carry_out(brain: Brain, thread: dict, agent: str, run=run_agent) -> str:
 
 def run_waiting(brain: Brain, run=run_agent) -> list[str]:
     """Carry out everything that waits, one after the other. Nothing when another run is still at it."""
-    if not _running.acquire(blocking=False):
+    if busy() or not _running.acquire(blocking=False):
         return []
+    mark = _busy_file()
     try:
-        return [carry_out(brain, thread, agent, run) for thread, agent in waiting(brain)]
+        lines = []
+        for thread, agent in waiting(brain):
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.write_text(thread["id"], encoding="utf-8")  # written again for each: its age is the age of this piece
+            lines.append(carry_out(brain, thread, agent, run))
+        return lines
     finally:
+        mark.unlink(missing_ok=True)
         _running.release()
 
 
 def start_soon(brain: Brain) -> int:
-    """The same in the background, for the watcher's pass: how many conversations it starts on."""
-    if _running.locked():
+    """The same in a process of its own, for the watcher's pass: how many conversations it starts on."""
+    if busy() or _running.locked():
         return 0
     count = len(waiting(brain))
-    if count:
-        threading.Thread(target=run_waiting, args=(brain,), daemon=True, name="cairn-runner").start()
+    if not count:
+        return 0
+    package = str(Path(__file__).resolve().parent.parent)
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [package, os.environ.get("PYTHONPATH", "")]))}
+    # --offline: the pass that found the work has just read the brain, and its sync may still be at it.
+    command = [sys.executable, "-m", "cairn", "--root", str(brain.root), "--brain", brain._brain_pathspec(), "handoff", "run", "--offline"]
+    alone = {"creationflags": 0x00000008 | 0x00000200 | 0x08000000} if os.name == "nt" else {"start_new_session": True}
+    try:
+        subprocess.Popen(command, cwd=str(brain.root), env=environment, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **alone)
+    except OSError:
+        return 0
     return count
 
 
