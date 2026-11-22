@@ -155,12 +155,21 @@ def the_page(playwright):
 
 
 def go(page, remote: str) -> None:
+    """Open a folder and wait until the page has drawn itself: on a busy computer that takes from 3 s to a minute."""
     base = page.url.split("/main")[0] if "/main" in page.url else "https://www.terabox.com"
     try:
         page.goto(f"{base}/main?category=all&path=" + urllib.parse.quote(remote, safe=""), wait_until="commit", timeout=120000)
     except Exception:  # a slow page still arrives
         pass
-    page.wait_for_timeout(7000)
+    page.wait_for_timeout(3000)
+    for _ in range(45):
+        try:
+            if page.get_by_text("New Folder", exact=True).count() or page.locator("input[type=password]").count():
+                break
+        except Exception:  # the page is between two addresses
+            pass
+        page.wait_for_timeout(2000)
+    page.wait_for_timeout(3000)
 
 
 def signed_in(page) -> bool:
@@ -188,9 +197,11 @@ def listing(page, remote: str) -> dict[str, int]:
     """Name -> size in bytes. Sizes come from the list TeraBox sends its own page; a name the page shows
     beyond that list has size -1 (there, size not known)."""
     found: dict[str, int] = {}
+    answers = []
 
     def keep(response) -> None:
         if response.url.split("?")[0].endswith("/api/list"):
+            answers.append(response.url)
             try:
                 for item in response.json().get("list", []):
                     if str(item.get("path", "")).rsplit("/", 1)[0] == remote.rstrip("/"):
@@ -201,9 +212,15 @@ def listing(page, remote: str) -> dict[str, int]:
     page.on("response", keep)
     try:
         go(page, remote)
+        for _ in range(30):  # an empty answer must be the folder being empty, not the page being slow
+            if answers:
+                break
+            page.wait_for_timeout(2000)
         load_all(page)
     finally:
         page.remove_listener("response", keep)
+    if not answers:
+        raise Stop(f"TeraBox's page did not show what is in {remote} (a slow computer or connection). Nothing was changed.")
     for name in names_shown(page):
         found.setdefault(name, -1)
     return found
@@ -246,8 +263,13 @@ def to_recycle_bin(page, name: str) -> None:
     row.locator("label.u-checkbox").first.click()
     page.wait_for_timeout(1200)
     row.locator("button[title=Delete]").click()
-    page.wait_for_timeout(2500)
-    if not page.evaluate("() => document.body.innerText.includes('move 1 item(s) to the recycle bin')"):
+    asked = False
+    for _ in range(10):  # the question comes at once, or after some seconds on a busy computer
+        page.wait_for_timeout(1500)
+        if page.evaluate("() => document.body.innerText.includes('move 1 item(s) to the recycle bin')"):
+            asked = True
+            break
+    if not asked:
         raise Stop("TeraBox did not ask about moving exactly one item to the recycle bin. Nothing was removed.")
     spot = page.evaluate("""() => { const b = [...document.querySelectorAll('.delete-box-btn.delete-btn')].find(e => e.offsetParent);
         if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }""")

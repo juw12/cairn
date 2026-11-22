@@ -442,6 +442,65 @@ class HelperTests(unittest.TestCase):
             left = sorted(path.relative_to(profile).as_posix() for path in profile.rglob("file"))
         self.assertEqual(left, ["Default/Network/file"])  # where Chrome keeps the sign-in
 
+    def test_an_empty_answer_is_an_empty_folder_and_a_page_that_never_drew_is_said(self):
+        class Counted:
+            def __init__(self, number):
+                self.number = number
+
+            def count(self):
+                return self.number
+
+        class Answer:
+            def __init__(self, url, items):
+                self.url, self.items = url, items
+
+            def json(self):
+                return {"list": self.items}
+
+        class Page:
+            """The few things `listing` asks of the page. `answers` is what the drive sends when a folder opens."""
+
+            url = "https://www.terabox.com/main?category=all"
+
+            def __init__(self, answers):
+                self.answers, self.handlers, self.rows = answers, [], []
+
+            def on(self, event, handler):
+                self.handlers.append(handler)
+
+            def remove_listener(self, event, handler):
+                self.handlers.remove(handler)
+
+            def goto(self, url, **options):
+                for answer in self.answers:
+                    for handler in list(self.handlers):
+                        handler(answer)
+
+            def wait_for_timeout(self, milliseconds):
+                pass
+
+            def get_by_text(self, text, exact=False):
+                return Counted(1)
+
+            def locator(self, selector):
+                return Counted(0)
+
+            def evaluate(self, script):
+                return self.rows if "a[title]" in script else None
+
+        sent = [Answer("https://www.terabox.com/api/list?dir=%2FCairn%20backup%2Fbrain", [
+            {"path": "/Cairn backup/brain/brain.7z", "server_filename": "brain.7z", "size": 500},
+            {"path": "/Cairn backup/other/x.7z", "server_filename": "x.7z", "size": 1},
+        ])]
+        page = Page(sent)
+        page.rows = ["brain.7z", "CONTENTS.json"]  # one the page shows beyond what the answer listed
+        self.assertEqual(cloud_terabox.listing(page, "/Cairn backup/brain"), {"brain.7z": 500, "CONTENTS.json": -1})
+        self.assertEqual(page.handlers, [])
+        self.assertEqual(cloud_terabox.listing(Page([Answer("https://www.terabox.com/api/list?dir=%2Fempty", [])]), "/empty"), {})
+        with self.assertRaises(cloud_terabox.Stop) as caught:
+            cloud_terabox.listing(Page([]), "/Cairn backup/brain")
+        self.assertIn("did not show what is in /Cairn backup/brain", str(caught.exception))
+
     def test_while_one_run_is_sending_another_is_turned_away(self):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
