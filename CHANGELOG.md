@@ -3,6 +3,14 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 112 (2026-11-22): Projects no longer stop at Couldn't load the repos on the computer itself
+
+- Fixed: Projects showed Couldn't load the repos. Without a sign-in in the page, Cairn asked GitHub anonymously, and GitHub gives 60 such answers an hour to everyone behind the same internet address. On the computer Cairn runs on, the page now reads GitHub through the GitHub CLI's sign-in of that computer (the account picked under Pushes from this computer on Vibe), which gets 5,000 an hour. The same goes for a repo's own page and for People ([#110](https://github.com/juw12/cairn/pull/110))
+- The status line of the ranking says whose sign-in was used: asked GitHub as NAME (this computer's sign-in). With it the owner's private repos that account was let into are ranked too, and tests and CI are looked up for 60 repos per refresh instead of 12 ([#110](https://github.com/juw12/cairn/pull/110))
+- Reads only: the local server passes on a short list of GitHub reads (users, orgs, repos, repository search), nothing that changes anything. The page never holds the token, and a paired phone does not get this: it asks GitHub itself, as before. A sign-in in the page still comes first, and without a GitHub CLI sign-in everything works as it did ([#110](https://github.com/juw12/cairn/pull/110))
+- When GitHub cannot be asked at all (its hourly limit, no network), Projects shows the list of your last visit and says how old it is, instead of an empty page ([#110](https://github.com/juw12/cairn/pull/110))
+- CAIRN_NO_GITHUB_READ=1 switches the reading through the computer's sign-in off ([#110](https://github.com/juw12/cairn/pull/110))
+
 ## Build 111 (2026-11-22): The Vibe page on a phone: everything pressed is big enough to hit, and Safari no longer zooms on Capture
 
 - On a touch screen the things to press on Vibe that were 10 to 22 px high are at least 32 px to the finger: a session's title and its fold arrow in Live recap, a lane's title and the agent groups in Overview, a piece of the overview bar, the folds in Chats' work, effort and usage. What is drawn keeps its size ([#108](https://github.com/juw12/cairn/pull/108))
