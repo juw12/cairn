@@ -733,6 +733,53 @@ function machineMeter(label, pct, note = "") {
     </div>`;
 }
 
+// The network under the computer: which one it is on and how the internet answers. An assistant that runs
+// online waits on this for every step; a model that runs on the computer itself does not. The link rate is
+// only the stretch to the router, so the speed is measured when asked (it costs megabytes on a hotspot).
+const NET_LABEL = { good: "Internet good", slow: "Internet slow", offline: "No internet" };
+const NET_EFFORT = { good: "light", slow: "medium", offline: "heavy" };
+const NET_NOTE = {
+  slow: "An assistant that runs online (Vector, Claude, Copilot, a cloud model in OpenCode) answers late on this. A model that runs on this computer is not held up.",
+  offline: "An assistant that runs online cannot answer until the internet is back. A model that runs on this computer keeps working.",
+};
+const netSummary = (reading) => (NET_LABEL[reading?.net?.level] ? NET_LABEL[reading.net.level].toLowerCase() : "");
+
+function machineNet(reading) {
+  const net = reading.net;
+  if (!net || !NET_LABEL[net.level]) return "";
+  const canMeasure = reading.live && state.info?.canMoveRepos && typeof state.store?.netSpeed === "function" && net.level !== "offline";
+  const busy = Boolean(state.vibeSpeedBusy);
+  const button = canMeasure
+    ? `<button type="button" class="chip vm-speed" data-action="vibe-net-speed"${busy ? " disabled" : ""} title="Downloads for up to 4 seconds, 8 MB at most">${busy ? "Measuring…" : net.speed ? "Measure again" : "Measure speed"}</button>`
+    : "";
+  const reach = [net.reach, net.speed].filter(Boolean).join(" · ");
+  const title = net.why || "A small request to the internet comes back quickly. Online assistants depend on that; a model on this computer does not.";
+  return `<div class="vm-net" role="group" aria-label="Network">
+      <span class="vm-label">Network</span>
+      <span class="vm-net-link">${esc(net.link)}</span>
+      <span class="effort effort-${NET_EFFORT[net.level]}" title="${esc(title)}">${NET_LABEL[net.level]}</span>
+      <span class="vm-net-reach muted small">${esc(reach)}</span>
+      ${button}
+      ${NET_NOTE[net.level] ? `<p class="vm-net-note small">${NET_NOTE[net.level]}</p>` : ""}
+    </div>`;
+}
+
+// Measure how fast the internet comes down on this computer, when asked: a few seconds, 8 MB at most.
+export async function measureSpeed() {
+  if (state.vibeSpeedBusy || typeof state.store?.netSpeed !== "function") return;
+  state.vibeSpeedBusy = true;
+  refreshProgress();
+  try {
+    const speed = await state.store.netSpeed();
+    if (state.vibeMachine?.net) state.vibeMachine = { ...state.vibeMachine, net: { ...state.vibeMachine.net, speed: speed.text } };
+    toast(`The internet comes down at ${speed.down_mbps} Mbit/s right now (${speed.mb} MB in ${speed.seconds} s).`);
+  } catch (error) {
+    toast(error.message, { error: true });
+  }
+  state.vibeSpeedBusy = false;
+  refreshProgress();
+}
+
 // Which computer this is and how loaded it is, above everything that runs on it. Re-rendered every poll tick.
 function machineStrip() {
   const reading = machine();
@@ -753,6 +800,7 @@ function machineStrip() {
       ${machineMeter("CPU", reading.cpu_pct)}
       ${machineMeter("Memory", reading.ram_pct, free)}
     </div>
+    ${machineNet(reading)}
     <p class="vm-foot muted small">${esc(foot.join(" · "))}${foot.length ? " · " : ""}<span class="vm-when">${esc(when)}</span></p>
   </section>`;
 }
@@ -2036,7 +2084,7 @@ export function vibeView() {
     },
     machine: {
       html: machineStrip(),
-      summary: reading ? `${EFFORT_LABEL[reading.level]} load · CPU ${reading.cpu_pct ?? "?"}% · memory ${reading.ram_pct ?? "?"}%` : "",
+      summary: reading ? [`${EFFORT_LABEL[reading.level]} load`, `CPU ${reading.cpu_pct ?? "?"}%`, `memory ${reading.ram_pct ?? "?"}%`, netSummary(reading)].filter(Boolean).join(" · ") : "",
       // Another computer picked in the device bar is not "This computer".
       label: shownDevice() !== null && shownDevice() !== (state.vibeHere || "") ? "Computer" : "",
     },

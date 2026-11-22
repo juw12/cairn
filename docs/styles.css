@@ -2427,7 +2427,13 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .vm-bar > span { background: var(--ink-2); }
 .vm-num { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .vm-foot { margin: 8px 0 0; overflow-wrap: anywhere; }
-.vibe-machine.stale .vm-meters { opacity: .6; }
+.vm-net { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; align-items: baseline; gap: 4px 8px; margin-top: 10px; font-size: 12.5px; }
+.vm-net-link { overflow-wrap: anywhere; }
+.vm-net-reach { grid-column: 2; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; }
+.vm-speed { grid-column: 3; justify-self: end; height: 24px; }
+.vm-speed:disabled { cursor: progress; opacity: .7; }
+.vm-net-note { grid-column: 2 / -1; margin: 2px 0 0; color: var(--ink-2); }
+.vibe-machine.stale :is(.vm-meters, .vm-net) { opacity: .6; }
 .vibe-machine.stale .vm-when { color: var(--ink-2); font-weight: 500; }
 .effort-machine { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
 /* GitHub Actions minutes: this month's meter, the warning, and the history the watcher keeps in github-usage/ */

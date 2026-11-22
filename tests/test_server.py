@@ -89,6 +89,23 @@ class ServerTests(unittest.TestCase):
         switch.assert_called_once_with("grace")
         self.assertEqual((status, result), (200, after))
 
+    def test_the_speed_is_measured_when_asked_and_a_dead_line_is_said(self):
+        from cairn import machine
+
+        speed = {"down_mbps": 12.0, "mb": 6.0, "seconds": 4.0, "at": "2026-11-22T10:42", "text": "measured 12 Mbit/s down at 10:42"}
+        with mock.patch.object(machine, "measure_speed", return_value=speed) as measure:
+            status, result = self.call("POST", "/api/vibe/speed", {})
+        measure.assert_called_once_with()
+        self.assertEqual((status, result), (200, speed))
+        with mock.patch.object(machine, "measure_speed", side_effect=OSError("no route to host")):
+            status, result = self.call("POST", "/api/vibe/speed", {})
+        self.assertEqual(status, 502)
+        self.assertIn("the internet did not answer", result["error"])
+        with mock.patch.object(machine, "measure_speed") as measure:
+            status, _ = self.call("POST", "/api/vibe/speed", {}, headers={"X-Cairn": ""})
+        self.assertEqual(status, 403)
+        measure.assert_not_called()
+
     def test_a_refused_switch_says_why(self):
         from cairn import github_push
 

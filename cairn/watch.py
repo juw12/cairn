@@ -61,6 +61,7 @@ HISTORY_KEY = "opencode_history"  # watch state: computer -> when its whole Open
 ACTIVITY_FILE = "cairn-activity.json"  # this computer's use, day by day, between two writes of its note
 ACTIVITY_SECONDS = 60  # how often the computer is looked at, whatever a pass is busy with
 MACHINE_NOTE_MINUTES = 15  # an unchanged reading is written again after this long, so a reader can tell it is current
+MACHINE_NET_WAIT_SECONDS = 10  # how long a pass waits for the first look at the network
 MACHINE_MOVE_POINTS = 10  # CPU or memory moving this many points is worth a new note
 
 
@@ -890,6 +891,7 @@ def machine_note(reading: dict) -> tuple[str, str]:
     name = text(reading.get("name")) or "This computer"
     reasons = "; ".join(reading.get("reasons") or [])
     top = "; ".join(reading.get("top") or [])
+    net = reading.get("net") or {}
     meta = {
         "title": name,
         "type": "note",
@@ -906,6 +908,12 @@ def machine_note(reading: dict) -> tuple[str, str]:
         "machine_uptime": text(reading.get("uptime")),
         "load_why": reasons,
         "load_top": top,
+        # The network it is on and how the internet answers: an assistant that runs online waits on this.
+        "net": text(net.get("level")),
+        "net_link": text(net.get("link")),
+        "net_reach": text(net.get("reach")),
+        "net_speed": text(net.get("speed")),
+        "net_why": text(net.get("why")),
     }
     lines = [
         "Written by the Cairn session watcher while an AI coding session is live, so the Vibe page can show",
@@ -917,6 +925,8 @@ def machine_note(reading: dict) -> tuple[str, str]:
     lines += [f"- {meta['load_power'].capitalize()}"] if meta["load_power"] else []
     lines += [f"- {meta['machine_uptime'].capitalize()}"] if meta["machine_uptime"] else []
     lines += [f"- Using the most: {top}"] if top else []
+    lines += [f"- Network: {meta['net_link']}"] if meta["net_link"] else []
+    lines += [f"- {'; '.join(part for part in (meta['net_reach'], meta['net_speed']) if part)}"] if meta["net_reach"] else []
     path = f"{MACHINE_FOLDER}/{core.slugify(name) or 'this-computer'}.md"
     return path, core.serialize_note(meta, "\n".join(lines) + "\n")
 
@@ -925,6 +935,9 @@ def _machine_changed(old: dict, reading: dict) -> bool:
     """Worth writing again: another level, CPU or memory moved a good way, or the note is getting old."""
     if str(old.get("load", "")) != str(reading.get("level", "")):
         return True
+    net = reading.get("net") or {}
+    if str(old.get("net", "")) != str(net.get("level") or ""):
+        return True  # the internet went, came back or turned slow: said at once, not at the next rewrite
     for key, now in (("load_cpu", reading.get("cpu_pct")), ("load_ram", reading.get("ram_pct"))):
         try:
             if now is not None and abs(int(old.get(key)) - int(now)) >= MACHINE_MOVE_POINTS:
@@ -944,7 +957,8 @@ def sync_machine(brain: Brain, reading: dict | None = None) -> bool:
     Quiet on purpose: an idle brain, an unreadable machine and an unchanged reading write nothing."""
     if not any(not elsewhere(note) for note in vibe.live_sessions(brain)):
         return False  # nothing live on this computer
-    reading = machine.snapshot() if reading is None else reading
+    # A pass has time: it waits for the first look at the network, so a one-pass run notes it too.
+    reading = machine.snapshot(net_wait=MACHINE_NET_WAIT_SECONDS) if reading is None else reading
     if not reading:
         return False
     path, text = machine_note(reading)

@@ -1226,6 +1226,9 @@ class EndToEndTests(unittest.TestCase):
                 self.assertTrue(page.eval_on_selector(".modal.versions .ver:nth-of-type(2)", "n => n.open"))
                 link = page.get_attribute(".modal.versions .ver:nth-of-type(2) li a", "href")
                 self.assertRegex(link, r"^https://github\.com/juw12/cairn/pull/\d+$")
+                # An apostrophe is "&#39;" once escaped: it must come out as an apostrophe, not as a link to pull request 39.
+                self.assertEqual(page.eval_on_selector_all(".modal.versions li", "nodes => nodes.filter((n) => n.textContent.includes('&#')).length"), 0)
+                self.assertGreater(page.eval_on_selector_all(".modal.versions li", "nodes => nodes.filter((n) => n.textContent.includes(\"'\")).length"), 0)
                 # Nothing runs off the side of the screen, and the list scrolls inside the dialog.
                 box = page.eval_on_selector(".modal.versions", "n => { const r = n.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom, n.scrollWidth, n.clientWidth]; }")
                 self.assertGreaterEqual(box[0], 0)
