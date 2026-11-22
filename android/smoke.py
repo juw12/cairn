@@ -19,7 +19,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def adb(*args, check=True):
-    result = subprocess.run(["adb", *args], capture_output=True, text=True, timeout=180)
+    try:
+        result = subprocess.run(["adb", *args], capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        # A busy emulator can take minutes over the whole log. Where the answer is only read (check=False)
+        # an empty one is enough: the checks above decide, not the dump.
+        if check:
+            raise
+        return ""
     if check and result.returncode != 0:
         raise SystemExit("adb %s failed: %s" % (" ".join(args), result.stderr.strip()))
     return result.stdout
