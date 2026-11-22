@@ -296,6 +296,16 @@ stand by and take over within five minutes of it stopping.
   conversation so the other computer stops. What moves is the work, not the conversation, which stays in the
   AI app; the other computer does it when a chat there picks the handoff up. The switch for all chats is a
   setting of the one computer (`handover.json` in Cairn's folder), not a note.
+- **Which session matters most:** with two or more sessions running, the Vibe page shows **Priority**: the
+  running sessions of every computer in one list, the most important at the top and the others under it in
+  order. Each row has **Top**, up and down, and a handle to drag (or `cairn vibe rank`, `cairn vibe rank SESSION
+  --to top|up|down|bottom|N`, `cairn vibe rank --reset`). The order is one small file in the brain,
+  `brain/CAIRN-PRIORITY.md`, so every device shows the same list and any of them can change it. Each assistant
+  is told its place at its next step (`cairn vibe start`, `log` and `check` print it, with the sessions that
+  come before it): where chats need the same thing, the lower number goes first. Cairn stops and slows
+  nothing; the order is what the assistants go by. A session a watcher found by itself (an OpenCode chat that
+  never runs `cairn vibe`) is ordered on the page like the others, and is not told. The live recap follows it and numbers its rows, a new
+  session joins at the bottom, and one that ended leaves the list by itself.
 - **Which account this computer pushes as:** where the GitHub CLI is signed in to several accounts, the Vibe
   page shows **Pushes from this computer** with a chip per account, the one in use pressed (or
   `cairn vibe github push-as [NAME]`). A press runs `gh auth switch`; the first press also runs

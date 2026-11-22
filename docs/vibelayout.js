@@ -18,6 +18,7 @@ const PAGES = {
     label: "Vibe",
     panels: [
       { id: "recap", label: "Live recap" },
+      { id: "priority", label: "Priority" },
       { id: "hand", label: "Chats' work", half: true },
       { id: "machine", label: "This computer", half: true },
       { id: "github", label: "GitHub minutes", half: true },

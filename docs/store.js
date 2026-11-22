@@ -310,7 +310,15 @@ export class FolderStore {
         files.push({ path: `${folder}/${name}`, text: await file.text(), mtime: file.lastModified });
       }
     }
-    return { files, git: { available: false, browser: true } };
+    // The order of importance of the running sessions (rank.js): one small file at the brain's top.
+    let rank = null;
+    try {
+      const file = await (await brain.getFileHandle("CAIRN-PRIORITY.md")).getFile();
+      rank = { path: "CAIRN-PRIORITY.md", text: await file.text(), mtime: file.lastModified };
+    } catch {
+      rank = null;
+    }
+    return { files, rank, git: { available: false, browser: true } };
   }
 
   async write(path, text, mtime) {

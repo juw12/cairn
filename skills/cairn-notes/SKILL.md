@@ -26,7 +26,7 @@ A Cairn brain is a folder of Markdown files. Cairn, Obsidian, GitHub and AI assi
 | `session` | `sessions/` | `live`, `shipped`, `partial`, `dropped`, `done` |
 | `feedback` | `feedback/` | `new`, `planned`, `addressed`, `wontfix` |
 
-Special files at the brain root, never edited by hand: `CONTEXT.md` (generated brief), `README.md`, `CAIRN-LAYOUT.md` (page order shared by every device).
+Special files at the brain root, never edited by hand: `CONTEXT.md` (generated brief), `README.md`, `CAIRN-LAYOUT.md` (page order shared by every device), `CAIRN-PRIORITY.md` (the running sessions in the user's order of importance; change it with `cairn vibe rank`, and only when the user says so).
 
 ## Front matter
 

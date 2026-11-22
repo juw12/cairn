@@ -76,6 +76,19 @@ cairn vibe hand              # where the work of this computer's chats goes (cha
 - `THIS CHAT'S WORK WAS HANDED TO`: Cairn has already left the handoff, written from this session's log. Stop, and add what a log does not show (a branch that is not pushed, files only on this computer) with the `cairn handoff reply` line it prints.
 - The switch is the user's. `cairn vibe hand "<computer>"`, `cairn vibe hand here` and `--session` change it: run them only when the user says so.
 
+### When the user has put the running sessions in order
+
+The user can say which running sessions matter most (the Vibe page, **Priority**): one list for the sessions of every computer, the most important first. Once it is set, `cairn vibe start`, `log` and `check` print a block that begins with `PRIORITY`, with the number of your session and the ones before it.
+
+```bash
+cairn vibe rank              # the running sessions in the user's order (changes nothing)
+```
+
+- Where your work and a session with a lower number need the same thing (the user's answer, a repo or a branch, this computer's processor, memory or disk, build minutes), that session goes first. Give way: wait, or do the part that does not collide, and log that you are waiting and for which session.
+- Number 1 is not held up by the others. It still does not take over their branches or undo their work.
+- The order says what goes first, not that the rest stops. Keep working on what is yours.
+- The order is the user's. `cairn vibe rank "<session>" --to top|up|down|bottom|N` and `--reset` change it: run them only when the user says so, and never to move your own session up.
+
 ## What a session file looks like
 
 ```markdown
