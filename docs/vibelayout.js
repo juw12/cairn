@@ -1,5 +1,5 @@
-// Pages as blocks you arrange: fold any block to one line, move it up or down (arrows or drag), and get the
-// same layout on every device. Every page with content of its own is built this way (see PAGES); each one
+// Pages as blocks you arrange: fold any block to one line, move it up or down (arrows or drag), hide the ones
+// you never look at, and get the same layout on every device. Every page with content of its own is built this way (see PAGES); each one
 // has a Dashboard block (its numbers) and a Recap block (what changed lately). The
 // layout lives in brain/CAIRN-LAYOUT.md, so the desktop app, the web app and the phone read the same file; a
 // copy in localStorage covers a read-only brain.
@@ -186,7 +186,8 @@ export const PANELS = PAGES.vibe.panels;
 const panelsOf = (page) => PAGES[page]?.panels || [];
 const localKey = (page) => (page === "vibe" ? "cairn.vibeLayout" : `cairn.layout.${page}`);
 
-// "vibe-order: a, b, c" and "vibe-folded: x, y" lines (one pair per page), anywhere in the file.
+// "vibe-order: a, b, c" and "vibe-folded: x, y" lines (one pair per page), anywhere in the file, and
+// "vibe-hidden: z" for a page with blocks taken off it.
 export function parseLayout(text, page = "vibe") {
   const known = new Set(panelsOf(page).map((panel) => panel.id));
   const list = (key) => {
@@ -195,7 +196,8 @@ export function parseLayout(text, page = "vibe") {
   };
   const order = list("order");
   const folded = list("folded");
-  return order || folded ? { order: order || [], folded: folded || [] } : null;
+  const hidden = list("hidden");
+  return order || folded || hidden ? { order: order || [], folded: folded || [], hidden: hidden || [] } : null;
 }
 
 // Blocks the saved order does not know (added in a later version) keep their default place.
@@ -229,21 +231,26 @@ export function pageLayout(page = "vibe") {
   return {
     order: complete(saved?.order || [], page),
     folded: new Set(saved ? saved.folded : PAGES[page]?.folded || []),
+    hidden: new Set(saved?.hidden || []),
   };
 }
 export const vibeLayout = () => pageLayout("vibe");
 
-// The whole file: one pair of lines for every page arranged so far. `layouts` maps a page to { order, folded }.
+// The whole file: one pair of lines for every page arranged so far, and a third line for a page with hidden
+// blocks. `layouts` maps a page to { order, folded, hidden }.
 // Lines of a page this version does not know (written by a newer Cairn) are carried over untouched.
 export function layoutText(layouts, previous = "") {
   const single = layouts && Array.isArray(layouts.order) ? { vibe: layouts } : layouts;
   const pairs = Object.keys(PAGES)
     .filter((page) => single[page])
-    .map((page) => `${page}-order: ${single[page].order.join(", ")}\n${page}-folded: ${[...single[page].folded].join(", ")}`);
+    .map((page) => {
+      const hidden = [...(single[page].hidden || [])];
+      return `${page}-order: ${single[page].order.join(", ")}\n${page}-folded: ${[...single[page].folded].join(", ")}${hidden.length ? `\n${page}-hidden: ${hidden.join(", ")}` : ""}`;
+    });
   const foreign = String(previous || "")
     .split(/\r?\n/)
     .filter((line) => {
-      const match = /^([a-z][a-z0-9]*)-(?:order|folded):/.exec(line);
+      const match = /^([a-z][a-z0-9]*)-(?:order|folded|hidden):/.exec(line);
       return match && !PAGES[match[1]];
     });
   return `---
@@ -254,7 +261,7 @@ type: settings
 
 How the pages built from blocks are arranged, shared by the desktop app, the web app
 and the phone. Change it in Cairn: the arrow on a block folds it, the up and down buttons (or dragging the
-handle) move it. Editing these lines by hand works too. Block names:
+handle) move it, the cross hides it. Editing these lines by hand works too. Block names:
 
 ${Object.entries(PAGES).map(([page, { panels }]) => `- ${page}: ${panels.map((panel) => panel.id).join(", ")}`).join("\n")}
 
@@ -293,7 +300,7 @@ function fileText() {
 }
 
 function saveLayout(layout, page = "vibe") {
-  const chosen = { order: layout.order, folded: [...layout.folded] };
+  const chosen = { order: layout.order, folded: [...layout.folded], hidden: [...(layout.hidden || [])] };
   pending[page] = chosen;
   try {
     localStorage.setItem(localKey(page), JSON.stringify(chosen));
@@ -323,8 +330,14 @@ export function isFolded(id, layout = pageLayout("vibe"), page = "vibe") {
   return layout.folded.has(id) && !peeked().has(peekKey(id, page));
 }
 
+// A hidden block is not drawn at all. Its name stays in the line under the blocks, where one press shows it again.
+export function isHidden(id, layout = pageLayout("vibe"), page = "vibe") {
+  return layout.hidden.has(id) && !peeked().has(peekKey(id, page));
+}
+
 export function openPanel(id, page = "vibe") {
-  if (!isFolded(id, pageLayout(page), page)) return false;
+  const layout = pageLayout(page);
+  if (!isFolded(id, layout, page) && !isHidden(id, layout, page)) return false;
   peeked().add(peekKey(id, page));
   renderView();
   return true;
@@ -341,6 +354,28 @@ export function togglePanel(id, page = "vibe") {
   saveLayout(layout, page);
   renderView();
   $(`${boardOf(page)} .vp-toggle[data-panel="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+}
+
+// Take a block off the page, or put it back (`show` true). Nothing in the brain is deleted: only the layout changes.
+export function hidePanel(id, page = "vibe", show = false) {
+  const layout = pageLayout(page);
+  peeked().delete(peekKey(id, page));
+  if (show) layout.hidden.delete(id);
+  else layout.hidden.add(id);
+  saveLayout(layout, page);
+  renderView();
+  const next = show
+    ? $(`${boardOf(page)} .vp-toggle[data-panel="${CSS.escape(id)}"]`)
+    : $(`.vibe-hidden[data-page="${CSS.escape(page)}"] [data-panel="${CSS.escape(id)}"]`);
+  next?.focus({ preventScroll: true });
+}
+
+export function showAllPanels(page = "vibe") {
+  const layout = pageLayout(page);
+  for (const id of layout.hidden) peeked().delete(peekKey(id, page));
+  layout.hidden = new Set();
+  saveLayout(layout, page);
+  renderView();
 }
 
 // Move a block one place up or down among the blocks shown on this page.
@@ -365,7 +400,7 @@ function placePanel(layout, id, target, where) {
 
 export function resetLayout(page = "vibe") {
   for (const key of [...peeked()]) if (page === "vibe" ? !key.includes(":") : key.startsWith(`${page}:`)) peeked().delete(key);
-  saveLayout({ order: panelsOf(page).map((panel) => panel.id), folded: new Set(PAGES[page]?.folded || []) }, page);
+  saveLayout({ order: panelsOf(page).map((panel) => panel.id), folded: new Set(PAGES[page]?.folded || []), hidden: new Set() }, page);
   renderView();
 }
 
@@ -373,7 +408,7 @@ export function resetLayout(page = "vibe") {
 // A block may give its own `label` for the cases where the usual title would be wrong.
 export function panelsHtml(blocks, page = "vibe") {
   const layout = pageLayout(page);
-  const shown = layout.order.filter((id) => blocks[id]?.html);
+  const shown = layout.order.filter((id) => blocks[id]?.html && !isHidden(id, layout, page));
   const meta = new Map(panelsOf(page).map((panel) => [panel.id, panel]));
   let pairedWithPrevious = false;
   return shown
@@ -395,6 +430,7 @@ export function panelsHtml(blocks, page = "vibe") {
             <button type="button" class="vp-move" data-action="vibe-panel-move" ${where} data-step="-1" ${index ? "" : "disabled"} aria-label="Move ${esc(label)} up" title="Move up">&uarr;</button>
             <button type="button" class="vp-move" data-action="vibe-panel-move" ${where} data-step="1" ${index < shown.length - 1 ? "" : "disabled"} aria-label="Move ${esc(label)} down" title="Move down">&darr;</button>
             <span class="vp-grip" draggable="true" data-panel="${id}" title="Drag to move" aria-hidden="true">&#8942;&#8942;</span>
+            <button type="button" class="vp-move vp-hide" data-action="vibe-panel-hide" ${where} aria-label="Hide ${esc(label)}" title="Hide this block. It stays in the line under the blocks, where one press shows it again">&times;</button>
           </span>
         </header>
         ${folded ? "" : `<div class="vp-body">${blocks[id].html}</div>`}
@@ -403,14 +439,30 @@ export function panelsHtml(blocks, page = "vibe") {
     .join("");
 }
 
+// The blocks taken off a page, each as a button that shows it again. Always drawn when there is one, also
+// on a brain you can only read, so a hidden block can never be lost.
+function hiddenHtml(page, blocks) {
+  const layout = pageLayout(page);
+  const hidden = panelsOf(page).filter((panel) => isHidden(panel.id, layout, page));
+  if (!hidden.length) return "";
+  const where = `data-page="${page}"`;
+  return `<p class="vibe-hidden small" ${where}><span class="muted">Hidden on this page:</span>
+    ${hidden.map((panel) => {
+      const label = blocks[panel.id]?.label || panel.label;
+      return `<button type="button" class="chip" data-action="vibe-panel-show" data-panel="${panel.id}" ${where} aria-label="Show ${esc(label)} again" title="Show ${esc(label)} again">${esc(label)} <b aria-hidden="true">+</b></button>`;
+    }).join("")}
+    ${hidden.length > 1 ? `<button type="button" class="btn sm ghost" data-action="vibe-panel-show-all" ${where}>Show all</button>` : ""}
+  </p>`;
+}
+
 // A page's blocks, plus the line under them that says how to arrange them and puts the default order back.
 export function boardHtml(page, blocks) {
   const note = readOnly()
     ? ""
-    : `<p class="vibe-layout-note muted small">Fold a block with its arrow, move it with ↑ ↓ or drag ⋮⋮. ${
+    : `<p class="vibe-layout-note muted small">Fold a block with its arrow, move it with ↑ ↓ or drag ⋮⋮, hide it with ×. ${
         fileByPath(LAYOUT_FILE) ? `The layout is kept in <code>${LAYOUT_FILE}</code>, so every device shows the same.` : "Your layout is saved to the brain, so every device shows the same."
       } <button type="button" class="btn sm ghost" data-action="vibe-layout-reset" data-page="${page}">Reset layout</button></p>`;
-  return `<div class="vibe-board" data-page="${page}">${panelsHtml(blocks, page)}</div>${note}`;
+  return `<div class="vibe-board" data-page="${page}">${panelsHtml(blocks, page)}</div>${hiddenHtml(page, blocks)}${note}`;
 }
 
 // The numbers at the top of a page: `tiles` is a list of { value, label, sub, title, go }. A tile with `go`

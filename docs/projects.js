@@ -10,7 +10,7 @@
 import * as gh from "./github.js";
 import * as auth from "./auth.js";
 import { escapeHtml as esc } from "./md.js";
-import { $, icon, pageHead, plural, relativeTime, toast } from "./ui.js";
+import { $, $$, icon, pageHead, plural, relativeTime, toast } from "./ui.js";
 import { REPO_URL, createNote, readOnly, saveNote, state } from "./state.js";
 import { renderView } from "./app.js";
 import { boardHtml, dashboardHtml, recapHtml } from "./vibelayout.js";
@@ -21,6 +21,9 @@ const STALE_MS = 15 * 60 * 1000;
 const OWNER_KEY = "cairn.projects.owner";
 const SORT_KEY = "cairn.projects.sort";
 const AUTO_NOTE_KEY = "cairn.projects.autoNote";
+const GROUP_KEY = "cairn.projects.group";
+const FILTER_KEY = "cairn.projects.filter";
+const CLOSED_KEY = "cairn.projects.closedGroups";
 const HISTORY_KEY = (owner) => `cairn.projects.ranks:${owner.toLowerCase()}`;
 // Cairn itself is always in the ranking, whoever's repos you look at.
 const CAIRN = REPO_URL.replace(/^https:\/\/github\.com\//, "");
@@ -183,6 +186,121 @@ export function scoreProject(repo, { now = Date.now(), facts = null, mentions = 
   return { solid, potential, overall, tier, strengths, nextSteps: fixes.slice(0, 2), fixes, idleDays: Math.round(idle) };
 }
 
+// ============================================================ categories (pure, tested)
+
+// What a repo is about, worked out from what GitHub already says about it: its topics, its name and its
+// description. No list to keep by hand: a new repo sorts itself, and changing a repo's topics on GitHub moves it.
+// A word found in a topic counts 3, in the name 2, in the description 1 (at most 3 words of it), and the
+// category with the most wins; a tie goes to the one listed first here. Phone and web apps says how a project is
+// built, not what it is about, so it only takes a repo no other category claims.
+const CATEGORIES = [
+  { id: "ai", label: "AI and agents", words: "ai agent agents ai-agents llm llms mcp model-context-protocol claude claude-code codex opencode copilot openai ollama gpt chatbot prompt prompts prompt-injection guardrails llm-guardrails ai-safety ai-security llm-security local-llm machine-learning deep-learning embeddings interpretability activation-steering skills agent-skills ai-assistant ai-detection rag" },
+  { id: "games", label: "Games", words: "game games gaming gamedev cozy-game browser-game indie-game html5-game cooking-game driving-game life-sim open-world unity godot unreal game-analytics first-person action-adventure low-poly mobile-legends aquarium" },
+  { id: "science", label: "Engineering and science", words: "cad cadquery opencascade mechanical mechanical-engineering gd-t tolerance cfd computational-fluid-dynamics numerical-methods fortran physics mathematics computational-mathematics number-theory combinatorics erdos-problems arxiv research research-tools science simulation simulations simulator simulators 3d-printing additive-manufacturing topology-optimization 5-axis firmware embedded robotics motor battery bess energy-storage" },
+  { id: "money", label: "Money and work", words: "money finance personal-finance payroll payslip salary budget budgets expense expenses spending ledger stocks portfolio-tracker trading algorithmic-trading crypto pricing invoice saas startup waitlist referral job jobs outreach linkedin" },
+  { id: "media", label: "Media and content", words: "podcast rss news newsletter video videos short-video shorts youtube remotion transcripts photography stock-photography music content content-marketing marketing social-media instagram tiktok downloader design-system design-tokens color-palette themes theme" },
+  { id: "notes", label: "Notes and learning", words: "notes note markdown obsidian brain second-brain knowledge-management kanban adr journal diary pomodoro productivity todo spaced-repetition fsrs flashcards language-learning chinese-learning mandarin hsk" },
+  { id: "life", label: "Health and daily life", words: "health wellbeing digital-wellbeing fitness meditation habit-tracker habits accountability commitment food-diary meal-tracker cooking recipes family caregiving friendship wedding invitation interfaith" },
+  { id: "travel", label: "Travel and places", words: "travel trip trips trip-planner maps map geolocation meeting-point leaflet openstreetmap ferry" },
+  { id: "devtools", label: "Developer tools", words: "developer-tools developer-tool devtools cli git github github-action github-actions github-trending code-review merge-queue monorepo ci testing linter sdk library api vscode benchmark model-selection interpreter compiler programming-language" },
+  { id: "system", label: "Desktop and system", words: "windows linux macos system-tray tray desktop desktop-widget desktop-assistant desktop-pet powershell performance process-priority old-hardware cpu pywebview electron tauri screen-reader kernel microkernel operating-system" },
+  { id: "sites", label: "Sites and profile", words: "github-pages website site portfolio personal-website homepage landing-page blog profile awesome awesome-list documentation docs" },
+  { id: "keep", label: "Backups and settings", words: "backup backups signing keystore config github-config dotfiles settings mirror sync" },
+  // How it is built rather than what it is about: only for a repo that none of the lines above claims.
+  { id: "apps", label: "Phone and web apps", fallback: true, words: "pwa offline-first web-app webapp android android-app ios iphone phone capacitor mobile react-native flutter indexeddb webrtc peer-to-peer" },
+].map((category) => ({ ...category, words: new Set(category.words.split(" ")) }));
+const OTHER = { id: "other", label: "Other" };
+
+export const CATEGORY_LABELS = Object.fromEntries([...CATEGORIES, OTHER].map((category) => [category.id, category.label]));
+
+const wordsOf = (value) => String(value || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+// A repo -> { id, label, why }. `why` lists the words that decided it, for the tooltip on the card.
+export function categoryOf(repo) {
+  const topics = (repo.topics || []).map((topic) => String(topic).toLowerCase());
+  const name = wordsOf(repo.name);
+  const described = new Set(wordsOf(repo.description));
+  let best = null;
+  for (const category of CATEGORIES) {
+    const why = [];
+    let points = 0;
+    for (const topic of topics) {
+      // The whole topic ("cozy-game"), or one word of it ("game"). "no-ai" says what a repo is not.
+      const hit = category.words.has(topic) ? topic : /^(no|non|not|anti)-/.test(topic) ? null : topic.split("-").find((part) => category.words.has(part));
+      if (hit) {
+        points += 3;
+        why.push(topic);
+      }
+    }
+    for (const word of name) {
+      if (category.words.has(word)) {
+        points += 2;
+        why.push(word);
+      }
+    }
+    let fromText = 0;
+    for (const word of described) {
+      if (fromText < 3 && category.words.has(word)) {
+        fromText += 1;
+        points += 1;
+        why.push(word);
+      }
+    }
+    if (!points || (category.fallback && best)) continue;
+    if (!best || points > best.points) best = { id: category.id, label: category.label, points, why: [...new Set(why)].slice(0, 4) };
+  }
+  return best ? { id: best.id, label: best.label, why: best.why } : { ...OTHER, why: [] };
+}
+
+// The list as it is shown: narrowed by the filter, in the chosen order, in one list or one group per category.
+//   ranked: rankProjects(...) (each project keeps the place it has in the full ranking)
+//   sort:   "name" for A to Z; anything else keeps the order of `ranked`
+//   group:  true for one group per category, A to Z, with Other last
+//   filter: { text, categories, tiers, shown } - a choice left empty lets everything through
+// Returns { groups: [{ id, label, projects }], shown, total }.
+export function arrangeProjects(ranked, { sort = "overall", group = false, filter = {} } = {}) {
+  const text = wordsOf(filter.text);
+  const picked = (list, value) => !list?.length || list.includes(value);
+  const kept = ranked.filter((project) => {
+    const { repo, score } = project;
+    if (!picked(filter.categories, categoryOf(repo).id)) return false;
+    if (!picked(filter.tiers, score.tier)) return false;
+    if (!picked(filter.shown, repo.private ? "private" : "public")) return false;
+    if (!text.length) return true;
+    const hay = `${repo.name} ${repo.description || ""} ${(repo.topics || []).join(" ")} ${repo.language || ""}`.toLowerCase();
+    return text.every((word) => hay.includes(word));
+  });
+  const byName = (a, b) => String(a.repo.name).localeCompare(String(b.repo.name), undefined, { sensitivity: "base", numeric: true });
+  const ordered = sort === "name" ? [...kept].sort(byName) : kept;
+  if (!group) return { groups: [{ id: "all", label: "", projects: ordered }], shown: kept.length, total: ranked.length };
+  const groups = new Map();
+  for (const project of ordered) {
+    const category = categoryOf(project.repo);
+    if (!groups.has(category.id)) groups.set(category.id, { id: category.id, label: category.label, projects: [] });
+    groups.get(category.id).projects.push(project);
+  }
+  const sorted = [...groups.values()].sort((a, b) => Number(a.id === OTHER.id) - Number(b.id === OTHER.id) || a.label.localeCompare(b.label));
+  return { groups: sorted, shown: kept.length, total: ranked.length };
+}
+
+// How many projects each filter choice would show, for the chips: { categories, tiers, shown } of [value, count].
+export function filterCounts(ranked) {
+  const tally = (read) => {
+    const counts = new Map();
+    for (const project of ranked) counts.set(read(project), (counts.get(read(project)) || 0) + 1);
+    return counts;
+  };
+  const categories = tally((p) => categoryOf(p.repo).id);
+  const tiers = tally((p) => p.score.tier);
+  const shown = tally((p) => (p.repo.private ? "private" : "public"));
+  const order = Object.keys(CATEGORY_LABELS);
+  return {
+    categories: [...categories.entries()].sort((a, b) => Number(a[0] === OTHER.id) - Number(b[0] === OTHER.id) || CATEGORY_LABELS[a[0]].localeCompare(CATEGORY_LABELS[b[0]]) || order.indexOf(a[0]) - order.indexOf(b[0])),
+    tiers: ["Flagship", "Rising", "Solid", "Seedling", "Dormant", "Empty", "Archived"].filter((tier) => tiers.has(tier)).map((tier) => [tier, tiers.get(tier)]),
+    shown: ["public", "private"].filter((kind) => shown.has(kind)).map((kind) => [kind, shown.get(kind)]),
+  };
+}
+
 const SORTS = {
   overall: (p) => p.score.overall,
   solid: (p) => p.score.solid,
@@ -291,7 +409,7 @@ const local = {
   },
 };
 
-const view = { owner: null, loading: false, error: "", repos: null, facts: {}, loadedAt: 0, failedAt: 0, moves: {}, timer: null };
+const view = { owner: null, loading: false, error: "", repos: null, facts: {}, loadedAt: 0, failedAt: 0, moves: {}, timer: null, query: "" };
 
 export function defaultOwner() {
   const saved = local.get(OWNER_KEY);
@@ -367,9 +485,31 @@ function mentionCounter() {
   };
 }
 
+// A to Z is an order to read the list in, not a ranking: the places shown then are those of the overall ranking.
 function ranked() {
   if (!view.repos) return [];
   return rankProjects(view.repos, { sort: local.get(SORT_KEY, "overall"), facts: view.facts, mentions: mentionCounter() });
+}
+
+// The filter as chosen on this device. The words typed in the box are kept for this visit only.
+function chosenFilter() {
+  const saved = local.get(FILTER_KEY, {}) || {};
+  const list = (value) => (Array.isArray(value) ? value : []);
+  return { text: view.query || "", categories: list(saved.categories), tiers: list(saved.tiers), shown: list(saved.shown) };
+}
+
+// A choice that names nothing in the list any more (a category whose last repo moved) is dropped, so an old
+// choice can never leave the page empty.
+function liveFilter(list) {
+  const chosen = chosenFilter();
+  const counts = filterCounts(list);
+  const present = (key) => new Set(counts[key].map(([value]) => value));
+  return {
+    text: chosen.text,
+    categories: chosen.categories.filter((value) => present("categories").has(value)),
+    tiers: chosen.tiers.filter((value) => present("tiers").has(value)),
+    shown: chosen.shown.filter((value) => present("shown").has(value)),
+  };
 }
 
 function rememberRanks(owner, list) {
@@ -474,8 +614,12 @@ function move(delta) {
 // A repo's own page inside Cairn (repo.js): its pictures, videos, README, pushes and files.
 const repoPage = (repo) => repoHash({ owner: repo.owner?.login || repo.full_name.split("/")[0], name: repo.name });
 
-function card(project) {
+function card(project, { grouped = false } = {}) {
   const { repo, score, rank, self } = project;
+  const category = categoryOf(repo);
+  const sortedBy = category.why.length
+    ? `Sorted into ${category.label} by Cairn, from: ${category.why.join(", ")}. Change the repo's topics on GitHub to move it.`
+    : "Nothing in its topics, name or description says what it is about. Add topics on GitHub and Cairn sorts it.";
   const demo = String(repo.homepage || "").trim() || (repo.has_pages ? `https://${repo.owner?.login}.github.io/${repo.name}/` : "");
   const chips = [
     `<span>${icon("star", "sm")} ${repo.stargazers_count || 0}</span>`,
@@ -492,6 +636,7 @@ function card(project) {
         <div class="proj-title">
           <a href="${esc(repoPage(repo))}" data-repo-go title="Look inside: pictures, videos, README, pushes and files">${esc(repo.name)}</a>
           <span class="pill proj-tier tier-${score.tier.toLowerCase()}" title="${esc(TIER_HINT[score.tier] || "")}">${score.tier}</span>
+          ${grouped ? "" : `<span class="pill proj-cat" data-category="${category.id}" title="${esc(sortedBy)}">${esc(category.label)}</span>`}
           ${self ? `<span class="pill proj-self">this app</span>` : ""}
         </div>
         ${repo.description ? `<p class="proj-desc" title="${esc(repo.description)}">${esc(repo.description)}</p>` : ""}
@@ -552,6 +697,55 @@ function projectsDashboard(list) {
   ]);
 }
 
+const SORT_WORDS = { overall: "by overall", solid: "by most solid", potential: "by most potential", name: "A to Z" };
+
+function rankingSummary(list, arranged, sort, grouped) {
+  const count = arranged.shown === arranged.total ? plural(list.length, "repo") : `${arranged.shown} of ${plural(arranged.total, "repo")}`;
+  return `${count} ${SORT_WORDS[sort] || SORT_WORDS.overall}${grouped ? ", by category" : ""}`;
+}
+
+// The filter: a box for words, then one row of chips per question. Chips of one row add up (Games or Notes);
+// rows narrow each other (Games that are also Flagship). A row with a single choice is left out.
+function filterBar(list, filter, arranged, grouped) {
+  const counts = filterCounts(list);
+  const row = (key, label, name) => {
+    if (counts[key].length < 2) return "";
+    const chips = counts[key].map(([value, count]) => {
+      const on = filter[key].includes(value);
+      return `<button type="button" class="chip${on ? " on" : ""}" data-action="projects-filter" data-kind="${key}" data-value="${esc(value)}" aria-pressed="${on}">${esc(name(value))} <b>${count}</b></button>`;
+    }).join("");
+    return `<div class="proj-filter-row" role="group" aria-label="${label}"><span class="proj-filter-label">${label}</span>${chips}</div>`;
+  };
+  const active = Boolean(filter.text || filter.categories.length || filter.tiers.length || filter.shown.length);
+  const tally = active
+    ? `<span class="proj-filter-count" role="status">Showing ${arranged.shown} of ${arranged.total}</span><button type="button" class="btn sm ghost" data-action="projects-filter-clear">Show all</button>`
+    : "";
+  return `
+    <div class="proj-filters" data-grouped="${grouped ? "1" : ""}">
+      <div class="proj-filter-row">
+        <label class="sr-only" for="projects-filter">Filter the projects</label>
+        <input class="input" id="projects-filter" type="search" value="${esc(filter.text)}" placeholder="Filter: a name, a word, a language" autocomplete="off">
+        ${tally}
+      </div>
+      ${row("categories", "Category", (id) => CATEGORY_LABELS[id] || id)}
+      ${row("tiers", "Tier", (tier) => tier)}
+      ${row("shown", "Kind", (kind) => (kind === "private" ? "Private" : "Public"))}
+    </div>`;
+}
+
+function listHtml(arranged, grouped) {
+  if (!arranged.shown) {
+    return `<div class="card"><div class="empty-state">${icon("search")}<h3>Nothing matches the filter</h3><p>${arranged.total} ${arranged.total === 1 ? "project is" : "projects are"} ranked. <button type="button" class="link-button" data-action="projects-filter-clear">Show all</button></p></div></div>`;
+  }
+  if (!grouped) return `<ol class="proj-list">${arranged.groups[0].projects.map((project) => card(project)).join("")}</ol>`;
+  const closed = new Set(local.get(CLOSED_KEY, []) || []);
+  return arranged.groups.map((group) => `
+    <details class="proj-group" data-proj-group="${group.id}"${closed.has(group.id) ? "" : " open"}>
+      <summary title="Sorted by Cairn from each repo's topics, name and description"><span class="proj-group-name">${esc(group.label)}</span><span class="count">${group.projects.length}</span></summary>
+      <ol class="proj-list">${group.projects.map((project) => card(project, { grouped: true })).join("")}</ol>
+    </details>`).join("");
+}
+
 export function projectsView() {
   // An address that names a repo (#/projects/juw12/cairn/…) shows that repo's page instead of the ranking.
   const repo = parseRepoHash(location.hash);
@@ -559,10 +753,15 @@ export function projectsView() {
   if (!view.owner) view.owner = defaultOwner();
   ensureFresh();
   const sort = local.get(SORT_KEY, "overall");
+  const grouped = Boolean(local.get(GROUP_KEY, false));
   const list = ranked();
+  const filter = liveFilter(list);
+  const arranged = arrangeProjects(list, { sort, group: grouped, filter });
   const autoNote = local.get(AUTO_NOTE_KEY, false);
-  const sortButton = (key, label) =>
-    `<button type="button" class="${sort === key ? "on" : ""}" data-action="projects-sort" data-sort="${key}" aria-pressed="${sort === key}">${label}</button>`;
+  const sortButton = (key, label, title = "") =>
+    `<button type="button" class="${sort === key ? "on" : ""}" data-action="projects-sort" data-sort="${key}" aria-pressed="${sort === key}"${title ? ` title="${title}"` : ""}>${label}</button>`;
+  const groupButton = (on, label) =>
+    `<button type="button" class="${grouped === on ? "on" : ""}" data-action="projects-group" data-group="${on ? "1" : ""}" aria-pressed="${grouped === on}">${label}</button>`;
   const status = view.loading
     ? "Ranking…"
     : view.loadedAt
@@ -573,23 +772,25 @@ export function projectsView() {
     ? `<div class="card"><div class="empty-state">${icon("github")}<h3>Couldn't load the repos</h3><p>${esc(view.error)}</p></div></div>`
     : !list.length
       ? `<div class="card"><div class="empty-state">${icon("github")}<h3>${view.loading ? "Fetching repos from GitHub…" : "No repos yet"}</h3><p>Every public repo of @${esc(view.owner)} shows up here, ranked.</p></div></div>`
-      : `<ol class="proj-list">${list.map(card).join("")}</ol>`;
+      : `${filterBar(list, filter, arranged, grouped)}${listHtml(arranged, grouped)}`;
   const toolbar = `
     <form class="proj-toolbar" id="projects-form" autocomplete="off">
       <label class="sr-only" for="projects-owner">GitHub user or organisation</label>
       <input class="input" id="projects-owner" name="owner" value="${esc(view.owner)}" placeholder="GitHub user, e.g. juw12" title="A GitHub user ranks their repos. user/repo opens that one repo.">
       <button class="btn sm" type="submit">Rank</button>
-      <div class="segmented" role="group" aria-label="Order by">${sortButton("overall", "Overall")}${sortButton("solid", "Most solid")}${sortButton("potential", "Most potential")}</div>
+      <div class="segmented" role="group" aria-label="Order by">${sortButton("overall", "Overall")}${sortButton("solid", "Most solid")}${sortButton("potential", "Most potential")}${sortButton("name", "A to Z", "By name. The number on each project stays its place in the overall ranking")}</div>
+      <div class="segmented" role="group" aria-label="Show as">${groupButton(false, "One list")}${groupButton(true, "By category")}</div>
       <label class="proj-auto"><input type="checkbox" data-projects-auto ${autoNote ? "checked" : ""} ${readOnly() ? "disabled" : ""}> Keep a ranking note in the brain</label>
       <span class="muted proj-status">${status}</span>
     </form>`;
   const blocks = {
     dashboard: list.length ? { html: projectsDashboard(list), summary: `${plural(list.length, "repo")} · top ${top.repo.name} ${top.score.overall}` } : null,
     recap: list.length ? { html: projectsRecap(list), summary: `focus: ${top.repo.name}` } : null,
-    ranking: { html: `${toolbar}${body}`, summary: list.length ? `${plural(list.length, "repo")} by ${sort}` : view.loading ? "ranking…" : "" },
+    ranking: { html: `${toolbar}${body}`, summary: list.length ? rankingSummary(list, arranged, sort, grouped) : view.loading ? "ranking…" : "" },
     scoring: {
-      html: `<p class="muted proj-foot">Solid: live demo, tests, CI, codebase size, months of upkeep, README, license, packaging. Potential: stars, recent pushes, how often your notes mention it, whether people can try it, forks. Overall weighs the stronger side more, so a project can top the list by being either very solid or very promising. Forks, archived repos and profile/settings repos are left out.</p>`,
-      summary: "what Solid, Potential and Overall count",
+      html: `<p class="muted proj-foot">Solid: live demo, tests, CI, codebase size, months of upkeep, README, license, packaging. Potential: stars, recent pushes, how often your notes mention it, whether people can try it, forks. Overall weighs the stronger side more, so a project can top the list by being either very solid or very promising. Forks, archived repos and profile/settings repos are left out.</p>
+        <p class="muted proj-foot">Categories: Cairn sorts each repo by itself from its topics on GitHub, its name and its description (a topic counts most). Point at the category on a project to see which words decided it. To move a project, change its topics on GitHub. A to Z orders by name and keeps each project's place in the overall ranking as its number.</p>`,
+      summary: "what Solid, Potential and Overall count, and how the categories are chosen",
     },
   };
   return `
@@ -603,6 +804,17 @@ export function projectsView() {
     ${boardHtml("projects", blocks)}`;
 }
 
+// On a phone a row of chips scrolls sideways. Drawing the page again must not throw a row back to its start,
+// or the chip just pressed would jump out of sight.
+function redrawKeepingRows() {
+  const places = $$(".proj-filter-row[aria-label]").map((row) => [row.getAttribute("aria-label"), row.scrollLeft]);
+  renderView();
+  for (const [label, left] of places) {
+    const row = $(`.proj-filter-row[aria-label="${label}"]`);
+    if (row && left) row.scrollLeft = left;
+  }
+}
+
 // Clicks and the owner form (called from the app's global handlers).
 export async function projectsAction(action, target) {
   if (action === "projects-refresh") {
@@ -612,6 +824,41 @@ export async function projectsAction(action, target) {
   if (action === "projects-sort") {
     local.set(SORT_KEY, target.dataset.sort);
     return renderView();
+  }
+  if (action === "projects-group") {
+    local.set(GROUP_KEY, Boolean(target.dataset.group));
+    return renderView();
+  }
+  if (action === "projects-filter") {
+    const kind = target.dataset.kind;
+    if (!["categories", "tiers", "shown"].includes(kind)) return;
+    const chosen = liveFilter(ranked());
+    const value = target.dataset.value;
+    const next = chosen[kind].includes(value) ? chosen[kind].filter((other) => other !== value) : [...chosen[kind], value];
+    local.set(FILTER_KEY, { categories: chosen.categories, tiers: chosen.tiers, shown: chosen.shown, [kind]: next });
+    redrawKeepingRows();
+    return $(`[data-action="projects-filter"][data-kind="${kind}"][data-value="${CSS.escape(value)}"]`)?.focus({ preventScroll: true });
+  }
+  if (action === "projects-filter-clear") {
+    view.query = "";
+    local.set(FILTER_KEY, {});
+    return renderView();
+  }
+  if (action === "projects-filter-text") {
+    // Typing redraws the list, so the box gets its focus and caret back.
+    view.query = target.value;
+    const caret = target.selectionStart;
+    redrawKeepingRows();
+    const input = $("#projects-filter");
+    input?.focus({ preventScroll: true });
+    if (input && caret !== null) input.setSelectionRange(caret, caret);
+    return;
+  }
+  if (action === "projects-group-toggle") {
+    const closed = new Set(local.get(CLOSED_KEY, []) || []);
+    if (target.open) closed.delete(target.dataset.projGroup);
+    else closed.add(target.dataset.projGroup);
+    return local.set(CLOSED_KEY, [...closed]);
   }
   if (action === "projects-note") {
     if (readOnly()) return toast("This brain is read-only.");

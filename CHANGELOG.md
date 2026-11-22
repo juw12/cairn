@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 110 (2026-11-22): Projects sort themselves into categories, read A to Z, and can be filtered; any block can be hidden
+
+- Projects: Cairn sorts every repo into a category by itself (AI and agents, Games, Engineering and science, Money and work, and nine more), from the repo's topics on GitHub, its name and its description. Each project shows its category; point at it to see which words decided it. To move a project, change its topics on GitHub ([#107](https://github.com/juw12/cairn/pull/107))
+- Projects: next to Overall, Most solid and Most potential there is A to Z. It orders by name and keeps each project's place in the overall ranking as its number ([#107](https://github.com/juw12/cairn/pull/107))
+- Projects: One list or By category. By category gives one group per category with its count; a group folds with its arrow and stays the way you leave it ([#107](https://github.com/juw12/cairn/pull/107))
+- Projects: a filter. Type a name, a word or a language, and press chips for Category, Tier and Public or Private. Chips of one row add up, rows narrow each other, Show all clears it. The choice is kept on the device; the numbers and the recap above still count every project ([#107](https://github.com/juw12/cairn/pull/107))
+- Every block of every page (Today, Vibe, Projects, People, Proof, Journal and the others) has a cross next to its arrows that hides it. Hidden blocks are named in a line under the blocks: press one to show it again, or Show all. Reset layout brings everything back. Nothing in the brain is deleted by it, and the choice is kept in CAIRN-LAYOUT.md, so every device shows the same ([#107](https://github.com/juw12/cairn/pull/107))
+- On a phone: the arrows and the cross on a block are 40 px instead of 26, links on a project are tall enough for a finger, and the capture bar and the fields on Projects and the welcome page no longer make Safari zoom in ([#107](https://github.com/juw12/cairn/pull/107))
+
 ## Build 109 (2026-11-22): A Mac copy installed without Git says that it does not update itself
 
 - On a Mac without Git the installer unpacks an archive, and that copy never takes a new build. Settings and Version history now say so, with the install line and a button that copies it, where Settings said updates come with your package manager ([#106](https://github.com/juw12/cairn/pull/106))

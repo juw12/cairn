@@ -29,7 +29,7 @@ import { initHoverPreview } from "./hover.js";
 import { initRichContent } from "./rich.js";
 import { canvasCount, canvasView, flushCanvas, wireCanvas } from "./canvas.js";
 import { autopilotCount, autopilotView, jobAction, previewBrief, queueDone, queueItems, queueToggle, removePro, selectJob, toggleEnabled, wireAutopilot } from "./autopilot.js";
-import { movePanel, openPanel, resetLayout, togglePanel, wirePanels } from "./vibelayout.js";
+import { hidePanel, movePanel, openPanel, resetLayout, showAllPanels, togglePanel, wirePanels } from "./vibelayout.js";
 import { pickChartDay, setChartMetric, setChartRange, showNeeds, wireHome } from "./home.js";
 import { renameDevice, sayHandoff, sendHandoff, toggleHandoff, toggleHandoffForm, toggleSettled } from "./handoffs.js";
 import { projectsAction, projectsView, submitProjectsOwner } from "./projects.js";
@@ -422,6 +422,9 @@ function wireGlobal() {
       },
       "vibe-panel-fold": () => togglePanel(actionEl.dataset.panel, actionEl.dataset.page || "vibe"),
       "vibe-panel-move": () => movePanel(actionEl.dataset.panel, actionEl.dataset.step, actionEl.dataset.page || "vibe"),
+      "vibe-panel-hide": () => hidePanel(actionEl.dataset.panel, actionEl.dataset.page || "vibe"),
+      "vibe-panel-show": () => hidePanel(actionEl.dataset.panel, actionEl.dataset.page || "vibe", true),
+      "vibe-panel-show-all": () => showAllPanels(actionEl.dataset.page || "vibe"),
       "vibe-layout-reset": () => resetLayout(actionEl.dataset.page || "vibe"),
       "vibe-row": () => toggleRow(actionEl.dataset.path),
       "vibe-day": () => toggleSessionDay(actionEl.dataset.day),
@@ -438,6 +441,9 @@ function wireGlobal() {
       "vibe-why": () => toggleWhy(actionEl.dataset.why),
       "projects-refresh": () => projectsAction("projects-refresh", actionEl),
       "projects-sort": () => projectsAction("projects-sort", actionEl),
+      "projects-group": () => projectsAction("projects-group", actionEl),
+      "projects-filter": () => projectsAction("projects-filter", actionEl),
+      "projects-filter-clear": () => projectsAction("projects-filter-clear", actionEl),
       "projects-note": () => projectsAction("projects-note", actionEl),
       "copy-context": () => copyText(core.contextPack(state.notes, state.info.project, today()), "Context pack copied"),
       "save-context": saveContext,
@@ -517,6 +523,8 @@ function wireGlobal() {
 
   // Folder tree: remember which folders were collapsed across re-renders.
   document.addEventListener("toggle", (event) => {
+    // Projects by category: a category folded here stays folded.
+    if (event.target.matches?.("details[data-proj-group]")) return projectsAction("projects-group-toggle", event.target);
     const folder = event.target.closest?.("details[data-folder]");
     if (!folder) return;
     state.closedFolders ||= new Set();
@@ -533,6 +541,7 @@ function wireGlobal() {
   });
 
   document.addEventListener("input", (event) => {
+    if (event.target.id === "projects-filter") projectsAction("projects-filter-text", event.target);
     if (event.target.id === "notes-search") {
       state.notesQuery = event.target.value;
       const position = event.target.selectionStart;

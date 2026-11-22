@@ -334,6 +334,226 @@ class NotionAndProjectsTests(unittest.TestCase):
         self.assertEqual(order(), ["dashboard", "recap", "ranking", "scoring"])
         self.assertEqual(self.errors, [])
 
+    # ------------------------------------------------------------------ categories, A to Z, the filter, hidden blocks
+
+    def test_categories_come_from_topics_name_and_description(self):
+        page = self.open()
+        result = page.evaluate(
+            """async ([repos, now]) => {
+                const P = await import('./projects.js');
+                const cat = (repo) => P.categoryOf(repo).id;
+                const at = Date.parse(now);
+                const mixed = [
+                    { ...repos[0], name: 'Zeta', full_name: 'juw12/Zeta', topics: ['game'], private: true },
+                    { ...repos[1], name: 'alpha', full_name: 'juw12/alpha', topics: ['llm'], description: 'An agent in Rust', language: 'Rust' },
+                    { ...repos[1], name: 'Beta', full_name: 'juw12/Beta', topics: ['cozy-game'] },
+                    { ...repos[1], name: 'gamma10', full_name: 'juw12/gamma10', topics: [] },
+                    { ...repos[1], name: 'gamma2', full_name: 'juw12/gamma2', topics: [] },
+                ];
+                const ranked = P.rankProjects(mixed, { now: at, keep: 'nobody/nothing' });
+                const names = (options) => P.arrangeProjects(ranked, options).groups.map((g) => [g.label, g.projects.map((p) => p.repo.name)]);
+                const az = P.arrangeProjects(ranked, { sort: 'name' }).groups[0].projects;
+                return {
+                    topic: cat({ name: 'x', topics: ['unity'], description: 'A second brain in markdown' }),
+                    wholeTopic: cat({ name: 'x', topics: ['cozy-game'] }),
+                    name: cat({ name: 'teduh-signing', topics: [] }),
+                    described: cat({ name: 'x', description: 'Family ledger for the phone' }),
+                    builtAs: cat({ name: 'x', topics: ['pwa', 'offline-first'] }),
+                    aboutBeatsBuiltAs: cat({ name: 'x', topics: ['pwa', 'offline-first', 'capacitor', 'game'] }),
+                    notThat: cat({ name: 'x', topics: ['no-ai', 'pwa'] }),
+                    unknown: P.categoryOf({ name: 'x', topics: ['zzz'], description: 'Fast new idea' }),
+                    why: P.categoryOf({ name: 'tolstack', topics: ['cad', 'gd-t'], description: '' }),
+                    labels: Object.values(P.CATEGORY_LABELS),
+                    ranks: ranked.map((p) => p.rank),
+                    az: az.map((p) => p.repo.name),
+                    azKeepsRanks: az.every((p) => p.rank === ranked.find((r) => r.repo.name === p.repo.name).rank),
+                    grouped: names({ sort: 'name', group: true }),
+                    games: names({ filter: { categories: ['games'] } }),
+                    gamesOrAi: P.arrangeProjects(ranked, { filter: { categories: ['games', 'ai'] } }).shown,
+                    privateGames: names({ sort: 'name', filter: { categories: ['games'], shown: ['private'] } }),
+                    text: names({ sort: 'name', filter: { text: 'rust agent' } }),
+                    nothing: P.arrangeProjects(ranked, { filter: { text: 'no such word' } }),
+                    counts: P.filterCounts(ranked),
+                };
+            }""",
+            [REPOS, DAY],
+        )
+        # A topic counts more than the description; a whole topic and a word of it both count.
+        self.assertEqual(result["topic"], "games")
+        self.assertEqual(result["wholeTopic"], "games")
+        self.assertEqual(result["name"], "keep")
+        self.assertEqual(result["described"], "money")
+        # How a project is built only decides when nothing says what it is about.
+        self.assertEqual(result["builtAs"], "apps")
+        self.assertEqual(result["aboutBeatsBuiltAs"], "games")
+        self.assertEqual(result["notThat"], "apps", "no-ai is not an AI project")
+        self.assertEqual(result["unknown"], {"id": "other", "label": "Other", "why": []})
+        self.assertEqual(result["why"], {"id": "science", "label": "Engineering and science", "why": ["cad", "gd-t"]})
+        self.assertEqual(len(result["labels"]), len(set(result["labels"])), "every category has its own name")
+        # A to Z ignores capitals, reads numbers as numbers and keeps each project's place in the ranking.
+        self.assertEqual(result["ranks"], [1, 2, 3, 4, 5])
+        self.assertEqual(result["az"], ["alpha", "Beta", "gamma2", "gamma10", "Zeta"])
+        self.assertTrue(result["azKeepsRanks"])
+        # Groups are in A to Z order with Other last.
+        self.assertEqual(result["grouped"], [["AI and agents", ["alpha"]], ["Games", ["Beta", "Zeta"]], ["Other", ["gamma2", "gamma10"]]])
+        # Chips of one row add up; rows narrow each other; every typed word must be found.
+        self.assertEqual(sorted(result["games"][0][1]), ["Beta", "Zeta"])
+        self.assertEqual(result["gamesOrAi"], 3)
+        self.assertEqual(result["privateGames"], [["", ["Zeta"]]])
+        self.assertEqual(result["text"], [["", ["alpha"]]])
+        self.assertEqual(result["nothing"]["shown"], 0)
+        self.assertEqual(result["nothing"]["total"], 5)
+        self.assertEqual(result["counts"]["categories"], [["ai", 1], ["games", 2], ["other", 2]])
+        self.assertEqual(result["counts"]["shown"], [["public", 4], ["private", 1]])
+
+    def test_projects_list_a_to_z_by_category_and_filtered(self):
+        page = self.open()
+        page.click('#nav [data-hub="build"]')
+        page.click('.hub-tabs [data-go="projects"]')
+        page.wait_for_selector(".proj-card")
+        names = lambda: page.eval_on_selector_all(".proj-card .proj-title a", "els => els.map((e) => e.textContent)")
+        ranks = lambda: page.eval_on_selector_all(".proj-card .proj-rank > span", "els => els.map((e) => e.textContent)")
+        self.assertEqual(names(), ["cairn", "rocket", "old-thing"])
+        # Each card says its category, and why.
+        pill = page.locator('.proj-card[data-project="juw12/cairn"] .proj-cat')
+        self.assertEqual(pill.inner_text(), "Notes and learning")
+        self.assertIn("obsidian, notes", pill.get_attribute("title"))
+
+        # A to Z: by name, with the places of the overall ranking as the numbers. No new GitHub calls.
+        before = len(self.calls)
+        page.click('[data-action="projects-sort"][data-sort="name"]')
+        self.assertEqual(names(), ["cairn", "old-thing", "rocket"])
+        self.assertEqual(ranks(), ["1", "3", "2"])
+        self.assertIn("Focus pick: cairn", page.inner_text(".proj-lead"), "the recap still follows the ranking")
+
+        # By category: one folding group each, A to Z, Other last. The heading replaces the pill on the cards.
+        page.click('[data-action="projects-group"][data-group="1"]')
+        groups = lambda: page.eval_on_selector_all(".proj-group", "els => els.map((e) => [e.dataset.projGroup, e.querySelector('.count').textContent, e.open])")
+        self.assertEqual(groups(), [["notes", "1", True], ["other", "2", True]])
+        self.assertEqual(page.locator(".proj-cat").count(), 0)
+        self.assertEqual(names(), ["cairn", "old-thing", "rocket"])
+        # A category folded here stays folded when the page is drawn again.
+        page.click('.proj-group[data-proj-group="other"] > summary')
+        page.wait_for_function("() => (localStorage.getItem('cairn.projects.closedGroups') || '').includes('other')")
+        page.click('[data-action="projects-sort"][data-sort="overall"]')
+        self.assertEqual(groups(), [["notes", "1", True], ["other", "2", False]])
+        page.click('.proj-group[data-proj-group="other"] > summary')
+
+        # Filter by category: a chip per category with its count.
+        chips = page.eval_on_selector_all('[data-action="projects-filter"][data-kind="categories"]', "els => els.map((e) => e.innerText.replace(/\\s+/g, ' ').trim())")
+        self.assertEqual(chips, ["Notes and learning 1", "Other 2"])
+        page.click('[data-action="projects-filter"][data-value="other"]')
+        self.assertEqual(names(), ["rocket", "old-thing"])
+        self.assertEqual(page.inner_text(".proj-filter-count"), "Showing 2 of 3")
+        self.assertEqual(page.get_attribute('[data-action="projects-filter"][data-value="other"]', "aria-pressed"), "true")
+        # A second row narrows the first.
+        page.click('[data-action="projects-filter"][data-kind="tiers"][data-value="Dormant"]')
+        self.assertEqual(names(), ["old-thing"])
+        # The numbers above still count every project.
+        self.assertTrue(page.inner_text('[data-page="projects"][data-panel="dashboard"] .figure').startswith("3"))
+        # The choice is kept when the page is opened again.
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(".proj-card")
+        self.assertEqual(names(), ["old-thing"])
+        page.click('[data-action="projects-filter-clear"]')
+        self.assertEqual(len(names()), 3)
+        self.assertEqual(page.locator(".proj-filter-count").count(), 0)
+
+        # Typing narrows as you type and the box keeps the caret.
+        page.click('[data-action="projects-group"][data-group=""]')
+        page.click("#projects-filter")
+        page.keyboard.type("rock")
+        self.assertEqual(names(), ["rocket"])
+        self.assertEqual(page.evaluate("() => [document.activeElement.id, document.activeElement.selectionStart]"), ["projects-filter", 4])
+        page.keyboard.type("zz")
+        self.assertEqual(page.locator(".proj-card").count(), 0)
+        self.assertIn("Nothing matches the filter", page.inner_text('[data-page="projects"][data-panel="ranking"]'))
+        page.click('.empty-state [data-action="projects-filter-clear"]')
+        self.assertEqual(len(names()), 3)
+        self.assertEqual(len(self.calls), before, "ordering, grouping and filtering ask GitHub nothing")
+        self.assertEqual(self.errors, [])
+
+    def test_a_block_can_be_hidden_and_shown_again(self):
+        page = self.open()
+        page.click('#nav [data-hub="build"]')
+        page.click('.hub-tabs [data-go="projects"]')
+        page.wait_for_selector(".proj-card")
+        board = '.vibe-board[data-page="projects"]'
+        hidden_line = '.vibe-hidden[data-page="projects"]'
+        order = lambda: page.eval_on_selector_all(f"{board} .vibe-panel", "els => els.map((e) => e.dataset.panel)")
+        layout = lambda: page.evaluate("() => window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || ''")
+        chips = lambda: page.eval_on_selector_all(f"{hidden_line} .chip", "els => els.map((e) => e.textContent.replace(/\\s+/g, ' ').trim())")
+        self.assertEqual(page.locator(hidden_line).count(), 0, "nothing hidden: no line")
+        # Every block has a Hide button.
+        self.assertEqual(page.locator(f"{board} .vp-hide").count(), 4)
+
+        page.click(f'{board} .vp-hide[data-panel="dashboard"]')
+        self.assertEqual(order(), ["recap", "ranking", "scoring"])
+        self.assertEqual(chips(), ["Dashboard +"])
+        self.assertEqual(page.evaluate("() => document.activeElement.dataset.panel"), "dashboard", "focus goes to the chip that brings it back")
+        page.wait_for_function("() => /^projects-hidden: dashboard$/m.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        self.assertRegex(layout(), r"(?m)^projects-order: dashboard, recap, ranking, scoring$", "a hidden block keeps its place")
+        self.assertNotRegex(layout(), r"(?m)^vibe-hidden:", "a page with nothing hidden gets no such line")
+
+        # A second one joins the line. Another page is untouched.
+        page.click(f'{board} .vp-hide[data-panel="scoring"]')
+        self.assertEqual(order(), ["recap", "ranking"])
+        self.assertEqual(chips(), ["Dashboard +", "How the score works +"])
+        page.click('.hub-tabs [data-go="vibe"]')
+        page.wait_for_selector('.vibe-board[data-page="vibe"] .vibe-panel')
+        self.assertEqual(page.locator('.vibe-hidden[data-page="vibe"]').count(), 0)
+        page.click('.hub-tabs [data-go="projects"]')
+        page.wait_for_selector(".proj-card")
+
+        # Hidden blocks stay hidden after a reload (the brain file carries it).
+        page.wait_for_function("() => /^projects-hidden: dashboard, scoring$/m.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(".proj-card")
+        self.assertEqual(order(), ["recap", "ranking"])
+
+        # One press shows a block again, in the place it had.
+        page.click(f'{hidden_line} [data-action="vibe-panel-show"][data-panel="dashboard"]')
+        self.assertEqual(order(), ["dashboard", "recap", "ranking"])
+        page.wait_for_function("() => /^projects-hidden: scoring$/m.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        # Show all, and Reset layout, bring everything back.
+        page.click(f'{board} .vp-hide[data-panel="recap"]')
+        page.click(f'{hidden_line} [data-action="vibe-panel-show-all"]')
+        self.assertEqual(order(), ["dashboard", "recap", "ranking", "scoring"])
+        self.assertEqual(page.locator(hidden_line).count(), 0)
+        page.click(f'{board} .vp-hide[data-panel="ranking"]')
+        self.assertEqual(page.locator(".proj-card").count(), 0)
+        page.click('[data-action="vibe-layout-reset"][data-page="projects"]')
+        page.wait_for_selector(".proj-card")
+        self.assertEqual(order(), ["dashboard", "recap", "ranking", "scoring"])
+        page.wait_for_function("() => !/^projects-hidden:/m.test(window.cairn.state.files.find((f) => f.path === 'CAIRN-LAYOUT.md')?.text || '')")
+        self.assertEqual(self.errors, [])
+
+    def test_layout_file_reads_and_keeps_hidden_lines(self):
+        page = self.open()
+        result = page.evaluate(
+            """async () => {
+                const L = await import('./vibelayout.js');
+                const text = L.layoutText({
+                    vibe: { order: ['recap', 'overview'], folded: ['hook'], hidden: ['models', 'skills'] },
+                    board: { order: ['dashboard', 'recap', 'cards'], folded: [] },
+                }, 'future-order: a, b\\nfuture-hidden: b\\n');
+                return {
+                    text,
+                    vibe: L.parseLayout(text, 'vibe'),
+                    board: L.parseLayout(text, 'board'),
+                    old: L.parseLayout('vibe-order: recap\\nvibe-folded: hook\\n', 'vibe'),
+                    onlyHidden: L.parseLayout('proof-hidden: publish, nonsense\\n', 'proof'),
+                };
+            }"""
+        )
+        self.assertIn("vibe-hidden: models, skills\n", result["text"])
+        self.assertNotIn("board-hidden", result["text"])
+        self.assertIn("future-order: a, b\nfuture-hidden: b", result["text"], "lines of a page this build does not know are carried over")
+        self.assertEqual(result["vibe"], {"order": ["recap", "overview"], "folded": ["hook"], "hidden": ["models", "skills"]})
+        self.assertEqual(result["board"]["hidden"], [])
+        self.assertEqual(result["old"], {"order": ["recap"], "folded": ["hook"], "hidden": []}, "a file written by an older build still reads")
+        self.assertEqual(result["onlyHidden"], {"order": [], "folded": [], "hidden": ["publish"]})
+
     def test_database_block_renders_edits_and_switches_view(self):
         page = self.open()
         page.evaluate(
