@@ -6,11 +6,12 @@
       "date": "2026-11-22",
       "title": "Let another computer do the work of this one's chats, and take it back",
       "changes": [
-        "Vibe has a new block, Chats' work, with one chip per computer of your brain. Press another computer and the assistants on this one stop doing the work themselves: each chat leaves its work for that computer as a handoff, follows the answers and checks the result. Press This computer and they do it themselves again",
-        "Nothing is interrupted and nothing is sent by the switch itself. A running chat is told at its next step (cairn vibe log says so), a new chat when it starts (the memory skill's rules begin with it). What only this computer can do is still done here",
-        "One chat alone: a live session of this computer has Hand to on its row in the live recap. Cairn writes the handoff itself, from the session's goal and its log so far, and marks the session, which every device then shows as handed. Take back on the same row closes that conversation so the other computer stops",
-        "What moves is the work, not the conversation: an AI app keeps its chats to itself. The other computer does the work when a chat there picks the handoff up",
-        "From a terminal: cairn vibe hand (where the work goes), cairn vibe hand NAME, cairn vibe hand here, and --session NAME for one session"
+        "Vibe has a new block, Chats' work, with one chip per computer of your brain. Press another computer and the assistants on this one stop doing the work themselves: each chat leaves its work for that computer as a handoff, follows the answers and checks the result. Press This computer and they do it themselves again (#98)",
+        "Nothing is interrupted and nothing is sent by the switch itself. A running chat is told at its next step (cairn vibe log says so), a new chat when it starts (the memory skill's rules begin with it). What only this computer can do is still done here (#98)",
+        "One chat alone: a live session of this computer has Hand to on its row in the live recap. Cairn writes the handoff itself, from the session's goal and its log so far, and marks the session, which every device then shows as handed. Take back on the same row closes that conversation so the other computer stops (#98)",
+        "What moves is the work, not the conversation: an AI app keeps its chats to itself. The other computer does the work when a chat there picks the handoff up (#98)",
+        "From a terminal: cairn vibe hand (where the work goes), cairn vibe hand NAME, cairn vibe hand here, and --session NAME for one session (#98)",
+        "Version history no longer turns every apostrophe in a change into a link to pull request 39 (#98)"
       ]
     },
     {

@@ -15,9 +15,19 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cairn import cli, connect, core, handoff, handover, vibe
-from cairn.brain import Brain
-from cairn.server import make_server
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from webserver import launch_browser  # noqa: E402
+
+from cairn import cli, connect, core, handoff, handover, vibe  # noqa: E402
+from cairn.brain import Brain  # noqa: E402
+from cairn.server import make_server  # noqa: E402
+
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover
+    if os.environ.get("CAIRN_REQUIRE_BROWSER"):
+        raise
+    sync_playwright = None
 
 MAC = "MacBook Pro 15,4"
 ASUS = "ASUS EXPERTBOOK P5405CSA"
@@ -380,6 +390,92 @@ class ServerTests(HandoverCase):
         status, data = self.call("POST", "/api/vibe/hand", {"to": "thinkpad"})
         self.assertEqual(status, 400)
         self.assertIn("No computer called", data["error"])
+
+
+@unittest.skipUnless(sync_playwright, "needs playwright")
+class PageTests(HandoverCase):
+    """The Vibe page: one chip per computer for all chats, and Hand to / Take back on a live row."""
+
+    def setUp(self):
+        super().setUp()
+        self.server = make_server(self.brain, port=0)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.pw = sync_playwright().start()
+        self.addCleanup(self.pw.stop)
+        self.browser = launch_browser(self.pw)
+        self.addCleanup(self.browser.close)
+        self.errors: list[str] = []
+        deliver = mock.patch.object(handoff, "deliver", return_value="")  # no remote here to send to
+        deliver.start()
+        self.addCleanup(deliver.stop)
+
+    def open(self, viewport=(1280, 1200)):
+        page = self.browser.new_page(viewport={"width": viewport[0], "height": viewport[1]})
+        page.add_init_script("window.CAIRN_TEST_POLL_MS = 150")
+        page.on("console", lambda message: self.errors.append(message.text) if message.type == "error" else None)
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        page.goto(f"http://127.0.0.1:{self.server.server_address[1]}/#/vibe")  # by its address: a phone has no sidebar to click
+        page.wait_for_selector(".vibe-hand")
+        return page
+
+    def test_one_press_hands_all_chats_over_and_one_takes_it_back(self):
+        page = self.open()
+        block = page.locator(".vibe-hand")
+        self.assertEqual(block.locator(".chip").all_inner_texts(), ["This computer", ASUS])
+        self.assertEqual(block.locator(".chip.on").inner_text(), "This computer")
+        self.assertIn("done on this computer", block.locator("header").inner_text())
+
+        block.locator(".chip", has_text=ASUS).click()
+        page.wait_for_function("document.querySelector('.vibe-hand .chip.on')?.textContent !== 'This computer'")
+        self.assertEqual(handover.status(self.brain)["to"], ASUS)
+        self.assertIn(f"goes to {ASUS} since", page.locator(".vibe-hand header").inner_text())
+        self.assertEqual(self.threads(), [], "the switch itself sends nothing")
+
+        page.locator(".vibe-hand .chip", has_text="This computer").click()
+        page.wait_for_function("document.querySelector('.vibe-hand .chip.on')?.textContent === 'This computer'")
+        self.assertEqual(handover.status(self.brain)["to"], "")
+        self.assertEqual(self.errors, [])
+
+    def test_a_switch_made_in_a_terminal_shows_on_the_page(self):
+        page = self.open()
+        with mock.patch.object(handover, "SOON_TTL_SECONDS", 0):
+            handover.switch(self.brain, ASUS)
+            page.wait_for_function("document.querySelector('.vibe-hand .chip.on')?.textContent !== 'This computer'")
+        self.assertEqual(self.errors, [])
+
+    def test_a_row_is_handed_after_a_confirmation_and_taken_back(self):
+        for viewport in ((1280, 1200), (390, 844)):
+            with self.subTest(viewport=viewport):
+                page = self.open(viewport)
+                mine = page.locator(".rc-row", has_text="Neon Coast 1.6")
+                theirs = page.locator(".rc-row", has_text="Lab writer")
+                self.assertEqual(mine.locator("[data-action=vibe-hand]").all_inner_texts(), [f"Hand to {ASUS}"])
+                self.assertEqual(theirs.count(), 1)
+                self.assertEqual(theirs.locator("[data-action=vibe-hand]").count(), 0, "another computer's chat is not this one's to hand")
+
+                mine.locator("[data-action=vibe-hand]").click()
+                confirm = page.get_by_role("button", name=f"Hand to {ASUS}", exact=True).last
+                self.assertIn("what moves is the work", page.locator(".modal").inner_text())
+                confirm.click()
+                page.wait_for_selector(".rc-row .rc-handed")
+                (entry,) = handover.status(self.brain)["sessions"]
+                self.assertEqual((entry["session"], entry["to"]), (self.session, ASUS))
+                self.assertEqual(len([thread for thread in self.threads() if thread["open"]]), 1)
+                mine = page.locator(".rc-row", has_text="Neon Coast 1.6")
+                self.assertEqual(mine.locator(".rc-handed").inner_text(), f"handed to {ASUS}")
+                self.assertEqual(mine.locator("[data-action=vibe-hand]").all_inner_texts(), [f"Take back from {ASUS}"])
+                self.assertEqual(page.locator(".vibe-hand .hand-list li").count(), 1)
+                # nothing runs off the side of a phone
+                self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), viewport[0])
+
+                mine.locator("[data-action=vibe-hand]").click()
+                page.wait_for_function("!document.querySelector('.rc-row .rc-handed')")
+                self.assertEqual(handover.status(self.brain)["sessions"], [])
+                self.assertEqual([thread["open"] for thread in self.threads()][-1], False)
+                self.assertEqual(self.errors, [])
+                page.close()
 
 
 if __name__ == "__main__":

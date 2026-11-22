@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -1224,8 +1225,13 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn(f"build {builds[0]['build']}", page.inner_text(".modal.versions p"))
                 page.click(".modal.versions .ver:nth-of-type(2) summary")
                 self.assertTrue(page.eval_on_selector(".modal.versions .ver:nth-of-type(2)", "n => n.open"))
-                link = page.get_attribute(".modal.versions .ver:nth-of-type(2) li a", "href")
-                self.assertRegex(link, r"^https://github\.com/juw12/cairn/pull/\d+$")
+                # "#86" in a change is a link to that pull request; an apostrophe ("&#39;" once escaped) is not one.
+                named = next(index for index, build in enumerate(builds) if index and re.search(r"(?<![&\w])#\d+", " ".join(build["changes"])))
+                numbers = re.findall(r"(?<![&\w])#(\d+)", " ".join(builds[named]["changes"]))
+                links = page.eval_on_selector_all(f".modal.versions .ver:nth-of-type({named + 1}) li a", "nodes => nodes.map((n) => n.getAttribute('href'))")
+                self.assertEqual(links, [f"https://github.com/juw12/cairn/pull/{number}" for number in numbers])
+                plain = next(index for index, build in enumerate(builds) if "'" in " ".join(build["changes"]) and not re.search(r"(?<![&\w])#\d+", " ".join(build["changes"])))
+                self.assertEqual(page.locator(f".modal.versions .ver:nth-of-type({plain + 1}) li a").count(), 0)
                 # Nothing runs off the side of the screen, and the list scrolls inside the dialog.
                 box = page.eval_on_selector(".modal.versions", "n => { const r = n.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom, n.scrollWidth, n.clientWidth]; }")
                 self.assertGreaterEqual(box[0], 0)
