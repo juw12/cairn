@@ -824,6 +824,37 @@ class MachineNoteTests(unittest.TestCase):
         meta = core.parse_note(text)["meta"]
         self.assertEqual((meta["title"], meta["load"], meta["load_cpu"]), ("This computer", "light", ""))
 
+    NET = {
+        "level": "slow", "why": "the internet takes 1800 ms to answer",
+        "link": "Wi-Fi Office 5G · 802.11ax 5 GHz · signal good (86%) · link 865 Mbit/s",
+        "reach": "Internet answers in 1800 ms · in use now 2.0 down, 0.2 up Mbit/s",
+        "speed": "measured 12 Mbit/s down at 10:42",
+    }
+
+    def test_the_note_carries_the_network_the_computer_is_on(self):
+        parsed = core.parse_note(watch.machine_note(self.reading(net=self.NET))[1])
+        meta = parsed["meta"]
+        self.assertEqual((meta["net"], meta["net_why"]), ("slow", "the internet takes 1800 ms to answer"))
+        self.assertEqual((meta["net_link"], meta["net_reach"], meta["net_speed"]), (self.NET["link"], self.NET["reach"], self.NET["speed"]))
+        self.assertIn("- Network: Wi-Fi Office 5G", parsed["body"])
+        self.assertIn("- Internet answers in 1800 ms · in use now 2.0 down, 0.2 up Mbit/s; measured 12 Mbit/s down at 10:42", parsed["body"])
+
+    def test_a_reading_without_the_network_still_gets_a_note(self):
+        for reading in (self.READING, self.reading(net=None)):
+            parsed = core.parse_note(watch.machine_note(reading)[1])
+            self.assertEqual((parsed["meta"]["net"], parsed["meta"]["net_link"], parsed["meta"]["net_reach"]), ("", "", ""))
+            self.assertNotIn("Network", parsed["body"])
+
+    def test_the_internet_going_or_turning_slow_is_written_at_once(self):
+        vibe.start(self.brain, "Something live")
+        good = {**self.NET, "level": "good", "why": ""}
+        self.assertTrue(watch.sync_machine(self.brain, self.reading(net=good)))
+        self.assertFalse(watch.sync_machine(self.brain, self.reading(net=good)), "the same network is not written again")
+        self.assertTrue(watch.sync_machine(self.brain, self.reading(net=self.NET)), "slow is")
+        self.assertTrue(watch.sync_machine(self.brain, self.reading(net={**self.NET, "level": "offline"})), "gone is")
+        self.assertTrue(watch.sync_machine(self.brain, self.reading(net=good)), "and back is")
+        self.assertEqual(core.parse_note(self.brain.read("machines/acme-roadrunner-14.md")["text"])["meta"]["net"], "good")
+
     def test_a_reading_from_before_uptime_was_measured_still_gets_a_note(self):
         reading = {key: value for key, value in self.READING.items() if key != "uptime"}
         parsed = core.parse_note(watch.machine_note(reading)[1])

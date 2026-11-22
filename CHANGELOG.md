@@ -3,6 +3,15 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 101 (2026-11-22): The network under the computer: which Wi-Fi, how the internet answers, how fast
+
+- The computer on the Vibe page now shows its network: the Wi-Fi's name, whether it is a phone's hotspot, the kind of Wi-Fi and its band, how strong the signal is and the link rate to the router. On a cable it says so
+- Next to it: whether the internet answers and how long a small request takes, checked every half minute with a request of under 1 kB, and how much is going down and up right now. A badge says Internet good, Internet slow (half a second or more) or No internet
+- When the internet is slow or gone the block says what that means for the work: an assistant that runs online answers late or not at all, while a model that runs on the computer itself is not held up
+- Measure speed downloads for up to 4 seconds (8 MB at most) and says how fast the internet really comes down. It runs only when pressed, because on a phone's hotspot those megabytes are counted. The link rate is only the stretch to the router: a strong 192 Mbit/s Wi-Fi can sit on a slow hotspot
+- The other computer's network shows too, from the note its watcher writes, and a change (the internet gone, back, or slow) is written at once
+- macOS 14.4 and later, and Windows 11 24H2 without location permission, keep the Wi-Fi's name from apps. The block says so and shows everything else
+
 ## Build 100 (2026-11-22): Cairn for Mac
 
 - The desktop app can now be had on a Mac: one line pasted in Terminal installs it, with no admin rights and no password, and puts Cairn.app in your Applications folder. It is the same app as on Windows: your notes open by themselves, one Sync button, and it updates itself

@@ -14,7 +14,7 @@ import { initObsidian, linkObsidian, obsidianView, syncObsidian, toggleAutoSync,
 import { afterSignOut, createMyBrain, lookupProfile, openBrain, openSignIn, peopleView, readOnlyBanner } from "./people.js";
 import { addFriend, loadLeaderboard, publishStats, removeFriend, setLeaderboardStat, toggleLeaderboardDevice, unpublishStats } from "./leaderboard.js";
 import { checkMyClaims, forgetProofLogin, newClaim, proofView, setProofLogin, showAllClaims, vouchFor } from "./proofview.js";
-import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeDevice, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, moveRepo, switchPusher, cloudSyncNow, toggleRow, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
+import { copyAgentHook, endSession, jumpToList, jumpToLive, leaveVibe, liveSessions, loadSampleSessions, setOverviewOutcome, setVibeDevice, setVibeFilter, setVibeOutcome, shareStats, showMoreSessions, startSession, moveRepo, switchPusher, cloudSyncNow, measureSpeed, toggleRow, toggleSessionDay, foldAllDays, jumpToDay, backToChart, toggleWhy, vibeView, wireVibe } from "./vibe.js";
 import { addProperty, addSpark, bookmarkOpenNote, closeDrawer, closeTab, createMissing, cycleTab, flushPending, openNote, openSplit, promote, renameOpenNote, renderDrawer, reopenClosedTab, resetTabs, toggleSplit, useHeld } from "./drawer.js";
 import { capture, commitBrain, copyText, newNote, openPairPhone, openSettings, openToday, openVersions, reloadBrain, saveContext, switchBrain, syncBrain, todoToTask, toggleTheme } from "./actions.js";
 import { openPalette } from "./palette.js";
@@ -401,6 +401,7 @@ function wireGlobal() {
       "vibe-gh-move": () => moveRepo(actionEl.dataset.repo, actionEl.dataset.from, actionEl.dataset.to),
       "vibe-gh-push": () => switchPusher(actionEl.dataset.account),
       "vibe-cloud-sync": () => cloudSyncNow(Boolean(actionEl.dataset.repos)),
+      "vibe-net-speed": measureSpeed,
       "vibe-to-list": jumpToList,
       "home-chart-day": () => pickChartDay(actionEl.dataset.day),
       "home-chart-range": () => setChartRange(actionEl.dataset.range) && renderView(),

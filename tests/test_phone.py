@@ -121,6 +121,15 @@ class PhoneTests(unittest.TestCase):
         _, info = self.call("GET", "/api/info", cookie=token)
         self.assertIs(json.loads(info)["githubMove"], False, "so the page does not offer the button there")
 
+    def test_a_phone_cannot_spend_this_computers_megabytes_on_a_speed_test(self):
+        from cairn import machine
+
+        token, _ = self.pair()
+        with mock.patch.object(machine, "measure_speed") as measure:
+            response, _ = self.call("POST", "/api/vibe/speed", {}, cookie=token)
+        self.assertEqual(response.status, 404)
+        measure.assert_not_called()
+
     def test_a_phone_cannot_switch_the_account_this_computer_pushes_as(self):
         from cairn import github_push
 

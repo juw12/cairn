@@ -11,6 +11,10 @@ page simply shows no laptop figures.
 
 `device_name()` is what this computer is called on session notes, so the Vibe page can tell two computers
 that share one brain apart.
+
+`network()` is the other half of how fast an assistant feels: which network the computer is on (the Wi-Fi's
+name where the system gives it, its signal and link rate), and whether and how quickly the internet answers.
+An assistant that runs online waits on that; a model that runs on the computer itself does not.
 """
 
 from __future__ import annotations
@@ -23,6 +27,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 
 LEVELS = ("light", "medium", "heavy")
 CPU_WINDOW_SECONDS = 30  # the CPU figure is an average over this long, so one spike does not flip the level
@@ -37,6 +43,19 @@ RAM_MEDIUM, RAM_HEAVY = 75, 90
 COMMIT_HEAVY = 90  # memory promised to apps against RAM plus page file: past this, Windows is paging hard
 PLACEHOLDER_NAMES = ("system product name", "to be filled by o.e.m.", "default string", "system manufacturer", "none")
 
+NET_LEVELS = ("good", "slow", "offline")
+NET_SLOW_MS = 500  # a small request that takes this long to come back: an online assistant feels it in every step
+NET_REFRESH_SECONDS = 30  # one look at the internet (a request of under 1 kB) this often while a page or watcher asks
+NET_WIFI_REFRESH_SECONDS = 60  # asking the system about the Wi-Fi is the costly part, and it changes rarely
+NET_PROBE_TIMEOUT = 4
+NET_FIRST_WAIT_SECONDS = 1.5
+# Pages that answer "204, nothing" and exist to be asked this. Plain http on purpose: a network that wants a
+# sign-in page first can then answer with that page, which is how it is told from a working one.
+NET_PROBES = ("http://www.gstatic.com/generate_204", "http://cp.cloudflare.com/generate_204")
+NET_SPEED_URL = "http://speed.cloudflare.com/__down?bytes=8000000"
+NET_SPEED_SECONDS = 4  # a speed measurement stops after this long or 8 MB, whichever comes first
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # a console tool must not flash a window under pythonw
+
 _lock = threading.Lock()
 _cpu_samples: collections.deque = collections.deque(maxlen=64)  # (monotonic seconds, busy, total)
 _processes: dict = {"at": 0.0, "times": {}, "top": []}
@@ -45,6 +64,14 @@ _soon_lock = threading.Lock()
 _soon: dict = {"at": float("-inf"), "value": None, "thread": None}
 IS_MAC = sys.platform == "darwin"
 _mac_total = 0  # bytes of memory, read once
+_net_lock = threading.Lock()
+_net: dict = {
+    "at": float("-inf"), "value": None, "thread": None,
+    "wifi_at": float("-inf"), "wifi": {},  # the Wi-Fi as the system last described it
+    "bytes": None,  # (monotonic seconds, bytes in, bytes out) at the previous look
+    "delays": collections.deque(maxlen=3),  # the last answers of the internet in ms; None for no answer
+    "speed": None,  # the last measurement someone asked for
+}
 
 
 # ------------------------------------------------------------ the level (pure)
@@ -314,7 +341,8 @@ def _registry(key: str, name: str) -> str:
 def _run(command: list[str]) -> str:
     """What a small system tool prints, or "" when it is missing, slow or fails."""
     try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace")
+        done = subprocess.run(command, capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace",
+                              stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return ""
     return done.stdout or ""
@@ -408,6 +436,394 @@ def _mac_uptime_seconds() -> float | None:
     return max(0.0, time.time() - int(started.group(1))) if started else None
 
 
+# ------------------------------------------------------------ the network (pure)
+# What the system's own tools print, read into one small dictionary. Each parser takes text and never raises,
+# so it can be tested on any computer with what a Mac or a Windows PC printed.
+
+VIRTUAL_ADAPTER = re.compile(r"vethernet|loopback|vmware|virtualbox|bluetooth|tailscale|zerotier|wireguard|vpn|wsl|hyper-v|npcap", re.I)
+WIFI_WORD = re.compile(r"wi-?fi|wlan|wireless|airport", re.I)
+
+
+def signal_word(dbm=None, pct=None) -> str:
+    """How well the Wi-Fi is heard: "strong", "good", "fair" or "weak". macOS gives dBm; Windows gives a
+    percentage, which is (dBm + 100) x 2."""
+    if dbm is None and pct is not None:
+        dbm = pct / 2 - 100
+    if dbm is None:
+        return ""
+    return "strong" if dbm >= -55 else "good" if dbm >= -67 else "fair" if dbm >= -75 else "weak"
+
+
+def mbit(value) -> str:
+    """A rate as it is said: "0.2", "7.5", "12", "192"."""
+    value = float(value)
+    return f"{value:.1f}" if value < 10 else str(round(value))
+
+
+def band_text(ghz) -> str:
+    """"2.4 GHz", "5 GHz", "6 GHz" from the 2, 2.4, 5 or 6 the tools print."""
+    ghz = float(ghz)
+    return "2.4 GHz" if ghz < 3 else f"{ghz:g} GHz"
+
+
+def parse_airport(text: str) -> dict:
+    """The Wi-Fi a Mac is on, from `system_profiler SPAirPortDataType`; {} when it is on none. macOS 14.4 and
+    later print "<redacted>" where the name goes unless the asking app may use Location Services."""
+    lines = (text or "").splitlines()
+    depth = lambda line: len(line) - len(line.lstrip())
+    for index, line in enumerate(lines):
+        if line.strip() != "Current Network Information:":
+            continue
+        block = []
+        for follower in lines[index + 1:]:
+            if follower.strip() and depth(follower) <= depth(line):
+                break
+            if follower.strip():
+                block.append(follower)
+        if not block or not block[0].rstrip().endswith(":"):
+            continue  # an interface that is on no network of its own (awdl0)
+        name = block[0].strip()[:-1]
+        fields = {}
+        for detail in block[1:]:
+            if depth(detail) <= depth(block[0]):
+                break
+            key, _, value = detail.strip().partition(":")
+            fields[key.strip().lower()] = value.strip()
+        hidden = name == "<redacted>"
+        found = {"connected": True, "name": "" if hidden else name, "name_hidden": hidden}
+        if fields.get("phy mode"):
+            found["radio"] = fields["phy mode"]
+        channel = re.match(r"(\d+)(?:\s*\(([\d.]+)\s*GHz)?", fields.get("channel", ""))
+        if channel:
+            found["channel"] = int(channel.group(1))
+            if channel.group(2):
+                found["band"] = band_text(channel.group(2))
+        if fields.get("security"):
+            found["security"] = fields["security"]
+        signal = re.match(r"(-?\d+)\s*dBm", fields.get("signal / noise", ""))
+        if signal:
+            found["signal_dbm"] = int(signal.group(1))
+        rate = re.match(r"([\d.]+)", fields.get("transmit rate", ""))
+        if rate and float(rate.group(1)) > 0:
+            found["link_mbps"] = float(rate.group(1))
+        return found
+    return {}
+
+
+def parse_netsh_wlan(text: str) -> dict:
+    """The Wi-Fi a Windows PC is on, from `netsh wlan show interfaces`; {} when it is on none. Windows 11 24H2
+    and later answer with a sentence about location permission instead: then only {"name_hidden": True}."""
+    text = text or ""
+    name = re.search(r"^\s*SSID\s*:\s?(.*)$", text, flags=re.M)
+    if not name:
+        return {"name_hidden": True} if re.search(r"location", text, flags=re.I) else {}
+    found = {"connected": True, "name": name.group(1).strip(), "name_hidden": False}
+    radio = re.search(r":\s*(802\.11[a-z]+)\s*$", text, flags=re.M | re.I)
+    if radio:
+        found["radio"] = radio.group(1)
+    band = re.search(r":\s*([\d.]+)\s*GHz\s*$", text, flags=re.M | re.I)
+    if band:
+        found["band"] = band_text(band.group(1))
+    channel = re.search(r"^\s*Channel\s*:\s*(\d+)\s*$", text, flags=re.M | re.I)
+    if channel:
+        found["channel"] = int(channel.group(1))
+    security = re.search(r"^\s*Authentication\s*:\s*(.+?)\s*$", text, flags=re.M | re.I)
+    if security:
+        found["security"] = security.group(1)
+    signal = re.search(r":\s*(\d{1,3})\s*%\s*$", text, flags=re.M)
+    if signal:
+        found["signal_pct"] = min(100, int(signal.group(1)))
+    rates = [float(rate) for rate in re.findall(r"\(Mbps\)\s*:\s*([\d.]+)", text)]  # receive, then transmit
+    if rates and rates[-1] > 0:
+        found["link_mbps"] = rates[-1]
+    return found
+
+
+def parse_netsh_interfaces(text: str) -> list[str]:
+    """The names of the connected adapters, from `netsh interface show interface` ("Wi-Fi", "Ethernet")."""
+    names = []
+    for line in (text or "").splitlines():
+        parts = line.split(None, 3)
+        if len(parts) == 4 and parts[1].lower() == "connected":
+            names.append(parts[3].strip())
+    return names
+
+
+def windows_link(wlan: dict, connected: list[str]) -> dict:
+    """What a Windows PC is on: the Wi-Fi netsh described, else the first real adapter that is connected."""
+    if wlan.get("connected"):
+        return {"kind": "wifi", **wlan}
+    real = [name for name in connected if not VIRTUAL_ADAPTER.search(name)]
+    if any(WIFI_WORD.search(name) for name in real):
+        hidden = bool(wlan.get("name_hidden"))
+        return {"kind": "wifi", "name": "", "name_hidden": hidden, **({"hidden_by": "Windows"} if hidden else {})}
+    if real:
+        return {"kind": "wired", "via": real[0]}
+    return {"kind": "none"}
+
+
+def parse_default_route(text: str) -> str:
+    """The interface a Mac sends to the internet through, from `route -n get default`; "" when there is none."""
+    found = re.search(r"^\s*interface:\s*(\S+)", text or "", flags=re.M)
+    return found.group(1) if found else ""
+
+
+def parse_hardware_ports(text: str) -> dict[str, str]:
+    """{"en0": "Wi-Fi", "en5": "USB 10/100/1000 LAN"} from `networksetup -listallhardwareports`."""
+    return {device: port.strip() for port, device in re.findall(r"^Hardware Port:\s*(.+)\nDevice:\s*(\S+)", text or "", flags=re.M)}
+
+
+def hotspot_text(text: str) -> str:
+    """"iPhone hotspot" or "phone hotspot" when the address a Mac was handed (`ipconfig getpacket`) is one a
+    phone gives out, else "". A hotspot is mobile data: slower and less even than a line, and usually counted."""
+    router = re.search(r"^router[^{\n]*\{\s*([\d.]+)", text or "", flags=re.M)
+    sender = re.search(r"^sname\s*=\s*(\S+)", text or "", flags=re.M)
+    address = router.group(1) if router else ""
+    if address == "172.20.10.1" or (sender and sender.group(1).lower() == "iphone"):
+        return "iPhone hotspot"
+    return "phone hotspot" if address == "192.168.43.1" else ""
+
+
+def parse_netstat_bytes(text: str) -> tuple[int, int] | None:
+    """(bytes in, bytes out) since the system started: of one interface from a Mac's `netstat -ibn -I en0`,
+    of every adapter together from Windows' `netstat -e`."""
+    text = text or ""
+    if "Ibytes" in text:
+        for line in text.splitlines():
+            parts = line.split()
+            if "<Link#" in line and len(parts) >= 7 and parts[-5].isdigit() and parts[-2].isdigit():
+                return int(parts[-5]), int(parts[-2])
+        return None
+    row = re.search(r"^\s*\D[^\d\n]*?\s(\d+)\s+(\d+)\s*$", text, flags=re.M)  # the first row of figures is the bytes
+    return (int(row.group(1)), int(row.group(2))) if row else None
+
+
+def traffic_rate(previous, current) -> tuple[float | None, float | None]:
+    """(down, up) in Mbit/s between two looks of (seconds, bytes in, bytes out); (None, None) when there is
+    no earlier look, no time between them, or the counters started again."""
+    if not previous or not current:
+        return None, None
+    seconds = current[0] - previous[0]
+    down, up = current[1] - previous[1], current[2] - previous[2]
+    if seconds < 1 or down < 0 or up < 0:
+        return None, None
+    return round(down * 8 / 1e6 / seconds, 1), round(up * 8 / 1e6 / seconds, 1)
+
+
+def net_level(internet: str, delay_ms) -> tuple[str, str]:
+    """Good, slow or offline for an assistant that runs online, and the reason when it is not good."""
+    if internet == "sign-in":
+        return "offline", "this network asks for a sign-in page before it lets the internet through"
+    if internet != "ok":
+        return "offline", "the internet does not answer"
+    if delay_ms is not None and delay_ms >= NET_SLOW_MS:
+        return "slow", f"the internet takes {delay_ms} ms to answer"
+    return "good", ""
+
+
+def link_text(net: dict) -> str:
+    """"Wi-Fi HomeNet · 802.11ac 5 GHz · signal strong (-37 dBm) · link 192 Mbit/s"."""
+    kind = net.get("kind")
+    if kind == "none":
+        return "Not on a network"
+    parts = []
+    if kind == "wifi":
+        if net.get("name"):
+            parts.append(f"Wi-Fi {net['name']}")
+        elif net.get("name_hidden"):
+            parts.append(f"Wi-Fi ({net.get('hidden_by') or 'the system'} keeps its name from apps)")
+        else:
+            parts.append("Wi-Fi")
+        parts.append(net.get("via") or "")
+    elif kind == "wired":
+        parts.append(f"Cable ({net['via']})" if net.get("via") else "Cable")
+    else:
+        parts.append("Connected")
+    parts.append(" ".join(part for part in (net.get("radio"), net.get("band")) if part))
+    if net.get("signal"):
+        figure = f"{net['signal_dbm']} dBm" if net.get("signal_dbm") is not None else f"{net['signal_pct']}%" if net.get("signal_pct") is not None else ""
+        parts.append(f"signal {net['signal']}" + (f" ({figure})" if figure else ""))
+    if net.get("link_mbps"):
+        parts.append(f"link {mbit(net['link_mbps'])} Mbit/s")
+    return " · ".join(part for part in parts if part)
+
+
+def reach_text(net: dict) -> str:
+    """"Internet answers in 85 ms · in use now 1.2 down, 0.1 up Mbit/s"."""
+    internet = net.get("internet")
+    if internet == "ok":
+        text = f"Internet answers in {net['delay_ms']} ms" if net.get("delay_ms") is not None else "Internet answers"
+    elif internet == "sign-in":
+        text = "This network asks for a sign-in page first"
+    else:
+        text = "No internet"
+    if net.get("down_mbps") is not None and net.get("up_mbps") is not None:
+        text += f" · in use now {mbit(net['down_mbps'])} down, {mbit(net['up_mbps'])} up Mbit/s"
+    return text
+
+
+def speed_text(speed: dict | None) -> str:
+    """"measured 12 Mbit/s down at 10:42", or "" when nobody asked for a measurement yet."""
+    if not speed or speed.get("down_mbps") is None:
+        return ""
+    return f"measured {mbit(speed['down_mbps'])} Mbit/s down at {str(speed.get('at', ''))[11:16]}"
+
+
+# ------------------------------------------------------------ the network (readings)
+
+
+def _mac_link(now: float) -> dict:
+    device = parse_default_route(_run(["route", "-n", "get", "default"]))
+    if not device:
+        return {"kind": "none"}
+    ports = parse_hardware_ports(_run(["networksetup", "-listallhardwareports"]))
+    wifi_device = next((name for name, port in ports.items() if WIFI_WORD.search(port)), "")
+    link = {"kind": "wired", "via": ports[device], "device": device} if device in ports and device != wifi_device else {"kind": "other", "device": device}
+    if wifi_device and (device == wifi_device or device not in ports):  # on the Wi-Fi, or through a tunnel over it
+        if now - _net["wifi_at"] >= NET_WIFI_REFRESH_SECONDS:
+            _net.update(wifi_at=now, wifi=parse_airport(_run(["system_profiler", "SPAirPortDataType"])))
+        wifi = _net["wifi"]
+        if wifi or device == wifi_device:
+            link = {"kind": "wifi", **wifi, "device": wifi_device, "via": hotspot_text(_run(["ipconfig", "getpacket", wifi_device]))}
+            if wifi.get("name_hidden"):
+                link["hidden_by"] = "macOS"
+    return link
+
+
+def _win_link() -> dict:
+    wlan = parse_netsh_wlan(_run(["netsh", "wlan", "show", "interfaces"]))
+    connected = [] if wlan.get("connected") else parse_netsh_interfaces(_run(["netsh", "interface", "show", "interface"]))
+    return windows_link(wlan, connected)
+
+
+def _bytes_now(link: dict) -> tuple[int, int] | None:
+    if IS_MAC:
+        return parse_netstat_bytes(_run(["netstat", "-ibn", "-I", link["device"]])) if link.get("device") else None
+    return parse_netstat_bytes(_run(["netstat", "-e"]))
+
+
+def _probe_internet() -> tuple[str, int | None]:
+    """("ok", ms) when the internet answered, ("sign-in", None) when something else answered in its place (a
+    hotel's or a hotspot's sign-in page), ("none", None) when nothing did. Goes through the system's proxy."""
+    answered = False
+    for url in NET_PROBES:
+        started = time.perf_counter()
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "cairn", "Cache-Control": "no-cache"})
+            with urllib.request.urlopen(request, timeout=NET_PROBE_TIMEOUT) as reply:
+                status = reply.status
+                reply.read(64)
+        except urllib.error.HTTPError:
+            answered = True
+            continue
+        except Exception:  # no route, no name, a timeout, a cut line: this one did not answer
+            continue
+        if status == 204:
+            return "ok", round((time.perf_counter() - started) * 1000)
+        answered = True
+    return ("sign-in" if answered else "none"), None
+
+
+def network() -> dict | None:
+    """The network this computer is on and how the internet answers right now, or None where it cannot be
+    read. It asks the system's tools and sends one tiny request, so it can take seconds: the page uses
+    `network_soon`. Never raises.
+
+    No address of this computer, no router address and no access point id: the name of the Wi-Fi is the one
+    thing here that says where the computer is, and it stays in your own notes."""
+    try:
+        if not IS_MAC and os.name != "nt":
+            return None
+        now = time.monotonic()
+        link = _mac_link(now) if IS_MAC else _win_link()
+        counted = _bytes_now(link)
+        look = (now, *counted) if counted else None
+        down, up = traffic_rate(_net["bytes"], look)
+        _net["bytes"] = look
+        internet, delay = _probe_internet()
+        _net["delays"].append(delay)
+        recent = sorted(value for value in _net["delays"] if value is not None)
+        level, why = net_level(internet, recent[len(recent) // 2] if recent else None)  # the middle of the last three
+        reading = {key: value for key, value in link.items() if key not in ("connected", "device")}
+        reading.update({
+            "signal": signal_word(link.get("signal_dbm"), link.get("signal_pct")) if link.get("kind") == "wifi" else "",
+            "internet": internet,
+            "delay_ms": delay,
+            "down_mbps": down,
+            "up_mbps": up,
+            "level": level,
+            "why": why,
+            "at": dt.datetime.now().strftime("%Y-%m-%dT%H:%M"),
+        })
+        reading["link"] = link_text(reading)
+        reading["reach"] = reach_text(reading)
+        reading["speed"] = speed_text(_net["speed"])
+        return reading
+    except Exception:  # a reading is a nicety: it must never take the watcher or a request down
+        return None
+
+
+def network_soon(wait: float = NET_FIRST_WAIT_SECONDS) -> dict | None:
+    """`network` without the wait: the last reading at once, refreshed in the background at most every
+    NET_REFRESH_SECONDS and one run at a time. Only the very first call waits, up to `wait` seconds."""
+    with _net_lock:
+        thread = _net["thread"]
+        if thread is None and time.monotonic() - _net["at"] >= NET_REFRESH_SECONDS:
+            def refresh() -> None:
+                try:
+                    reading = network()
+                    if reading is not None:
+                        _net["value"] = reading
+                finally:
+                    _net["at"] = time.monotonic()
+                    _net["thread"] = None
+
+            thread = _net["thread"] = threading.Thread(target=refresh, daemon=True)
+            thread.start()
+    if _net["value"] is None and thread is not None and wait > 0:
+        thread.join(wait)
+    return _net["value"]
+
+
+def measure_speed() -> dict:
+    """How fast the internet comes down right now: a download that stops after NET_SPEED_SECONDS or 8 MB,
+    whichever is first. Only when someone asks, because on a phone's hotspot those megabytes are counted.
+    Gives {down_mbps, mb, seconds, at, text}; raises OSError when the internet cannot be reached."""
+    request = urllib.request.Request(NET_SPEED_URL, headers={"User-Agent": "cairn", "Cache-Control": "no-cache"})
+    received = 0
+    try:
+        with urllib.request.urlopen(request, timeout=NET_PROBE_TIMEOUT * 2) as reply:
+            started = time.perf_counter()  # the clock starts when the answer starts, not while the line is set up
+            seconds = 0.0
+            while seconds < NET_SPEED_SECONDS:
+                chunk = reply.read1(65536)
+                seconds = time.perf_counter() - started
+                if not chunk:
+                    break
+                received += len(chunk)
+    except OSError:
+        if not received:
+            raise
+        seconds = time.perf_counter() - started  # the line broke part way: what came still says how fast
+    except Exception as error:  # a cut answer that is not an OSError
+        raise OSError(str(error)) from error
+    if not received or seconds <= 0:
+        raise OSError("the speed test sent nothing back")
+    speed = {
+        "down_mbps": round(received * 8 / 1e6 / seconds, 1 if received * 8 / 1e6 / seconds < 10 else 0),
+        "mb": round(received / 1e6, 1),
+        "seconds": round(seconds, 1),
+        "at": dt.datetime.now().strftime("%Y-%m-%dT%H:%M"),
+    }
+    speed["text"] = speed_text(speed)
+    _net["speed"] = speed
+    if _net["value"] is not None:  # the page shows it on its next look, not one reading later
+        _net["value"] = {**_net["value"], "speed": speed["text"]}
+        if _soon["value"] is not None and _soon["value"].get("net"):
+            _soon["value"] = {**_soon["value"], "net": _net["value"]}
+    return dict(speed)
+
+
 # ------------------------------------------------------------ what the page gets
 
 
@@ -479,9 +895,12 @@ def _top_processes(now: float, cores: int) -> list[dict]:
     return top
 
 
-def snapshot() -> dict | None:
-    """The laptop and its load right now, or None where it cannot be read. Never raises."""
+def snapshot(net_wait: float = NET_FIRST_WAIT_SECONDS) -> dict | None:
+    """The laptop and its load right now, or None where it cannot be read. Never raises.
+    `net` is the network it is on (see `network`), or None while the first look at it is still out;
+    `net_wait` is how long this call may wait for that first look."""
     try:
+        net = network_soon(net_wait)  # before the lock: it may wait, and needs nothing the lock guards
         with _lock:
             memory = _memory()
             if memory is None:
@@ -502,6 +921,7 @@ def snapshot() -> dict | None:
                 "level": level,
                 "reasons": reasons,
                 "top": [top_text(group) for group in _top_processes(now, reading["cores"])],
+                "net": net,
             })
             return reading
     except Exception:  # a reading is a nicety: it must never take the watcher or a request down

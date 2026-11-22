@@ -91,6 +91,21 @@ assert.deepEqual(fromNote.reasons, ["CPU 91% busy", "memory 80% full"]);
 assert.deepEqual(fromNote.top, ["python x3: 2.0 GB, 60% CPU", "node: 1.1 GB"]);
 assert.equal(fromNote.uptime, "up 76 h (3 d 4 h) since restart");
 assert.equal(machineFromNote({ meta: { load: "light", machine_at: "2026-03-04T10:00" } }).uptime, "");
+// The network the computer is on travels in the same note; a note from before it was read has none.
+assert.equal(fromNote.net, null);
+const online = machineFromNote({
+  meta: {
+    ...noted.meta, net: "slow", net_why: "the internet takes 1800 ms to answer",
+    net_link: "Wi-Fi Office 5G · 802.11ax 5 GHz · signal good (86%) · link 865 Mbit/s",
+    net_reach: "Internet answers in 1800 ms", net_speed: "measured 12 Mbit/s down at 10:42",
+  },
+});
+assert.deepEqual(online.net, {
+  level: "slow", why: "the internet takes 1800 ms to answer",
+  link: "Wi-Fi Office 5G · 802.11ax 5 GHz · signal good (86%) · link 865 Mbit/s",
+  reach: "Internet answers in 1800 ms", speed: "measured 12 Mbit/s down at 10:42",
+});
+assert.equal(machineFromNote({ meta: { ...noted.meta, net: "melting" } }).net, null);
 assert.equal(machineFromNote({ meta: { title: "Plain note" } }), null);
 assert.equal(machineFromNote({ meta: { load: "heavy" } }), null);
 
