@@ -1083,7 +1083,7 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
                days: int = DAYS, idle_minutes: int = IDLE_MINUTES, now_ms: int | None = None,
                vector_names=VECTOR_PROCESSES, db_path: Path | None = None, running: bool | None = None,
                git: str | None = None, last_reply: bool = False, laptop: bool = False,
-               github: bool = False, github_accounts=(), repo_copy: bool = False) -> list[str]:
+               github: bool = False, github_accounts=(), repo_copy: bool = False, handoffs: bool = True) -> list[str]:
     """One pass over every source. Returns human-readable lines describing what changed."""
     now_ms = _now_ms() if now_ms is None else now_ms
     messages = []
@@ -1133,6 +1133,12 @@ def watch_once(brain: Brain, *, opencode: bool = True, vector: bool = True, ever
         messages.append(f"GitHub: Actions minutes of {account} noted in {github_usage.FOLDER}/{account}/")
     if repo_copy and github_copy.sync_soon(brain):
         messages.append("GitHub: bringing this computer's copy of your repos up to date")
+    if handoffs and not os.environ.get("CAIRN_NO_RUNNER"):
+        from . import runner  # work another computer left for an app this one can start by itself
+
+        started = runner.start_soon(brain)
+        if started:
+            messages.append(f"Handoffs: starting the app asked for on {started} left for this computer")
     return messages
 
 

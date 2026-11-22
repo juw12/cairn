@@ -2419,6 +2419,9 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand, .vibe-rank { padding: 0 0 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
 :is(.vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand, .vibe-rank) > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 8px; }
 :is(.vibe-machine, .vibe-github, .vibe-ghpush, .vibe-cloud, .vibe-hand, .vibe-rank) > header h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.vibe-hand .hand-phone { margin-top: 14px; }
+.vibe-hand .hand-phone h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.vibe-hand .hand-phone .gh-push + .gh-push { margin-top: 6px; }
 .vm-spec { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .vm-meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 24px; }
 .vm-meter { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; }

@@ -33,7 +33,13 @@ from .brain import Brain, ConflictError
 
 HERE_WORDS = ("", "here", "back", "off", "this", "this computer", "self", "me")
 LOG_LINES = 40  # the end of a session's log that goes into the handoff
-SESSION_KEYS = ("handed_to", "handed_at", "handed_thread")
+SESSION_KEYS = ("handed_to", "handed_at", "handed_thread", "handed_agent")
+# The AI apps a piece of work can be given to. The ones in STARTS_ITSELF run with nobody at the computer, so
+# Cairn there starts them (cairn/runner.py); the others wait until a chat in that app picks the handoff up.
+AGENTS = {"vector": "Vector", "opencode": "OpenCode", "claude": "Claude Code"}
+STARTS_ITSELF = ("opencode", "claude")
+PHONE_AGENT = "opencode"  # what carries out a prompt from the phone until another one is chosen
+AGENT_LINE = re.compile(r"^Agent:[ \t]*([a-z]+)[ \t]*$", re.M)  # the line of a handoff that names the app asked for
 SOON_TTL_SECONDS = 10  # the live page shows a switch made elsewhere (a terminal, an assistant) this soon
 
 HEADER_CHARS = 2000  # a session note's properties are at its top: enough to look for one without parsing it
@@ -81,6 +87,78 @@ def _when(stamp: str) -> str:
     return str(stamp or "").replace("T", " ")
 
 
+# ------------------------------------------------------------ which AI app
+
+
+def agent_id(wanted: str) -> str:
+    """The app `wanted` means ("" for none): its id, its name, or the name without its spaces."""
+    key = "".join(str(wanted or "").lower().replace("-", " ").split())
+    if not key:
+        return ""
+    for known, name in AGENTS.items():
+        if key in (known, "".join(name.lower().split())):
+            return known
+    raise HandoverError(f'No AI app "{wanted}". Known: {", ".join(AGENTS.values())}.')
+
+
+def agents() -> list[dict]:
+    return [{"id": known, "name": name, "starts": known in STARTS_ITSELF} for known, name in AGENTS.items()]
+
+
+def agent_asked(text: str) -> str:
+    """The app a handoff asks for ("" when it names none, or one this Cairn does not know)."""
+    found = AGENT_LINE.search(str(text or ""))
+    return found.group(1) if found and found.group(1) in AGENTS else ""
+
+
+def agent_lines(agent: str, to: str) -> list[str]:
+    """What a handoff says about the app that was asked for. The first line is the one Cairn reads."""
+    if not agent:
+        return []
+    name = AGENTS[agent]
+    how = (f"Asked for in Cairn: {name} does it. Cairn on {to} starts it by itself, with nobody at the computer, and answers here."
+           if agent in STARTS_ITSELF else
+           f"Asked for in Cairn: a {name} chat does it. Nothing can start {name} from outside, so it waits until a {name} chat on {to} picks it up.")
+    return ["", f"Agent: {agent}", how]
+
+
+# ------------------------------------------------------------ prompts from the phone
+
+
+def phone(brain: Brain, folder: Path | None = None) -> dict:
+    """Where a prompt sent from the phone to a finished chat of this computer is carried out, and by which
+    app: {"to": "" for this computer, "agent"}. Read by the phone desk of Vector Relay (`cairn vibe hand phone`)."""
+    entry = (_read(folder).get("phone") or {}).get(str(brain.dir))
+    entry = entry if isinstance(entry, dict) else {}
+    agent = entry.get("agent") if entry.get("agent") in STARTS_ITSELF else PHONE_AGENT
+    return {"to": str(entry.get("to") or ""), "agent": agent}
+
+
+def set_phone(brain: Brain, to: str | None = None, agent: str | None = None, folder: Path | None = None) -> dict:
+    """Choose the computer (`to`, "here" for this one) and/or the app for prompts from the phone. Returns the
+    new `status` with a `message`."""
+    now = phone(brain, folder)
+    if to is not None:
+        now["to"] = _resolve(brain, to)
+    if agent is not None and str(agent).strip():
+        wanted = agent_id(agent)
+        if wanted not in STARTS_ITSELF:
+            names = " or ".join(AGENTS[known] for known in STARTS_ITSELF)
+            raise HandoverError(f"A prompt from the phone needs an app that starts with nobody at the computer: {names}. "
+                                f"{AGENTS[wanted]} cannot be started from outside.")
+        now["agent"] = wanted
+    settings = _read(folder)
+    phones = dict(settings.get("phone") or {})
+    phones[str(brain.dir)] = now
+    settings["phone"] = phones
+    _write(settings, folder)
+    _forget_soon(brain)
+    reading = status(brain, folder)
+    reading["message"] = (f"A prompt from the phone to a finished chat of this computer is carried out on "
+                          f"{now['to'] or 'this computer'}, by {AGENTS[now['agent']]}.")
+    return reading
+
+
 # ------------------------------------------------------------ who there is
 
 
@@ -115,6 +193,7 @@ def _handed(note: dict) -> dict | None:
         "to": to.strip(),
         "at": str(note["meta"].get("handed_at", "")),
         "thread": str(note["meta"].get("handed_thread", "")),
+        "agent": str(note["meta"].get("handed_agent", "")),
     }
 
 
@@ -190,6 +269,8 @@ def status(brain: Brain, folder: Path | None = None) -> dict:
         "since": str(setting.get("since", "")),
         "others": names,
         "sessions": handed,
+        "agents": agents(),
+        "phone": phone(brain, folder),
     }
 
 
@@ -219,8 +300,12 @@ def summary(reading: dict) -> str:
         lines.append("The work of this computer's chats is done here. To hand it over: cairn vibe hand \"<computer>\"   (" + ", ".join(reading["others"]) + ")")
     else:
         lines.append("The work of this computer's chats is done here. No other computer has written into this brain yet, so there is nobody to hand it to.")
+    if reading.get("phone"):
+        route = reading["phone"]
+        lines.append(f"A prompt from the phone to a finished chat is carried out on {route['to'] or 'this computer'}, by {AGENTS[route['agent']]}. "
+                     "Change: cairn vibe hand phone \"<computer>\" --agent NAME")
     for entry in reading["sessions"]:
-        lines.append(f"  handed to {entry['to']} {_when(entry['at'])}: {entry['title']}\n    {entry['session']}   (back: cairn vibe hand here --session {entry['session']})")
+        lines.append(f"  handed to {entry['to']}{' (' + AGENTS[entry['agent']] + ')' if entry['agent'] in AGENTS else ''} {_when(entry['at'])}: {entry['title']}\n    {entry['session']}   (back: cairn vibe hand here --session {entry['session']})")
     return "\n".join(lines)
 
 
@@ -296,7 +381,7 @@ def _log_tail(note: dict) -> list[str]:
     return lines[-LOG_LINES:]
 
 
-def _handoff_text(note: dict, here: str, to: str, stamp: str) -> tuple[str, str]:
+def _handoff_text(note: dict, here: str, to: str, stamp: str, agent: str = "") -> tuple[str, str]:
     title = f"Take over: {note['title']}"
     meta = note["meta"]
     facts = [f"Session note: {note['path']}"]
@@ -310,6 +395,7 @@ def _handoff_text(note: dict, here: str, to: str, stamp: str) -> tuple[str, str]
         "",
         f"Goal: {note['title']}",
         ", ".join(facts),
+        *agent_lines(agent, to),
     ]
     if meta.get("task"):
         lines.append(f"Task: {meta['task']}")
@@ -346,10 +432,13 @@ def _mark(brain: Brain, path: str, changes: dict | None, line: str) -> None:
     raise HandoverError("The session's note is being written right now. Try again in a moment.")
 
 
-def hand_session(brain: Brain, wanted: str, to: str = "", folder: Path | None = None, now: dt.datetime | None = None) -> dict:
+def hand_session(brain: Brain, wanted: str, to: str = "", folder: Path | None = None, now: dt.datetime | None = None,
+                 agent: str = "") -> dict:
     """Hand one session of this computer to `to` (default: where all chats go, else the one other
-    computer). Leaves the handoff and marks the session. Returns {"session", "to", "thread", "handoff",
-    "message"}; the caller sends the brain on its way (handoff.deliver)."""
+    computer), to be done there by `agent` (an AI app; none: whichever chat picks it up). Leaves the
+    handoff and marks the session. Returns {"session", "to", "agent", "thread", "handoff", "message"}; the
+    caller sends the brain on its way (handoff.deliver)."""
+    agent = agent_id(agent)
     note = _find_session(brain, wanted)
     already = _handed(note)
     if already:
@@ -363,20 +452,29 @@ def hand_session(brain: Brain, wanted: str, to: str = "", folder: Path | None = 
         raise HandoverError(f"Hand it to which computer? Known: {known}.")
     here = handoff.this_device()
     stamp = _stamp(now)
-    title, body = _handoff_text(note, here, name, stamp)
+    title, body = _handoff_text(note, here, name, stamp, agent)
     try:
         message = handoff.send(brain, title, body, to=[name], now=now)
     except handoff.HandoffError as error:
         raise HandoverError(str(error)) from None
     thread = message["slug"]
-    _mark(brain, note["path"], {"handed_to": name, "handed_at": stamp, "handed_thread": thread}, f"handed to {name} (handoff {thread})")
+    marks = {"handed_to": name, "handed_at": stamp, "handed_thread": thread, **({"handed_agent": agent} if agent else {})}
+    who = f"{name}, {AGENTS[agent]}" if agent else name
+    _mark(brain, note["path"], marks, f"handed to {who} (handoff {thread})")
+    if agent in STARTS_ITSELF:
+        then = f" Cairn on {name} starts {AGENTS[agent]} on it by itself."
+    elif agent:
+        then = f" It waits there until a {AGENTS[agent]} chat picks it up: {AGENTS[agent]} cannot be started from outside."
+    else:
+        then = ""
     return {
         "session": note["slug"],
         "path": note["path"],
         "to": name,
+        "agent": agent,
         "thread": thread,
         "handoff": message["path"],
-        "message": f"Handed to {name}: {note['title']}. Its chat here is told at its next step.",
+        "message": f"Handed to {who}: {note['title']}. Its chat here is told at its next step.{then}",
     }
 
 

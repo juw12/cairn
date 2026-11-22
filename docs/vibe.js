@@ -590,6 +590,7 @@ export async function handWork(to, session = "") {
   const hand = state.vibeHand;
   if (!hand || typeof state.store?.vibeHand !== "function") return;
   const back = !to;
+  const agent = session && !back ? (hand.agents || []).find((entry) => entry.id === handAgent(hand)) : null;
   if (session && !back) {
     const note = state.notes.find((entry) => entry.type === "session" && entry.slug === session);
     const sure = await ask({
@@ -597,7 +598,9 @@ export async function handWork(to, session = "") {
       text: note ? note.title : session,
       list: [
         `Cairn leaves a handoff for ${to} now, with this session's goal and its log so far.`,
-        `A chat on ${to} carries it on when it picks the handoff up. The conversation itself stays in the AI app on this computer: what moves is the work.`,
+        agent?.starts
+          ? `Cairn on ${to} starts ${agent.name} on it by itself, within a minute while that computer is on and Cairn runs there. The conversation itself stays in the AI app on this computer: what moves is the work.`
+          : `A ${agent ? `${agent.name} chat` : "chat"} on ${to} carries it on when it picks the handoff up${agent ? `: ${agent.name} cannot be started from outside` : ""}. The conversation itself stays in the AI app on this computer: what moves is the work.`,
         "The chat here is told at its next step. It stops, and adds what a log cannot show (a branch that is not pushed, files only on this computer).",
         "Take back on the same row returns it.",
       ],
@@ -608,7 +611,7 @@ export async function handWork(to, session = "") {
   }
   for (const button of $$("[data-action=vibe-hand]")) button.disabled = true;
   try {
-    const { message, files, ...now } = await state.store.vibeHand(back ? "here" : to, session);
+    const { message, files, ...now } = await state.store.vibeHand(back ? "here" : to, session, agent?.id || "");
     for (const file of files || []) upsertFile(file.path, file.text, file.mtime);
     state.vibeHand = now;
     state.vibeHandKey = JSON.stringify(now);
@@ -990,22 +993,40 @@ function handSummary(hand) {
   return hand.to ? `goes to ${hand.to}` : `done on this computer${one}`;
 }
 
-// One press: the assistants on this computer stop doing the work themselves and leave it for the other
-// computer; the same press on "This computer" takes it back. Under it, the chats handed over one by one.
+// Which AI app does a chat's work on the other computer. Vector is what it was before there was a choice:
+// a chat there picks the handoff up. The choice is for the next Hand to; it is not sent anywhere by itself.
+function handAgent(hand) {
+  const known = (hand.agents || []).map((agent) => agent.id);
+  return known.includes(state.vibeHandAgent) ? state.vibeHandAgent : known[0] || "";
+}
+
+export function pickHandAgent(agent) {
+  state.vibeHandAgent = agent;
+  renderView();
+}
+
+// A chat's work is done on the computer the chat was started on. Nothing is handed over by itself: one chat
+// is handed here, to a computer and to an AI app there. Below that, where a prompt from the phone goes.
 function handStrip() {
   const hand = handChoice();
   if (!hand) return "";
-  const chip = (name, label, on, title) =>
-    `<button type="button" class="chip${on ? " on" : ""}" data-action="vibe-hand" data-to="${esc(name)}" aria-pressed="${on}" title="${esc(title)}">${esc(label)}</button>`;
-  const chips = [
-    chip("", "This computer", !hand.to, hand.to ? "Take the work back: the chats on this computer do it themselves again" : "The chats on this computer do their own work"),
-    ...hand.others.map((name) => chip(name, name, sameAccount(name, hand.to), sameAccount(name, hand.to) ? `The work of this computer's chats goes to ${name}` : `Let ${name} do the work of this computer's chats`)),
-  ].join("");
-  const how = hand.to
-    ? `Every chat on this computer leaves its work for ${hand.to} as a handoff, follows the answers and checks the result. It is told at its next step, a new chat when it starts. What only this computer can do is still done here. ${hand.to} does the work when a chat there picks the handoff up.`
-    : "Press a computer and the assistants here stop doing the work themselves: each chat hands its own work over at its next step, a new chat when it starts. For one chat alone, use Hand to on its row below or in the live recap.";
+  const agents = hand.agents || [];
+  const chosen = handAgent(hand);
+  const agentChips = agents
+    .map((agent) => `<button type="button" class="chip${agent.id === chosen ? " on" : ""}" data-action="vibe-hand-agent" data-agent="${esc(agent.id)}" aria-pressed="${agent.id === chosen}" title="${esc(agent.starts ? `Cairn on the other computer starts ${agent.name} on it by itself, with nobody there` : `${agent.name} cannot be started from outside: the work waits until a ${agent.name} chat there picks it up`)}">${esc(agent.name)}</button>`)
+    .join("");
+  const picked = agents.find((agent) => agent.id === chosen);
+  const how = !picked
+    ? ""
+    : picked.starts
+      ? `Hand a chat over and Cairn on the other computer starts ${picked.name} on it within a minute, with nobody there, and the answer comes back here.`
+      : `Hand a chat over and it waits on the other computer until a ${picked.name} chat there picks it up: ${picked.name} cannot be started from outside.`;
+  const old = hand.to
+    ? `<p class="small gh-note hand-all">Every chat on this computer is still told to leave its work for ${esc(hand.to)} (switched on ${esc(handWhen(hand.since))}).
+        <button type="button" class="btn sm" data-action="vibe-hand" data-to="" title="The chats on this computer do their own work again">Do the work here again</button></p>`
+    : "";
   const rows = hand.sessions
-    .map((entry) => `<li><span class="hand-what">${esc(entry.title)}</span> <span class="muted small">to ${esc(entry.to)}${entry.at ? `, ${esc(handWhen(entry.at))}` : ""}${entry.live ? "" : ", session ended"}</span>
+    .map((entry) => `<li><span class="hand-what">${esc(entry.title)}</span> <span class="muted small">to ${esc(entry.to)}${agentName(hand, entry.agent) ? `, ${esc(agentName(hand, entry.agent))}` : ""}${entry.at ? `, ${esc(handWhen(entry.at))}` : ""}${entry.live ? "" : ", session ended"}</span>
         <button type="button" class="btn sm" data-action="vibe-hand" data-to="" data-session="${esc(entry.session)}" title="This computer does it again; the other computer is told to stop">Take back</button></li>`)
     .join("");
   // The chats to pick from are listed here too, newest first: the live recap can be folded away, or far down.
@@ -1014,23 +1035,67 @@ function handStrip() {
   const open = foldOpen("hand-pick", mine.length <= HAND_PICK_OPEN);
   const pick = mine.length
     ? `<details class="hand-pick" data-block="hand-pick"${open ? " open" : ""}>
-        <summary>Or one chat alone <span class="muted small">${plural(mine.length, "live chat")} on this computer</span></summary>
+        <summary>Hand one chat over <span class="muted small">${plural(mine.length, "live chat")} on this computer</span></summary>
         <ul class="hand-list">${mine
           .map((note) => `<li><span class="hand-what">${esc(note.title)}</span> <span class="muted small">${esc([groupOf(note).key === "other" ? "" : groupOf(note).label, note.meta.started ? `since ${handWhen(note.meta.started)}` : ""].filter(Boolean).join(", "))}</span>
             <span class="hand-do">${handButtons(note).join("")}</span></li>`)
           .join("")}</ul>
       </details>`
     : "";
-  return `<section class="vibe-hand" aria-label="Which computer does the work of this computer's chats">
+  const count = hand.sessions.filter((entry) => entry.live).length;
+  return `<section class="vibe-hand" aria-label="Which computer and which AI app does the work of this computer's chats">
     <header>
       <h2>Chats' work</h2>
-      <span class="vm-spec">${hand.to ? `goes to ${esc(hand.to)}${hand.since ? ` since ${esc(handWhen(hand.since))}` : ""}` : "done on this computer"}</span>
+      <span class="vm-spec">${hand.to ? `goes to ${esc(hand.to)}${hand.since ? ` since ${esc(handWhen(hand.since))}` : ""}` : `done on this computer${count ? ` · ${plural(count, "chat")} handed over` : ""}`}</span>
     </header>
-    <div class="gh-push" role="group" aria-label="Done by">${chips}</div>
+    <p class="muted small gh-note">A chat's work is done on the computer the chat was started on. Nothing is handed over by itself: hand one chat over below.</p>
+    ${old}
+    <div class="gh-push hand-agent" role="group" aria-label="Done on the other computer by">${agentChips}</div>
     <p class="muted small gh-note">${esc(how)}</p>
     ${rows ? `<ul class="hand-list hand-out">${rows}</ul>` : ""}
     ${pick}
+    ${phoneStrip(hand)}
   </section>`;
+}
+
+const agentName = (hand, id) => (hand.agents || []).find((agent) => agent.id === id)?.name || "";
+
+// A prompt sent from the phone to a finished chat of this computer: on which computer it is carried out,
+// and by which app. Only an app that starts with nobody at the computer can take one.
+function phoneStrip(hand) {
+  const phone = hand.phone;
+  if (!phone) return "";
+  const place = (name, label) => {
+    const on = name ? sameAccount(name, phone.to) : !phone.to;
+    return `<button type="button" class="chip${on ? " on" : ""}" data-action="vibe-hand-phone" data-to="${esc(name || "here")}" aria-pressed="${on}" title="${esc(`A prompt from the phone is carried out on ${label}`)}">${esc(label)}</button>`;
+  };
+  const places = [place("", "This computer"), ...hand.others.map((name) => place(name, name))].join("");
+  const apps = (hand.agents || [])
+    .filter((agent) => agent.starts)
+    .map((agent) => `<button type="button" class="chip${agent.id === phone.agent ? " on" : ""}" data-action="vibe-hand-phone" data-agent="${esc(agent.id)}" aria-pressed="${agent.id === phone.agent}" title="${esc(`${agent.name} carries out a prompt from the phone`)}">${esc(agent.name)}</button>`)
+    .join("");
+  const where = phone.to || "this computer";
+  return `<div class="hand-phone">
+      <h3>Prompts from the phone</h3>
+      <div class="gh-push hand-phone-to" role="group" aria-label="A prompt from the phone is carried out on">${places}</div>
+      <div class="gh-push hand-phone-agent" role="group" aria-label="A prompt from the phone is carried out by">${apps}</div>
+      <p class="muted small gh-note">${esc(`A prompt you send from the phone to a finished chat of this computer is carried out on ${where}, by ${agentName(hand, phone.agent)}. The chat's own app cannot be woken from outside, so the answer comes from ${agentName(hand, phone.agent)} and appears on the phone under the same chat.${phone.to ? ` ${phone.to} has to be on, with Cairn running.` : ""}`)}</p>
+    </div>`;
+}
+
+// Choose where a prompt from the phone goes: a computer (`to`, "here" for this one) or an app (`agent`).
+export async function handPhone(to, agent) {
+  if (typeof state.store?.vibeHandPhone !== "function") return;
+  for (const button of $$("[data-action=vibe-hand-phone]")) button.disabled = true;
+  try {
+    const { message, files, ...now } = await state.store.vibeHandPhone(to, agent);
+    state.vibeHand = now;
+    state.vibeHandKey = JSON.stringify(now);
+    toast(message);
+  } catch (error) {
+    toast(error.message, { error: true });
+  }
+  renderView();
 }
 
 // On a live row of this computer: hand that one chat's work to another computer, or take it back.

@@ -2,6 +2,18 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 105,
+      "date": "2026-11-22",
+      "title": "Choose the computer and the AI app for one chat, and for prompts from the phone",
+      "changes": [
+        "A chat's work is done on the computer the chat was started on. Chats' work on Vibe no longer has a switch that hands every chat over: nothing is handed by itself, one chat is handed with Hand to on its row (#102)",
+        "Choose the AI app that does a handed chat on the other computer: Vector, OpenCode or Claude Code. OpenCode and Claude Code run with nobody at the computer, so Cairn there starts them by itself within a minute, says picked-up and answers done with what the app said. Vector cannot be started from outside: the work waits until a Vector chat there picks it up, as before (#102)",
+        "New on Chats' work, Prompts from the phone: the computer that carries out a prompt you send from the phone to a finished chat of this computer, and the app that does it (OpenCode or Claude Code). The phone desk of Vector Relay follows it (#102)",
+        "From a terminal: cairn vibe hand COMPUTER --session NAME --agent NAME, cairn vibe hand phone COMPUTER --agent NAME (here: this computer), cairn handoff ask TITLE --to COMPUTER --agent NAME (leaves work for an app there and waits for its answer) and cairn handoff run (starts what was left here that way). CAIRN_NO_RUNNER=1 stops a computer from starting apps by itself (#102)",
+        "The old switch for all chats is still in cairn vibe hand COMPUTER. While it is on, Chats' work says so and has one button that turns it off (#102)"
+      ]
+    },
+    {
       "build": 104,
       "date": "2026-11-22",
       "title": "Put the running sessions in your order of importance",
