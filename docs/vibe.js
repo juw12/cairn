@@ -2144,9 +2144,13 @@ function activity(stats, sessions = []) {
         .join(", ");
       const tip = `${dayLabel(d.day)}: ${plural(d.sessions, "session")}${byMinutes ? ` · ${duration(d.minutes)} clock time` : ""}${split ? ` · ${split}` : ""}`;
       // A day with sessions is a button: it unfolds that day in the list below and scrolls to it.
+      // What is pressed reaches a little into the gaps beside the column: on a 360 px phone a column of
+      // 14 days is 23 px wide, one short of what a finger hits.
+      const hitX = Math.max(0, i * width - 0.8);
+      const hitW = Math.min(100, (i + 1) * width + 0.8) - hitX;
       const open = d.sessions ? ` class="bar-day" data-action="vibe-jump" data-day="${esc(d.day)}" role="button" tabindex="0" aria-label="${esc(tip)}. Show this day's sessions."` : "";
       return `<g${open}><title>${tip}${d.sessions ? " · click to show these sessions" : ""}</title>
-        ${d.sessions ? `<rect x="${(i * width).toFixed(2)}" y="0" width="${width.toFixed(2)}" height="62" class="hit"/>` : ""}
+        ${d.sessions ? `<rect x="${hitX.toFixed(2)}" y="0" width="${hitW.toFixed(2)}" height="62" class="hit"/>` : ""}
         <rect x="${x}" y="${60 - h}" width="${w}" height="${Math.max(h, 1)}" class="${h ? "bar" : "bar empty"}"/>
         ${shippedH ? `<rect x="${x}" y="${60 - shippedH}" width="${w}" height="${shippedH}" class="bar shipped"/>` : ""}
         ${unknownH ? `<rect x="${x}" y="${60 - h}" width="${w}" height="${unknownH}" class="bar nogit"/>` : ""}
