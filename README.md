@@ -291,7 +291,7 @@ stand by and take over within five minutes of it stopping.
   handoff that says what done looks like, follows the answers and checks the result, and still does what only
   this computer can. Nothing is interrupted: a running chat is told at its next step (`cairn vibe log` prints
   it), a new chat when it starts (the memory skill's `recall.py rules` begins with it). For one chat alone, a
-  live session of this computer has **Hand to** on its row (`cairn vibe hand NAME --session SESSION`): Cairn
+  live session of this computer has **Hand to** in that block and on its row in the live recap (`cairn vibe hand NAME --session SESSION`): Cairn
   writes the handoff itself from the session's goal and log, and marks the session; **Take back** closes that
   conversation so the other computer stops. What moves is the work, not the conversation, which stays in the
   AI app; the other computer does it when a chat there picks the handoff up. The switch for all chats is a

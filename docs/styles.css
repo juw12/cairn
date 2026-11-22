@@ -2458,6 +2458,12 @@ details.rc-section > summary .muted { margin-left: 4px; }
 .hand-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .hand-list .hand-what { font-weight: 500; }
 .hand-list .btn { margin-left: auto; }
+.hand-list .hand-do { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+.hand-list .hand-do .btn { margin-left: 0; }
+.hand-pick { margin-top: 10px; }
+.hand-pick > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.hand-pick > summary .muted { font-weight: 400; margin-left: 6px; }
+.hand-pick .hand-list { margin-top: 8px; max-height: 320px; overflow-y: auto; }
 .rc-handed { color: var(--accent); font-weight: 500; }
 .cloud-facts { margin: 8px 0 0; padding-left: 18px; }
 .cloud-facts li { margin: 2px 0; }
