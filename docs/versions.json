@@ -2,6 +2,14 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 107,
+      "date": "2026-11-22",
+      "title": "Claude Code is no longer one of the apps to choose",
+      "changes": [
+        "Chats' work on Vibe offers Vector and OpenCode for a handed chat, and OpenCode for prompts from the phone. Claude Code is taken out: it is not used here. A choice of Claude Code made before falls back to OpenCode (#104)"
+      ]
+    },
+    {
       "build": 106,
       "date": "2026-11-22",
       "title": "An app started for a handoff keeps running when the watcher's pass ends",

@@ -107,10 +107,10 @@ class Waiting(RunnerCase):
             self.assertEqual(runner.waiting(self.brain), [])
 
     def test_an_app_that_fails_leaves_it_picked_up_with_the_reason(self):
-        handover.hand_session(self.brain, self.session, ASUS, agent="claude")
+        handover.hand_session(self.brain, self.session, ASUS, agent="opencode")
         with self.on(ASUS):
             lines = runner.run_waiting(self.brain, self.run_fake("half an answer", "it ended with code 1 and no answer"))
-        self.assertIn("Claude Code did not finish", lines[0])
+        self.assertIn("OpenCode did not finish", lines[0])
         self.assertEqual(self.says(), [(MAC, "note"), (ASUS, "picked-up"), (ASUS, "note")])
         self.assertTrue(self.thread()["open"], "a chat there can still take it on")
         self.assertIn("half an answer", handoff.body_of(self.brain, self.thread()["messages"][-1]["path"]))
@@ -148,24 +148,23 @@ class Apps(unittest.TestCase):
         self.assertEqual(runner.answer_of("opencode", output), ("It printed 4.\n\nNothing else changed.", ""))
         failed = json.dumps({"type": "error", "error": {"message": "the model said no"}})
         self.assertEqual(runner.answer_of("opencode", failed), ("", "the model said no"))
-        self.assertEqual(runner.answer_of("claude", " plain words \n"), ("plain words", ""))
+        self.assertEqual(runner.answer_of("another", " plain words \n"), ("plain words", ""), "an app that prints its answer as it is")
 
     def test_the_commands(self):
         self.assertEqual(runner.command("opencode", "/bin/opencode", "T", "do it"),
                          ["/bin/opencode", "run", "--auto", "--format", "json", "--title", "T", "do it"])
-        self.assertEqual(runner.command("claude", "/bin/claude", "T", "do it"), ["/bin/claude", "-p", "do it"])
 
     def test_a_real_program_is_run_and_stopped_at_the_limit(self):
         folder = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, folder, True)
         with mock.patch.object(runner, "command", return_value=[sys.executable, "-c", "print('  hello  ')"]):
-            self.assertEqual(runner.run_agent("claude", "x", "T", "text", folder), ("hello", ""))
+            self.assertEqual(runner.run_agent("another", "x", "T", "text", folder), ("hello", ""))
         with mock.patch.object(runner, "command", return_value=[sys.executable, "-c", "import time; time.sleep(30)"]):
-            said, problem = runner.run_agent("claude", "x", "T", "text", folder, minutes=0.02)
+            said, problem = runner.run_agent("another", "x", "T", "text", folder, minutes=0.02)
         self.assertEqual(said, "")
         self.assertIn("it was stopped after", problem)
         with mock.patch.object(runner, "command", return_value=[str(folder / "no-such-program")]):
-            self.assertIn("could not be started", runner.run_agent("claude", "x", "T", "text", folder)[1])
+            self.assertIn("could not be started", runner.run_agent("another", "x", "T", "text", folder)[1])
 
 
 class Ask(RunnerCase):
