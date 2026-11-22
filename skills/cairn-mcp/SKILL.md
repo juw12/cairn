@@ -24,6 +24,7 @@ Check your tool list first. A server started with `--read-only` has only the rea
 | `precedent_brief` | `goal`, `k` | Before starting a delegated goal: what the user asked for after similar goals, lessons, a draft definition of done. |
 | `queue_next` | `auto_only` | Get the next open `#queue` task, skipping items tagged `#needs-me`. |
 | `handoffs` | `thread`, `all`, `device` | See what the user's other computers left for this one and what this one is waiting for. Call it at the start. `thread` (a few words of a conversation's name) shows that conversation in full. |
+| `priority` | `session`, `folder` | Your place in the user's order of the running sessions (Cairn, Vibe, Priority). Name the folder you work in, or your session note. Call it at the start of a turn when you do not log your steps with `cairn vibe`; where sessions need the same thing, the lower number goes first. It only reads. |
 
 ### Writing (absent in read-only mode)
 

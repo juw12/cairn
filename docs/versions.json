@@ -2,7 +2,7 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
-      "build": 112,
+      "build": 113,
       "date": "2026-11-22",
       "title": "Projects no longer stop at Couldn't load the repos on the computer itself",
       "changes": [
@@ -11,6 +11,15 @@
         "Reads only: the local server passes on a short list of GitHub reads (users, orgs, repos, repository search), nothing that changes anything. The page never holds the token, and a paired phone does not get this: it asks GitHub itself, as before. A sign-in in the page still comes first, and without a GitHub CLI sign-in everything works as it did (#110)",
         "When GitHub cannot be asked at all (its hourly limit, no network), Projects shows the list of your last visit and says how old it is, instead of an empty page (#110)",
         "CAIRN_NO_GITHUB_READ=1 switches the reading through the computer's sign-in off (#110)"
+      ]
+    },
+    {
+      "build": 112,
+      "date": "2026-11-22",
+      "title": "A session that never runs cairn vibe can ask for its place in your order",
+      "changes": [
+        "The Cairn MCP server has a tool, priority: an assistant names the folder it works in (or its session) and is told its place among the running sessions, the same words cairn vibe log prints. A session the watcher found by itself, such as an OpenCode run, was ordered on the page and never told its place (#109)",
+        "The tool only reads: it does not change the order, and it says so when no order is set (#109)"
       ]
     },
     {
