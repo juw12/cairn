@@ -3,6 +3,12 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 108 (2026-11-22): A step names its session when several are live, and a message is never called sent on a guess
+
+- cairn vibe log, skill, check and end without --session: with several sessions live on this computer the step is refused and the sentence names them, where it went into the newest one, which was another chat's as often as not ([#105](https://github.com/juw12/cairn/pull/105))
+- A session the watcher keeps for another app's runs is never picked for a step that names no session ([#105](https://github.com/juw12/cairn/pull/105))
+- Fixed: when git did not answer in time, a message for another computer counted as sent. It now counts as unsent, is asked about once more with a longer limit, and goes with the next sync; the writer is told Not sent yet, also when a sync command ended well and sent nothing ([#105](https://github.com/juw12/cairn/pull/105))
+
 ## Build 107 (2026-11-22): Claude Code is no longer one of the apps to choose
 
 - Chats' work on Vibe offers Vector and OpenCode for a handed chat, and OpenCode for prompts from the phone. Claude Code is taken out: it is not used here. A choice of Claude Code made before falls back to OpenCode ([#104](https://github.com/juw12/cairn/pull/104))

@@ -2,6 +2,16 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 108,
+      "date": "2026-11-22",
+      "title": "A step names its session when several are live, and a message is never called sent on a guess",
+      "changes": [
+        "cairn vibe log, skill, check and end without --session: with several sessions live on this computer the step is refused and the sentence names them, where it went into the newest one, which was another chat's as often as not (#105)",
+        "A session the watcher keeps for another app's runs is never picked for a step that names no session (#105)",
+        "Fixed: when git did not answer in time, a message for another computer counted as sent. It now counts as unsent, is asked about once more with a longer limit, and goes with the next sync; the writer is told Not sent yet, also when a sync command ended well and sent nothing (#105)"
+      ]
+    },
+    {
       "build": 107,
       "date": "2026-11-22",
       "title": "Claude Code is no longer one of the apps to choose",

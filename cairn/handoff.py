@@ -185,6 +185,8 @@ def deliver(brain: Brain) -> str:
         return f"Not sent yet: {error} It goes with the brain's next sync."
     except Exception as error:  # noqa: BLE001 - a message that is written must never fail on its way out
         return f"Not sent yet: {error}. It goes with the brain's next sync."
+    if brain.handoffs_unsent():  # the sync ended without an error and the message is still only here (or git did not say)
+        return "Not sent yet: git did not confirm that the message is on the remote. It goes with the brain's next sync."
     return "Sent: it is on the brain's remote now."
 
 

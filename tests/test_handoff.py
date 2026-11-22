@@ -465,6 +465,30 @@ class AtOnceTests(unittest.TestCase):
         self.assertTrue(self.mac.handoffs_unsent())
         self.assertEqual(git(self.remote, "rev-list", "--count", "main"), "1", "nothing left this computer")
 
+    def test_git_that_does_not_answer_in_time_never_reads_as_sent(self):
+        """On a busy computer git timed out, `handoffs_unsent` answered "nothing unsent" and the writer
+        was told the message had left. Unknown counts as unsent, and it is asked a second time first."""
+        for brain in (self.mac, self.asus):
+            brain.set_sync_mode("auto")
+        handoff.send(self.mac, "Check the runner", "It stopped at 19:04.", to=["asus"], sender=MAC)
+        real, asked = self.mac._git, []
+
+        def slow(*args, **kwargs):
+            if args and args[0] in ("status", "diff"):
+                asked.append(kwargs.get("timeout", 20))
+                raise subprocess.TimeoutExpired("git", kwargs.get("timeout", 20))
+            return real(*args, **kwargs)
+
+        with mock.patch.object(self.mac, "_git", side_effect=slow):
+            self.assertTrue(self.mac.handoffs_unsent())
+        self.assertEqual(len(asked), 2, "asked again before giving up")
+        self.assertGreater(asked[1], asked[0], "and with a longer limit")
+        with mock.patch.object(self.mac, "handoffs_unsent", return_value=True), mock.patch.object(self.mac, "sync_now", return_value={}):
+            said = handoff.deliver(self.mac)
+        self.assertTrue(said.startswith("Not sent yet"), said)
+        self.assertEqual(handoff.deliver(self.mac), "Sent: it is on the brain's remote now.")
+        self.assertFalse(self.mac.handoffs_unsent())
+
     def test_a_message_leaves_at_once_and_arrives_on_the_other_computers_next_look(self):
         for brain in (self.mac, self.asus):
             brain.set_sync_mode("auto")
