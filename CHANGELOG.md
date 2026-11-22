@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 114 (2026-11-22): Home on a phone: one day's bar is wide enough to tap
+
+- On a touch screen each bar of Home's chart is 24 px wide, where 30 days gave 12 px and 90 days 4 px. A chart of more than 14 days is slid sideways and opens at today ([#111](https://github.com/juw12/cairn/pull/111))
+- A link written as a button inside a line of text is 30 px high on a touch screen, where it was 20 ([#111](https://github.com/juw12/cairn/pull/111))
+
 ## Build 113 (2026-11-22): Projects no longer stop at Couldn't load the repos on the computer itself
 
 - Fixed: Projects showed Couldn't load the repos. Without a sign-in in the page, Cairn asked GitHub anonymously, and GitHub gives 60 such answers an hour to everyone behind the same internet address. On the computer Cairn runs on, the page now reads GitHub through the GitHub CLI's sign-in of that computer (the account picked under Pushes from this computer on Vibe), which gets 5,000 an hour. The same goes for a repo's own page and for People ([#110](https://github.com/juw12/cairn/pull/110))
