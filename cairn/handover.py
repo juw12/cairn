@@ -36,8 +36,8 @@ LOG_LINES = 40  # the end of a session's log that goes into the handoff
 SESSION_KEYS = ("handed_to", "handed_at", "handed_thread", "handed_agent")
 # The AI apps a piece of work can be given to. The ones in STARTS_ITSELF run with nobody at the computer, so
 # Cairn there starts them (cairn/runner.py); the others wait until a chat in that app picks the handoff up.
-AGENTS = {"vector": "Vector", "opencode": "OpenCode", "claude": "Claude Code"}
-STARTS_ITSELF = ("opencode", "claude")
+AGENTS = {"vector": "Vector", "opencode": "OpenCode"}
+STARTS_ITSELF = ("opencode",)
 PHONE_AGENT = "opencode"  # what carries out a prompt from the phone until another one is chosen
 AGENT_LINE = re.compile(r"^Agent:[ \t]*([a-z]+)[ \t]*$", re.M)  # the line of a handoff that names the app asked for
 SOON_TTL_SECONDS = 10  # the live page shows a switch made elsewhere (a terminal, an assistant) this soon

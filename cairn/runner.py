@@ -33,7 +33,7 @@ from .brain import Brain
 RUN_MINUTES = 45  # one piece of work may take this long
 ANSWER_CHARS = 20_000
 ASK_EVERY_SECONDS = 15  # how often `ask` looks for the answer
-PLACES = {"opencode": ("opencode", "~/.opencode/bin/opencode"), "claude": ("claude", "~/.local/bin/claude")}
+PLACES = {"opencode": ("opencode", "~/.opencode/bin/opencode")}
 
 RULES = """\
 Another computer of the same owner left this work for you through Cairn. Nobody is at this computer.
@@ -75,8 +75,6 @@ def program(agent: str) -> str:
 
 
 def command(agent: str, where: str, title: str, text: str) -> list[str]:
-    if agent == "claude":
-        return [where, "-p", text]
     return [where, "run", "--auto", "--format", "json", "--title", title, text]
 
 

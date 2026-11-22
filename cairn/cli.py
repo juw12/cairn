@@ -1063,7 +1063,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
     vibe_parser.add_argument("--task", help="start: link a task, e.g. ship-v1")
-    vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor; hand: the AI app that does it there (vector, opencode, claude)")
+    vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor; hand: the AI app that does it there (vector, opencode)")
     vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest one of this computer)")
     vibe_parser.add_argument("--result", default="shipped", choices=["shipped", "partial", "dropped"], help="end: the outcome")
     vibe_parser.add_argument("--once", action="store_true", help="watch: one pass, then exit")
@@ -1166,7 +1166,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     handoff_parser.add_argument("action", nargs="?", default="list", choices=["list", "send", "show", "reply", "pickup", "done", "close", "ask", "run"])
     handoff_parser.add_argument("--agent", default="", metavar="NAME",
-                                help="ask TITLE --to COMPUTER: the AI app that does it there, started by Cairn (opencode, claude). "
+                                help="ask TITLE --to COMPUTER: the AI app that does it there, started by Cairn (opencode). "
                                      "ask waits for the answer and prints it; run starts what was left here that way")
     handoff_parser.add_argument("--wait", type=float, default=50, metavar="MINUTES", help="ask: how long to wait for the answer (default 50)")
     handoff_parser.add_argument("text", nargs="*", help="send: the title. Others: the conversation, then what to say")
