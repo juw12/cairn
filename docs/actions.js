@@ -401,8 +401,10 @@ function versionDate(day) {
   return new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+// "#86" in a change is its pull request. Not the "#39" inside "&#39;", which is what an apostrophe is once escaped:
+// every "brain's" used to come out as a link to pull request 39.
 const versionChange = (text) =>
-  esc(text).replace(/#(\d+)/g, `<a href="${REPO_URL}/pull/$1" target="_blank" rel="noopener">#$1</a>`);
+  esc(text).replace(/(^|[^&\w])#(\d+)/g, `$1<a href="${REPO_URL}/pull/$2" target="_blank" rel="noopener">#$2</a>`);
 
 // Every build with its date and what changed. versions.json ships with the app (and is kept for offline),
 // so the newest entry is the build this page runs; CHANGELOG.md is written from the same file.
