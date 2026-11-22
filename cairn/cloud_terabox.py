@@ -173,9 +173,14 @@ def go(page, remote: str) -> None:
 
 
 def signed_in(page) -> bool:
+    """True with the files page drawn, False with the sign-in form. Neither after the wait is a page that did
+    not load, which is said as that and not as "sign in"."""
     go(page, "/")
-    return "/main" in page.url and page.locator("input[type=password]").count() == 0 \
-        and page.get_by_text("New Folder", exact=True).count() > 0
+    if page.locator("input[type=password]").count() or "/login" in page.url:
+        return False
+    if "/main" in page.url and page.get_by_text("New Folder", exact=True).count():
+        return True
+    raise Stop("TeraBox's page did not load (a slow computer or connection). Nothing was changed; try again later.")
 
 
 # ---------------------------------------------------------------- what the page shows
