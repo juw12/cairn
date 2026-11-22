@@ -36,7 +36,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-PORT = int(os.environ.get("CAIRN_TERABOX_PORT") or 9333)
+DEFAULT_PORT = 9333
 START = "https://www.terabox.com/main?category=all"
 ROW = "tr.wp-s-pan-table__body-row"
 
@@ -75,21 +75,30 @@ def chrome() -> str:
 # ---------------------------------------------------------------- the window
 
 
-def answering() -> bool:
+def port() -> int:
+    return int(os.environ.get("CAIRN_TERABOX_PORT") or DEFAULT_PORT)
+
+
+def answering() -> str:
+    """Which Chrome is on the profile's port: "" (none), "window" (one the person can see) or "hidden" (a run's)."""
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/version", timeout=5).read()
-        return True
-    except OSError:
-        return False
+        version = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port()}/json/version", timeout=5).read())
+    except (OSError, ValueError):
+        return ""
+    return "hidden" if "Headless" in str(version.get("User-Agent", "")) else "window"
 
 
 def start_window(hidden: bool) -> bool:
-    """Start Chrome on the profile. False when a window on that profile is already open (the person's)."""
-    if answering():
+    """Start Chrome on the profile. False when a window on that profile is already open (the person's).
+    Two runs never share the page: while one is sending, another is turned away."""
+    there = answering()
+    if there == "hidden":
+        raise Stop("A backup is being sent right now, in a Chrome without a window. Try again when it is done.")
+    if there:
         return False
     profile().mkdir(parents=True, exist_ok=True)
     flags = [
-        f"--user-data-dir={profile()}", f"--remote-debugging-port={PORT}", "--remote-debugging-address=127.0.0.1",
+        f"--user-data-dir={profile()}", f"--remote-debugging-port={port()}", "--remote-debugging-address=127.0.0.1",
         "--no-first-run", "--no-default-browser-check", "--window-size=1300,900",
         # keep working when the window is covered or the screen is locked
         "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling",
@@ -137,7 +146,7 @@ def trim_profile() -> None:
 
 
 def the_page(playwright):
-    browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{PORT}", timeout=180000)
+    browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port()}", timeout=180000)
     context = browser.contexts[0]
     pages = [page for page in context.pages if "terabox" in page.url]
     page = pages[-1] if pages else context.new_page()
