@@ -282,6 +282,20 @@ def ensure_start_menu_shortcut(config: "Config") -> None:
         log(f"could not tag the start menu shortcut: {error}")
 
 
+MAC_INSTALL_LINE = "curl -fsSL https://juw12.github.io/cairn/mac-install.sh | bash"
+
+
+def reinstall_line() -> str:
+    """The line that brings this copy up to date when it cannot do that itself, else "".
+
+    docs/mac-install.sh unpacks an archive on a Mac that has no Git. Such a copy has no .git, so it never
+    takes a new build, and nothing said so. A Git checkout updates itself; a copy inside site-packages
+    came from a package manager, which is what updates it."""
+    if (APP_ROOT / ".git").exists() or sys.platform != "darwin" or "site-packages" in APP_ROOT.parts:
+        return ""
+    return MAC_INSTALL_LINE
+
+
 def app_git(*args: str, timeout: int = 120) -> subprocess.CompletedProcess | None:
     if not (APP_ROOT / ".git").exists() or not shutil.which("git"):
         return None
@@ -561,6 +575,7 @@ class DesktopHooks:
             "version": __version__,
             "build": self.loaded_head,
             "updates": (APP_ROOT / ".git").exists(),
+            "reinstall": reinstall_line(),
             "autoUpdate": self.config.get("autoUpdate", True),
             "publishTo": self.config.get("publishTo", ""),
             "autoPublish": bool(self.config.get("autoPublish", False)),

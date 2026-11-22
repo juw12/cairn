@@ -423,6 +423,17 @@ export async function openVersions() {
   const current = releases.find((release) => release.build === state.build.page) || releases[0];
   const newest = releases[0];
   const first = releases[releases.length - 1];
+  // A copy of the desktop app that was installed without Git never takes a new build by itself: say so here,
+  // where a person looks for the version, with the line that brings it up to date.
+  let reinstall = "";
+  try {
+    reinstall = state.info && state.info.desktop ? (await state.store.desktop()).reinstall || "" : "";
+  } catch {
+    reinstall = "";
+  }
+  const stuck = reinstall
+    ? `<p class="ver-reinstall"><strong>This copy does not update itself.</strong> Run the install line again in Terminal: <code>${esc(reinstall)}</code> <button type="button" class="btn sm" data-copy-reinstall>${icon("copy", "sm")} Copy the line</button></p>`
+    : "";
   const behind = newest.build > current.build
     ? `<p class="ver-newer"><strong>Build ${newest.build} is out</strong> (${esc(newest.title)}). <button type="button" class="btn sm primary" data-action="update-now">${icon("refresh", "sm")} Update now</button></p>`
     : "";
@@ -431,6 +442,7 @@ export async function openVersions() {
       <h2 id="versions-title">Version history</h2>
       <p>You are on build ${current.build} from ${versionDate(current.date)}. ${plural(releases.length, "build")} since ${versionDate(first.date)}.</p>
       ${behind}
+      ${stuck}
       <div class="ver-list">
         ${releases.map((release) => `
         <details class="ver"${release === current ? " open" : ""}>
@@ -444,7 +456,10 @@ export async function openVersions() {
         </details>`).join("")}
       </div>
       <div class="actions"><button type="button" class="btn primary" data-cancel>Done</button></div>
-    </div>`, () => {});
+    </div>`, (wrap) => {
+      const copy = wrap.querySelector("[data-copy-reinstall]");
+      if (copy) copy.addEventListener("click", () => copyText(reinstall, "Install line copied. Paste it into Terminal."));
+    });
 }
 
 export async function openSettings() {
@@ -493,7 +508,7 @@ export async function openSettings() {
       <div class="settings-update">
         <span>Cairn ${esc(info.version)}${info.build ? ` <span class="muted">· ${esc(info.build)}</span>` : ""}</span>
         <button class="btn sm ghost" data-settings="versions">${icon("history", "sm")} Version history</button>
-        ${info.updates ? `<button class="btn sm" data-settings="check-update">${icon("refresh", "sm")} Check for updates</button>` : `<span class="muted">Updates come with your package manager.</span>`}
+        ${info.updates ? `<button class="btn sm" data-settings="check-update">${icon("refresh", "sm")} Check for updates</button>` : info.reinstall ? `<span class="settings-reinstall">This copy does not update itself. Run the install line again in Terminal: <code>${esc(info.reinstall)}</code> <button class="btn sm" data-settings="copy-reinstall">${icon("copy", "sm")} Copy the line</button></span>` : `<span class="muted">Updates come with your package manager.</span>`}
       </div>
       <p class="hint">Closing the window keeps Cairn running in the tray. Quit it from the tray icon.</p>
       <div class="actions"><button type="button" class="btn primary" data-cancel>Done</button></div>
@@ -559,6 +574,10 @@ export async function openSettings() {
           if (fresh) $("[data-phone-status]", wrap).textContent = phoneStatus(fresh);
           toast("All phones unpaired.");
         }
+        return;
+      }
+      if (button.dataset.settings === "copy-reinstall") {
+        copyText(info.reinstall, "Install line copied. Paste it into Terminal.");
         return;
       }
       if (button.dataset.settings === "check-update") {

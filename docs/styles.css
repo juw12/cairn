@@ -161,6 +161,8 @@ code { font-family: var(--mono); font-size: max(12px, .88em); padding: 1px 5px; 
 .foot-versions { align-self: flex-start; margin-top: -4px; color: var(--muted); }
 .foot-update { width: 100%; }
 .modal .ver-newer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--ink); }
+.modal .ver-reinstall, .settings-reinstall { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--ink); }
+.modal .ver-reinstall code, .settings-reinstall code { overflow-wrap: anywhere; user-select: all; }
 
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
