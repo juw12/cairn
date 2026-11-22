@@ -3,6 +3,14 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 105 (2026-11-22): Choose the computer and the AI app for one chat, and for prompts from the phone
+
+- A chat's work is done on the computer the chat was started on. Chats' work on Vibe no longer has a switch that hands every chat over: nothing is handed by itself, one chat is handed with Hand to on its row ([#102](https://github.com/juw12/cairn/pull/102))
+- Choose the AI app that does a handed chat on the other computer: Vector, OpenCode or Claude Code. OpenCode and Claude Code run with nobody at the computer, so Cairn there starts them by itself within a minute, says picked-up and answers done with what the app said. Vector cannot be started from outside: the work waits until a Vector chat there picks it up, as before ([#102](https://github.com/juw12/cairn/pull/102))
+- New on Chats' work, Prompts from the phone: the computer that carries out a prompt you send from the phone to a finished chat of this computer, and the app that does it (OpenCode or Claude Code). The phone desk of Vector Relay follows it ([#102](https://github.com/juw12/cairn/pull/102))
+- From a terminal: cairn vibe hand COMPUTER --session NAME --agent NAME, cairn vibe hand phone COMPUTER --agent NAME (here: this computer), cairn handoff ask TITLE --to COMPUTER --agent NAME (leaves work for an app there and waits for its answer) and cairn handoff run (starts what was left here that way). CAIRN_NO_RUNNER=1 stops a computer from starting apps by itself ([#102](https://github.com/juw12/cairn/pull/102))
+- The old switch for all chats is still in cairn vibe hand COMPUTER. While it is on, Chats' work says so and has one button that turns it off ([#102](https://github.com/juw12/cairn/pull/102))
+
 ## Build 104 (2026-11-22): Put the running sessions in your order of importance
 
 - Vibe has a new block, Priority: the running sessions of every computer in one list. Put the most important one at the top and the others under it in order, with Top, up and down on each row, or by dragging its handle ([#101](https://github.com/juw12/cairn/pull/101))

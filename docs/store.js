@@ -173,8 +173,14 @@ export class ServerStore {
 
   // Let `to`, another computer of this brain, do the work of this computer's chats ("here": take it back).
   // With `session` it is that one session: handed now, with a handoff written from its log, or taken back.
-  async vibeHand(to, session = "") {
-    return this.request("POST", "api/vibe/hand", session ? { to, session } : { to });
+  // `agent` is the AI app that does it there ("vector", "opencode", "claude"; none: whichever chat picks it up).
+  async vibeHand(to, session = "", agent = "") {
+    return this.request("POST", "api/vibe/hand", session ? { to, session, ...(agent ? { agent } : {}) } : { to });
+  }
+
+  // Where a prompt from the phone to a finished chat of this computer is carried out: the computer and/or the app.
+  async vibeHandPhone(to, agent) {
+    return this.request("POST", "api/vibe/hand", { phone: true, ...(to ? { to } : {}), ...(agent ? { agent } : {}) });
   }
 
   // Send the backup to the cloud drive now (set up on this computer with `cairn cloud setup`).

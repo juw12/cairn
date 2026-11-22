@@ -356,14 +356,17 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             to = str(body.get("to", ""))
             session = str(body.get("session", "")).strip()
+            agent = str(body.get("agent", ""))
             written: list[str] = []
-            if not session:
+            if body.get("phone"):  # {phone: true, to?, agent?}: where a prompt from the phone is carried out
+                message = handover.set_phone(self.brain, to if "to" in body else None, agent or None)["message"]
+            elif not session:
                 message = handover.switch(self.brain, to)["message"]
             elif core.device_key(to) in handover.HERE_WORDS and to.strip():
                 result = handover.take_back(self.brain, session)
                 message, written = result["message"], [result["path"]]
             else:
-                result = handover.hand_session(self.brain, session, to)
+                result = handover.hand_session(self.brain, session, to, agent=agent)
                 message, written = result["message"], [result["path"], result["handoff"]]
         except (handover.HandoverError, ValueError, OSError) as error:
             return self._error(HTTPStatus.BAD_REQUEST, str(error))

@@ -340,6 +340,75 @@ class MemorySkillTests(HandoverCase):
         self.assertIn("remember.py handoff", guide)
 
 
+class AppAndPhoneTests(CommandTests):
+    """One chat is handed to a computer and an AI app there; prompts from the phone have a place of their own."""
+
+    def head(self) -> str:
+        return handoff.body_of(self.brain, self.threads()[0]["messages"][0]["path"])
+
+    def test_a_session_is_handed_to_an_app_that_cairn_starts(self):
+        result = handover.hand_session(self.brain, self.session, "asus", agent="OpenCode")
+        self.assertEqual((result["to"], result["agent"]), (ASUS, "opencode"))
+        self.assertIn(f"Cairn on {ASUS} starts OpenCode on it by itself", result["message"])
+        self.assertEqual(self.note(self.session)["meta"]["handed_agent"], "opencode")
+        self.assertEqual(handover.agent_asked(self.head()), "opencode")
+        self.assertEqual(handover.status(self.brain)["sessions"][0]["agent"], "opencode")
+        handover.take_back(self.brain, self.session)
+        self.assertNotIn("handed_agent", self.note(self.session)["meta"])
+
+    def test_an_app_that_cannot_be_started_waits_for_its_chat(self):
+        result = handover.hand_session(self.brain, self.session, "asus", agent="vector")
+        self.assertIn("waits there until a Vector chat picks it up", result["message"])
+        self.assertIn("Nothing can start Vector from outside", self.head())
+
+    def test_without_an_app_the_handoff_names_none(self):
+        handover.hand_session(self.brain, self.session, "asus")
+        self.assertEqual(handover.agent_asked(self.head()), "")
+        self.assertNotIn("handed_agent", self.note(self.session)["meta"])
+
+    def test_an_unknown_app_is_refused_before_anything_is_written(self):
+        with self.assertRaisesRegex(handover.HandoverError, 'No AI app "cursor". Known: Vector, OpenCode, Claude Code'):
+            handover.hand_session(self.brain, self.session, "asus", agent="cursor")
+        self.assertEqual(self.threads(), [])
+
+    def test_hand_with_an_app_from_the_command_line(self):
+        with mock.patch.object(handoff, "deliver", return_value=""):
+            code, out, _ = self.run_cli("vibe", "hand", "asus", "--session", self.session, "--agent", "claude code")
+        self.assertEqual(code, 0)
+        self.assertIn(f"Handed to {ASUS}, Claude Code", out)
+        self.assertIn(f"({ASUS}" if False else "(Claude Code)", self.run_cli("vibe", "hand")[1])
+
+    def test_phone_prompts_are_done_here_by_opencode_until_chosen(self):
+        self.assertEqual(handover.phone(self.brain), {"to": "", "agent": "opencode"})
+        reading = handover.status(self.brain)
+        self.assertEqual(reading["phone"], {"to": "", "agent": "opencode"})
+        self.assertEqual([(agent["id"], agent["starts"]) for agent in reading["agents"]], [("vector", False), ("opencode", True), ("claude", True)])
+        self.assertEqual(self.run_cli("vibe", "hand", "phone")[1].strip(), "PHONE to=here agent=opencode")
+
+    def test_the_phone_s_computer_and_app_are_chosen_apart(self):
+        reading = handover.set_phone(self.brain, "asus")
+        self.assertEqual(reading["phone"], {"to": ASUS, "agent": "opencode"})
+        self.assertIn(f"carried out on {ASUS}, by OpenCode", reading["message"])
+        self.assertEqual(handover.set_phone(self.brain, agent="claude")["phone"], {"to": ASUS, "agent": "claude"})
+        self.assertEqual(handover.set_phone(self.brain, "here")["phone"], {"to": "", "agent": "claude"})
+        self.assertEqual(handover.status(self.brain)["to"], "", "it is not the switch for all chats")
+        self.assertEqual(handover.notice(self.brain), "")
+
+    def test_the_phone_cannot_be_given_an_app_that_does_not_start_itself(self):
+        with self.assertRaisesRegex(handover.HandoverError, "Vector cannot be started from outside"):
+            handover.set_phone(self.brain, agent="vector")
+        self.assertEqual(handover.phone(self.brain)["agent"], "opencode")
+
+    def test_the_phone_from_the_command_line(self):
+        code, out, _ = self.run_cli("vibe", "hand", "phone", "asus", "--agent", "opencode")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip().splitlines()[-1], f"PHONE to={ASUS} agent=opencode")
+        self.assertEqual(self.run_cli("vibe", "hand", "phone", "here")[1].strip().splitlines()[-1], "PHONE to=here agent=opencode")
+        code, _, err = self.run_cli("vibe", "hand", "phone", "--agent", "vector")
+        self.assertEqual(code, 1)
+        self.assertIn("cannot be started from outside", err)
+
+
 class ServerTests(HandoverCase):
     def setUp(self):
         super().setUp()
@@ -386,6 +455,21 @@ class ServerTests(HandoverCase):
             status, data = self.call("POST", "/api/vibe/hand", {"to": "here", "session": self.session})
         self.assertEqual((status, data["sessions"]), (200, []))
 
+    def test_a_press_on_a_row_names_the_app(self):
+        with mock.patch.object(handoff, "deliver"):
+            status, data = self.call("POST", "/api/vibe/hand", {"to": ASUS, "session": self.session, "agent": "opencode"})
+        self.assertEqual((status, data["sessions"][0]["agent"]), (200, "opencode"))
+        self.assertIn("handed_agent: opencode", data["files"][0]["text"])
+
+    def test_a_press_sends_the_phone_s_prompts_elsewhere(self):
+        status, data = self.call("POST", "/api/vibe/hand", {"phone": True, "to": ASUS})
+        self.assertEqual((status, data["phone"], data["to"], data["files"]), (200, {"to": ASUS, "agent": "opencode"}, "", []))
+        status, data = self.call("POST", "/api/vibe/hand", {"phone": True, "agent": "claude"})
+        self.assertEqual((status, data["phone"]), (200, {"to": ASUS, "agent": "claude"}))
+        self.assertEqual(self.call("GET", "/api/vibe")[1]["hand"]["phone"], {"to": ASUS, "agent": "claude"})
+        status, data = self.call("POST", "/api/vibe/hand", {"phone": True, "agent": "vector"})
+        self.assertEqual(status, 400)
+
     def test_a_refusal_is_a_400_with_the_sentence(self):
         status, data = self.call("POST", "/api/vibe/hand", {"to": "thinkpad"})
         self.assertEqual(status, 400)
@@ -420,29 +504,58 @@ class PageTests(HandoverCase):
         page.wait_for_selector(".vibe-hand")
         return page
 
-    def test_one_press_hands_all_chats_over_and_one_takes_it_back(self):
+    def test_there_is_no_switch_for_all_chats_and_the_app_is_chosen(self):
         page = self.open()
         block = page.locator(".vibe-hand")
-        self.assertEqual(block.locator(".chip").all_inner_texts(), ["This computer", ASUS])
-        self.assertEqual(block.locator(".chip.on").inner_text(), "This computer")
         self.assertIn("done on this computer", block.locator("header").inner_text())
+        self.assertIn("Nothing is handed over by itself", block.inner_text())
+        self.assertEqual(block.locator(".hand-agent .chip").all_inner_texts(), ["Vector", "OpenCode", "Claude Code"])
+        self.assertEqual(block.locator(".hand-agent .chip.on").inner_text(), "Vector")
+        self.assertEqual(block.locator(".hand-all").count(), 0)
 
-        block.locator(".chip", has_text=ASUS).click()
-        page.wait_for_function("document.querySelector('.vibe-hand .chip.on')?.textContent !== 'This computer'")
-        self.assertEqual(handover.status(self.brain)["to"], ASUS)
-        self.assertIn(f"goes to {ASUS} since", page.locator(".vibe-hand header").inner_text())
-        self.assertEqual(self.threads(), [], "the switch itself sends nothing")
+        block.locator(".hand-agent .chip", has_text="OpenCode").click()
+        page.wait_for_function("document.querySelector('.vibe-hand .hand-agent .chip.on')?.textContent === 'OpenCode'")
+        self.assertEqual(handover.status(self.brain)["to"], "", "choosing an app hands nothing over")
+        self.assertEqual(self.threads(), [])
 
-        page.locator(".vibe-hand .chip", has_text="This computer").click()
-        page.wait_for_function("document.querySelector('.vibe-hand .chip.on')?.textContent === 'This computer'")
-        self.assertEqual(handover.status(self.brain)["to"], "")
+        page.locator(".vibe-hand .hand-pick li").locator("[data-action=vibe-hand]").click()
+        self.assertIn("starts OpenCode on it by itself", page.locator("dialog, .modal, [role=dialog]").last.inner_text())
+        page.get_by_role("button", name=f"Hand to {ASUS}", exact=True).last.click()
+        page.wait_for_selector(".vibe-hand .hand-out li")
+        self.assertEqual(self.note(self.session)["meta"]["handed_agent"], "opencode")
+        self.assertIn("OpenCode", page.locator(".vibe-hand .hand-out").inner_text())
+        self.assertEqual(handover.agent_asked(handoff.body_of(self.brain, self.threads()[0]["messages"][0]["path"])), "opencode")
+        self.assertEqual(self.errors, [])
+
+    def test_prompts_from_the_phone_are_sent_to_a_computer_and_an_app(self):
+        page = self.open()
+        block = page.locator(".vibe-hand .hand-phone")
+        self.assertEqual(block.locator(".hand-phone-to .chip").all_inner_texts(), ["This computer", ASUS])
+        self.assertEqual(block.locator(".hand-phone-to .chip.on").inner_text(), "This computer")
+        self.assertEqual(block.locator(".hand-phone-agent .chip").all_inner_texts(), ["OpenCode", "Claude Code"], "Vector cannot be started from outside")
+        self.assertEqual(block.locator(".hand-phone-agent .chip.on").inner_text(), "OpenCode")
+
+        block.locator(".hand-phone-to .chip", has_text=ASUS).click()
+        page.wait_for_function("document.querySelector('.hand-phone-to .chip.on')?.textContent !== 'This computer'")
+        self.assertEqual(handover.phone(self.brain), {"to": ASUS, "agent": "opencode"})
+        page.locator(".hand-phone-agent .chip", has_text="Claude Code").click()
+        page.wait_for_function("document.querySelector('.hand-phone-agent .chip.on')?.textContent === 'Claude Code'")
+        self.assertEqual(handover.phone(self.brain), {"to": ASUS, "agent": "claude"})
+        page.locator(".hand-phone-to .chip", has_text="This computer").click()
+        page.wait_for_function("document.querySelector('.hand-phone-to .chip.on')?.textContent === 'This computer'")
+        self.assertEqual(handover.phone(self.brain), {"to": "", "agent": "claude"})
+        self.assertEqual(handover.status(self.brain)["to"], "", "the phone's choice is not a switch for the chats")
         self.assertEqual(self.errors, [])
 
     def test_a_switch_made_in_a_terminal_shows_on_the_page(self):
         page = self.open()
         with mock.patch.object(handover, "SOON_TTL_SECONDS", 0):
-            handover.switch(self.brain, ASUS)
-            page.wait_for_function("document.querySelector('.vibe-hand .chip.on')?.textContent !== 'This computer'")
+            handover.switch(self.brain, ASUS)  # the old switch for all chats is still in `cairn vibe hand COMPUTER`
+            page.wait_for_selector(".vibe-hand .hand-all")
+            self.assertIn(f"goes to {ASUS} since", page.locator(".vibe-hand header").inner_text())
+            page.locator(".vibe-hand .hand-all [data-action=vibe-hand]").click()
+            page.wait_for_function("!document.querySelector('.vibe-hand .hand-all')")
+        self.assertEqual(handover.status(self.brain)["to"], "")
         self.assertEqual(self.errors, [])
 
     def test_the_block_lists_this_computers_live_chats_to_pick_from(self):

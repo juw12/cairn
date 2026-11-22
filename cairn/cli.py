@@ -526,11 +526,19 @@ def _vibe_hand(brain: Brain, args) -> int:
     wanted = " ".join(args.text).strip() or (args.to or "").strip()
     session = (args.session or "").strip()
     try:
+        if args.text and args.text[0].lower() == "phone":
+            # `cairn vibe hand phone [COMPUTER | here] [--agent NAME]`: where a prompt from the phone is carried out.
+            where = " ".join(args.text[1:]).strip()
+            if where or args.agent:
+                print(handover.set_phone(brain, where or None, args.agent)["message"])
+            route = handover.phone(brain)
+            print(f"PHONE to={route['to'] or 'here'} agent={route['agent']}")  # the phone desk reads this line
+            return 0
         if session:
             if core.device_key(wanted) in handover.HERE_WORDS and wanted:
                 print(handover.take_back(brain, session)["message"])
             else:
-                result = handover.hand_session(brain, session, wanted)
+                result = handover.hand_session(brain, session, wanted, agent=args.agent or "")
                 print(result["message"])
                 print(f"Left for {result['to']}: brain/{result['handoff']}")
             print(handoff.deliver(brain))
@@ -656,6 +664,25 @@ def cmd_handoff(brain: Brain, args) -> int:
         if args.action == "list":
             print(handoff.overview(brain, args.sender or "", everything=args.all), end="")
             return 0
+        if args.action == "run":
+            from . import runner
+
+            if not args.offline:
+                handoff.refresh(brain)
+            print("\n".join(runner.run_waiting(brain)) or "Nothing is left here for an app that Cairn can start.")
+            return 0
+        if args.action == "ask":
+            from . import handover, runner
+
+            if len(args.to) != 1:
+                raise handoff.HandoffError('Ask one computer: --to "<computer>".')
+            try:
+                done, said = runner.ask(brain, " ".join(words), extra, args.to[0], args.agent or "",
+                                        wait_seconds=args.wait * 60, echo=lambda line: print(line, file=sys.stderr))
+            except handover.HandoverError as error:
+                raise handoff.HandoffError(str(error)) from None
+            print(said)
+            return 0 if done else 3
         if args.action == "show":
             print(handoff.transcript(brain, handoff.find_thread(handoff.threads(brain), " ".join(words))), end="")
             return 0
@@ -1036,7 +1063,7 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
     vibe_parser.add_argument("--task", help="start: link a task, e.g. ship-v1")
-    vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor")
+    vibe_parser.add_argument("--agent", help="start: who is coding, e.g. claude, copilot, cursor; hand: the AI app that does it there (vector, opencode, claude)")
     vibe_parser.add_argument("--session", help="which live session to write to (default: $CAIRN_SESSION, else the newest one of this computer)")
     vibe_parser.add_argument("--result", default="shipped", choices=["shipped", "partial", "dropped"], help="end: the outcome")
     vibe_parser.add_argument("--once", action="store_true", help="watch: one pass, then exit")
@@ -1137,7 +1164,11 @@ def build_parser() -> argparse.ArgumentParser:
             "where the brain is set up for it (git config cairn.sync auto, or a sync command of your own), else with the next sync."
         ),
     )
-    handoff_parser.add_argument("action", nargs="?", default="list", choices=["list", "send", "show", "reply", "pickup", "done", "close"])
+    handoff_parser.add_argument("action", nargs="?", default="list", choices=["list", "send", "show", "reply", "pickup", "done", "close", "ask", "run"])
+    handoff_parser.add_argument("--agent", default="", metavar="NAME",
+                                help="ask TITLE --to COMPUTER: the AI app that does it there, started by Cairn (opencode, claude). "
+                                     "ask waits for the answer and prints it; run starts what was left here that way")
+    handoff_parser.add_argument("--wait", type=float, default=50, metavar="MINUTES", help="ask: how long to wait for the answer (default 50)")
     handoff_parser.add_argument("text", nargs="*", help="send: the title. Others: the conversation, then what to say")
     handoff_parser.add_argument("--to", action="append", default=[], metavar="COMPUTER",
                                 help='send: who it is for, a name or a few words of it; repeat for several; "all" for every computer')
