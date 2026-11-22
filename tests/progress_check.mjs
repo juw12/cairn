@@ -1,6 +1,6 @@
 // Checks for docs/progress.js; run by tests/test_progress.py (needs Node).
 import assert from "node:assert/strict";
-import { MACHINE_FRESH_MIN, agentGroup, deviceChoice, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubAccounts, githubBudget, githubFromNote, githubMoves, githubUsage, historyRemaining, machineFromNote, machineReading, notesOfDevices, movePending, reportedProgress } from "../docs/progress.js";
+import { MACHINE_FRESH_MIN, agentGroup, deviceChoice, deviceList, deviceNotes, deviceOf, estimateEffort, estimateProgress, formatMinutes, githubAccounts, githubBudget, githubFromNote, githubMoves, githubUsage, historyRemaining, limitOf, machineFromNote, machineReading, notesOfDevices, movePending, reportedProgress } from "../docs/progress.js";
 
 const log = (...entries) => entries.map(([time, kind, text]) => ({ time, kind, text }));
 
@@ -106,6 +106,28 @@ assert.deepEqual(online.net, {
   reach: "Internet answers in 1800 ms", speed: "measured 12 Mbit/s down at 10:42",
 });
 assert.equal(machineFromNote({ meta: { ...noted.meta, net: "melting" } }).net, null);
+// Where it stands against the brain's load limit travels in the same note; a note from an older Cairn has none.
+const at0 = (stamp) => new Date(stamp).getTime();
+assert.equal(fromNote.limit, null);
+const overNote = machineFromNote({
+  meta: {
+    ...noted.meta, limit: "over", limit_since: "2026-03-04T09:10", limit_restart: "up 76 h since restart (due after 72 h)",
+    limit_why: "processor 82% busy on average over the last 60 min (limit 75%); memory 93% or more in use for 15 min (limit 90%)",
+  },
+});
+assert.deepEqual(overNote.limit, {
+  state: "over", since: "2026-03-04T09:10", restart: "up 76 h since restart (due after 72 h)",
+  why: ["processor 82% busy on average over the last 60 min (limit 75%)", "memory 93% or more in use for 15 min (limit 90%)"],
+});
+assert.deepEqual(machineFromNote({ meta: { ...noted.meta, limit: "ok" } }).limit, { state: "ok", why: [], since: "", restart: "" });
+assert.equal(machineFromNote({ meta: { ...noted.meta, limit: "melting" } }).limit, null);
+// What the local app measured has the same shape; while nobody has looked lately it claims nothing.
+assert.deepEqual(limitOf({ state: "over", known: true, why: ["processor 80% busy"], since: "2026-03-04T09:10", restart: "", cpu_avg: 80 }),
+  { state: "over", why: ["processor 80% busy"], since: "2026-03-04T09:10", restart: "" });
+assert.equal(limitOf({ state: "ok", known: false, why: [], since: "", restart: "" }), null);
+assert.equal(limitOf(null), null);
+assert.equal(machineReading({ level: "medium", at: "2026-03-04T10:20", limit: { state: "over", known: true, why: ["x"], since: "", restart: "" } }, [], at0("2026-03-04T10:20")).limit.state, "over");
+assert.equal(machineReading(null, [{ meta: { ...noted.meta, limit: "over", limit_why: "x" } }], at0("2026-03-04T10:05")).limit.state, "over");
 assert.equal(machineFromNote({ meta: { title: "Plain note" } }), null);
 assert.equal(machineFromNote({ meta: { load: "heavy" } }), null);
 

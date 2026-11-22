@@ -331,6 +331,7 @@ def cmd_vibe(brain: Brain, args) -> int:
                       f"   (or add --session {slug})")
             _say_handed_over(brain, note["path"])
             _say_place(brain, note["path"])
+            _say_limit(brain)
         elif args.action in ("log", "skill"):
             text = " ".join(args.text)
             kind = "skill" if args.action == "skill" else args.kind
@@ -344,11 +345,13 @@ def cmd_vibe(brain: Brain, args) -> int:
             print("Logged.")
             _say_handed_over(brain, saved["path"])
             _say_place(brain, saved["path"])
+            _say_limit(brain)
         elif args.action == "check":
             code, saved = vibe.check(brain, args.text, session_slug=args.session or "")
             print(f"{'PASS' if code == 0 else 'FAIL'} logged to the live session.")
             _say_handed_over(brain, saved["path"])
             _say_place(brain, saved["path"])
+            _say_limit(brain)
             return code
         elif args.action == "end":
             note = vibe.end(brain, args.result, " ".join(args.text), session_slug=args.session or "")
@@ -361,6 +364,8 @@ def cmd_vibe(brain: Brain, args) -> int:
             return _vibe_hand(brain, args)
         elif args.action == "rank":
             return _vibe_rank(brain, args)
+        elif args.action == "limit":
+            return _vibe_limit(brain, args)
         elif args.action == "device":
             from . import machine
 
@@ -478,6 +483,41 @@ def _say_handed_over(brain: Brain, session_path: str = "") -> None:
         return
     if text:
         print("\n" + text)
+
+
+def _say_limit(brain: Brain) -> None:
+    """After a step: tell the assistant when this computer is over the brain's load limit, or due for a
+    restart (cairn/limit.py)."""
+    from . import limit
+
+    try:
+        text = limit.notice(brain)
+    except Exception:  # noqa: BLE001 - a step that is logged must never fail on this
+        return
+    if text:
+        print("\n" + text)
+
+
+def _vibe_limit(brain: Brain, args) -> int:
+    """`cairn vibe limit`: the load limit of this brain's computers and where each stands against it.
+    `cairn vibe limit --processor 70 --minutes 45 --memory 90 --restart-hours 72` changes it, and
+    `cairn vibe limit off` (or `on`) switches it."""
+    from . import limit, machine
+
+    word = " ".join(args.text).strip().lower()
+    try:
+        if word and word not in ("on", "off"):
+            raise limit.LimitError("cairn vibe limit takes on or off, or the numbers: --processor, --minutes, --memory, --restart-hours.")
+        changes = {"processor": args.processor, "minutes": args.minutes, "memory": args.memory,
+                   "restart_hours": args.restart_hours, "on": {"on": True, "off": False}.get(word)}
+        if any(value is not None for value in changes.values()):
+            limit.set_limits(brain, **changes)
+            print(f"Written to {limit.FILE}: every computer of this brain follows it from its next look.\n")
+        print(limit.summary(brain, machine.device_name()))
+    except limit.LimitError as error:
+        print(error, file=sys.stderr)
+        return 1
+    return 0
 
 
 def _say_place(brain: Brain, session_path: str = "") -> None:
@@ -1058,7 +1098,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Live progress for AI-assisted coding, kept in brain/sessions/. Tell your assistant to run "
         "`cairn vibe log` after each step and `cairn vibe check -- <tests>` to record results; the app shows it as it happens.",
     )
-    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github", "device", "hand", "rank"])
+    vibe_parser.add_argument("action", choices=["start", "log", "skill", "check", "end", "status", "watch", "github", "device", "hand", "rank", "limit"])
     vibe_parser.add_argument("text", nargs="*", help="goal / log text / end summary; for check, the command after --")
     vibe_parser.add_argument("--kind", default="note", choices=core.LOG_KINDS, help="log: note, prompt, pass, fail, commit, skill (a text starting with /refine, /council... is a skill)")
     vibe_parser.add_argument("--progress", type=int, metavar="PCT", help="log: how far along the work is (0-100); the Vibe page shows it as the live bar and paces the time left from it")
@@ -1082,6 +1122,10 @@ def build_parser() -> argparse.ArgumentParser:
     vibe_parser.add_argument("--account", metavar="NAME", help="github: the figure of another account you are signed in to; with move, the account that owns the repo")
     vibe_parser.add_argument("--to", metavar="NAME", help="github move REPO: the account of yours that takes the private repo, so its minutes count there; rank SESSION: where it goes (top, up, down, bottom, or a number)")
     vibe_parser.add_argument("--reset", action="store_true", help="rank: forget the order, so the running sessions are listed as they started")
+    vibe_parser.add_argument("--processor", type=int, metavar="PCT", help="limit: the processor's average use in percent a computer may reach over --minutes (default 75)")
+    vibe_parser.add_argument("--minutes", type=int, metavar="N", help="limit: the stretch that average is taken over (default 60)")
+    vibe_parser.add_argument("--memory", type=int, metavar="PCT", help="limit: memory in use in percent that may not stay for 15 minutes (default 90)")
+    vibe_parser.add_argument("--restart-hours", type=int, metavar="N", help="limit: hours since the last restart after which a computer is due for one (default 72; 0: never said)")
     vibe_parser.add_argument("--yes", action="store_true", help="github move: do not ask first")
     vibe_parser.add_argument("--at", metavar="WHEN", help="github: when GitHub showed that figure, e.g. 2026-11-16T14:51 (default: now)")
     vibe_parser.add_argument("--api", type=int, metavar="MINUTES", help="github: what the billing rows summed to at that moment, for a figure that is not fresh")

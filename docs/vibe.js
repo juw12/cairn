@@ -820,6 +820,24 @@ export async function measureSpeed() {
   refreshProgress();
 }
 
+// Where the computer stands against the brain's load limit (CAIRN-LIMIT.md, the same for every computer):
+// said only when it is over, or due for a restart. Under its limit the card stays as it was.
+function machineLimit(reading) {
+  const limit = reading.limit;
+  if (!limit || (limit.state !== "over" && !limit.restart)) return "";
+  const since = limit.since ? ` · since ${machineWhen({ at: limit.since })}` : "";
+  const over = limit.state === "over"
+    ? `<span class="effort effort-heavy" title="The limit is set for every computer in CAIRN-LIMIT.md (cairn vibe limit)">Over its load limit</span>
+      <span class="vm-limit-why">${esc(limit.why.join(" · "))}${esc(since)}</span>
+      <p class="vm-limit-note small">Cairn starts no handed-over work here and tells the assistants on it to start nothing heavy until it has rested.</p>`
+    : "";
+  const restart = limit.restart ? `<p class="vm-limit-note small">Due for a restart: ${esc(limit.restart)}.</p>` : "";
+  return `<div class="vm-limit" role="status" aria-label="Load limit">
+      <span class="vm-label">Limit</span>
+      ${over}${restart}
+    </div>`;
+}
+
 // Which computer this is and how loaded it is, above everything that runs on it. Re-rendered every poll tick.
 function machineStrip() {
   const reading = machine();
@@ -841,6 +859,7 @@ function machineStrip() {
       ${machineMeter("Memory", reading.ram_pct, free)}
     </div>
     ${machineNet(reading)}
+    ${machineLimit(reading)}
     <p class="vm-foot muted small">${esc(foot.join(" · "))}${foot.length ? " · " : ""}<span class="vm-when">${esc(when)}</span></p>
   </section>`;
 }

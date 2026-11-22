@@ -192,6 +192,24 @@ export function machineFromNote(note) {
     net: NET_LEVELS.includes(meta.net)
       ? { level: meta.net, link: String(meta.net_link || ""), reach: String(meta.net_reach || ""), speed: String(meta.net_speed || ""), why: String(meta.net_why || "") }
       : null,
+    limit: limitOf({ state: meta.limit, why: listOf(meta.limit_why), since: meta.limit_since, restart: meta.limit_restart }),
+  };
+}
+
+export const LIMIT_STATES = ["ok", "over", "off"];
+
+/**
+ * Where a computer stands against the brain's load limit (cairn/limit.py): { state, why, since, restart },
+ * or null while it has not been measured (an older Cairn there, or nobody has looked lately).
+ * Takes what the local app measured or what a machines/ note says.
+ */
+export function limitOf(raw) {
+  if (!raw || !LIMIT_STATES.includes(raw.state) || raw.known === false) return null;
+  return {
+    state: raw.state,
+    why: (Array.isArray(raw.why) ? raw.why : listOf(raw.why)).map(String).filter(Boolean),
+    since: String(raw.since || ""),
+    restart: String(raw.restart || ""),
   };
 }
 
@@ -208,7 +226,7 @@ export function machineReading(live, notes, nowMs = Date.now()) {
   if (!reading) return null;
   const at = Date.parse(reading.at);
   const age = Number.isFinite(at) ? Math.max(0, Math.round((nowMs - at) / 60000)) : null;
-  return { ...reading, age, fresh: reading.live || (age !== null && age <= MACHINE_FRESH_MIN) };
+  return { ...reading, limit: limitOf(reading.limit), age, fresh: reading.live || (age !== null && age <= MACHINE_FRESH_MIN) };
 }
 
 // ------------------------------------------------------------ GitHub Actions minutes

@@ -80,6 +80,8 @@ cairn vibe hand                           # which computer does the work of this
 cairn vibe hand "<computer>"              # the user's switch: every chat here leaves its work for that computer; `hand here` takes it back. Only when the user says so
 cairn vibe rank                           # the running sessions in the user's order of importance, the most important first (changes nothing)
 cairn vibe rank "<session>" --to top      # the user's order: move one session (top, up, down, bottom, or a number). Only when the user says so
+cairn vibe limit                          # the load limit of the brain's computers and where each stands against it (changes nothing)
+cairn vibe limit --processor 70           # the user's limit: change it (--processor, --minutes, --memory, --restart-hours; `limit off` | `on`). Only when the user says so
 cairn cloud                               # the second copy in a cloud drive: what it holds and when it was sent (changes nothing)
 cairn cloud sync                          # send the brain there now, locked first; only after the user ran `cairn cloud setup` (--repos: their GitHub repos too)
 cairn serve --port 4777                   # open the app in the browser (the default command)

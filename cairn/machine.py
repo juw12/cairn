@@ -158,6 +158,11 @@ def uptime_text(seconds) -> str:
     return f"up {hours} h ({hours // 24} d {hours % 24} h) since restart"
 
 
+def uptime_hours(seconds) -> int | None:
+    """Whole hours since the computer last started, None where that cannot be read."""
+    return None if seconds is None or seconds < 0 else int(seconds // 3600)
+
+
 def top_text(group: dict) -> str:
     """"opencode x15: 5.2 GB, 20% CPU"."""
     count = f" x{group['count']}" if group.get("count", 1) > 1 else ""
@@ -929,8 +934,9 @@ def snapshot(net_wait: float = NET_FIRST_WAIT_SECONDS) -> dict | None:
 
 
 def load_now() -> dict | None:
-    """Only how busy the processors and how full the memory are right now: {cpu_pct, ram_pct, level}.
-    Cheap enough for every watcher pass (no process list, no specs). None where it cannot be read."""
+    """Only how busy the processors and how full the memory are right now: {cpu_pct, ram_pct, commit_pct,
+    uptime_hours, level}. Cheap enough for every watcher pass (no process list, no specs). None where it
+    cannot be read. The load limit (cairn/limit.py) is judged from these looks."""
     try:
         with _lock:
             memory = _memory()
@@ -938,7 +944,8 @@ def load_now() -> dict | None:
                 return None
             cpu_pct = _cpu_percent(time.monotonic())
             level, _ = load_level(cpu_pct, memory["ram_pct"], memory["commit_pct"])
-            return {"cpu_pct": cpu_pct, "ram_pct": memory["ram_pct"], "level": level}
+            return {"cpu_pct": cpu_pct, "ram_pct": memory["ram_pct"], "commit_pct": memory["commit_pct"],
+                    "uptime_hours": uptime_hours(_uptime_seconds()), "level": level}
     except Exception:  # a reading is a nicety: it must never take the watcher down
         return None
 

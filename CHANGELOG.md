@@ -3,6 +3,16 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 115 (2026-11-22): A load limit every computer of the brain follows
+
+- Every computer of the brain follows one load limit: the processor's average use over an hour (75% unless changed), memory that stays 90% full for 15 minutes, and 72 hours since the last restart. Why: a laptop that ran several assistants for 100 hours at about 80% of its processor lost its drive in the middle of the work, and its load note had called every one of those hours medium. A level describes a moment; the limit describes the stretch ([#112](https://github.com/juw12/cairn/pull/112))
+- Over its limit, a computer's assistants are told at their next step to start nothing heavy until it has rested: cairn vibe start, log and check print a block that begins with LOAD LIMIT, with the figures, and the MCP tool priority says the same to an assistant that never logs. A second block, RESTART DUE, says when the computer has been up longer than the limit allows ([#112](https://github.com/juw12/cairn/pull/112))
+- Cairn starts no work another computer left for an app of a computer that is over its limit. The handoff waits and is started by the watcher's first pass after the computer has rested, which is once the average is 5 points under the limit ([#112](https://github.com/juw12/cairn/pull/112))
+- The computer's card on Vibe says Over its load limit, with the figures and since when, on every device: it travels in the computer's note in machines/. Under its limit the card is as it was ([#112](https://github.com/juw12/cairn/pull/112))
+- cairn vibe limit shows the limit and every computer of the brain against it. cairn vibe limit --processor 70 --minutes 45 --memory 90 --restart-hours 72 changes it, cairn vibe limit off switches it off. The numbers are one small file, CAIRN-LIMIT.md, so every computer follows the same ones; without the file the defaults hold ([#112](https://github.com/juw12/cairn/pull/112))
+- Each computer measures itself with the watcher's look once a minute, kept for four hours in a file next to the watcher's state and never synced. Nothing is claimed while nobody has looked for 5 minutes: a closed Cairn or a sleeping computer is not judged from an old average ([#112](https://github.com/juw12/cairn/pull/112))
+- What it does not do: Cairn stops and slows no program, and reads no temperature. It limits the work that makes the heat. Holding busy programs back is Spry's work, which follows a limit of the same shape from version 0.7.0 ([#112](https://github.com/juw12/cairn/pull/112))
+
 ## Build 114 (2026-11-22): Home on a phone: one day's bar is wide enough to tap
 
 - On a touch screen each bar of Home's chart is 24 px wide, where 30 days gave 12 px and 90 days 4 px. A chart of more than 14 days is slid sideways and opens at today ([#111](https://github.com/juw12/cairn/pull/111))

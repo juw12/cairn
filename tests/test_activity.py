@@ -242,11 +242,16 @@ class ReadingTests(unittest.TestCase):
         idle = activity.idle_seconds()
         self.assertTrue(idle is None or idle >= 0)
 
-    def test_the_light_reading_has_the_three_figures_or_is_nothing(self):
+    def test_the_light_reading_has_its_figures_or_is_nothing(self):
+        """The day's use takes three of them; the load limit also takes what is promised and the hours up."""
         reading = machine.load_now()
         if reading is not None:
-            self.assertEqual(sorted(reading), ["cpu_pct", "level", "ram_pct"])
+            self.assertEqual(sorted(reading), ["commit_pct", "cpu_pct", "level", "ram_pct", "uptime_hours"])
             self.assertIn(reading["level"], machine.LEVELS)
+            self.assertTrue(reading["uptime_hours"] is None or reading["uptime_hours"] >= 0)
+
+    def test_hours_up_are_whole_hours_or_nothing(self):
+        self.assertEqual([machine.uptime_hours(seconds) for seconds in (None, -5, 0, 3599, 3600, 360_000)], [None, None, 0, 0, 1, 100])
 
     def test_a_reading_that_fails_is_nothing(self):
         with mock.patch.object(machine, "_memory", side_effect=RuntimeError("no")):

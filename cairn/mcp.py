@@ -297,6 +297,19 @@ def _same_folder(one: str, other: str) -> bool:
 
 
 def _tool_priority(brain: Brain, args: dict) -> str:
+    """The place of one running session in the user's order, and whether this computer is over the load
+    limit of the brain: what `cairn vibe log` prints, for an assistant that never runs it."""
+    from . import limit
+
+    told = _place_text(brain, args)
+    try:
+        held = limit.notice(brain)
+    except Exception:  # noqa: BLE001 - the place is told whatever happens to the limit
+        held = ""
+    return f"{told}\n\n{held}" if held else told
+
+
+def _place_text(brain: Brain, args: dict) -> str:
     """The place of one running session in the user's order. For an assistant that never runs `cairn vibe`
     (a session the watcher found by itself is ordered on the page and was never told its place)."""
     from . import rank
@@ -505,7 +518,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "priority",
-        "description": "Your place in the user's order of the running sessions (set in Cairn, Vibe, Priority). Ask at the start of a turn when you do not log your steps with cairn vibe: where sessions need the same thing (the user's answer, a repo, this computer's processor, memory or disk, build minutes) the lower number goes first and the others give way. Answers that no order is set when the user has not placed any session.",
+        "description": "Your place in the user's order of the running sessions (set in Cairn, Vibe, Priority). Ask at the start of a turn when you do not log your steps with cairn vibe: where sessions need the same thing (the user's answer, a repo, this computer's processor, memory or disk, build minutes) the lower number goes first and the others give way. Answers that no order is set when the user has not placed any session. Also says when this computer is over the load limit the user set for every computer (processor average over an hour, memory, hours since restart): then start nothing heavy on it until it has rested.",
         "inputSchema": {
             "type": "object",
             "properties": {
