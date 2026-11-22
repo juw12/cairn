@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -34,6 +35,9 @@ HERE_WORDS = ("", "here", "back", "off", "this", "this computer", "self", "me")
 LOG_LINES = 40  # the end of a session's log that goes into the handoff
 SESSION_KEYS = ("handed_to", "handed_at", "handed_thread")
 SOON_TTL_SECONDS = 10  # the live page shows a switch made elsewhere (a terminal, an assistant) this soon
+
+HEADER_CHARS = 2000  # a session note's properties are at its top: enough to look for one without parsing it
+_MACHINE_LINE = re.compile(r"^machine:[ \t]*(.+?)[ \t]*$", re.M)
 
 _soon: dict[str, tuple[float, dict]] = {}
 _soon_lock = threading.Lock()
@@ -99,12 +103,6 @@ def _resolve(brain: Brain, wanted: str) -> str:
         raise HandoverError(str(error).replace(' Use "all" for every computer.', "")) from None
 
 
-def _sessions(brain: Brain) -> list[dict]:
-    """This computer's session notes, oldest first."""
-    notes = [note for note in vibe._notes(brain) if note["type"] == "session" and not vibe.elsewhere(note)]
-    return sorted(notes, key=lambda note: (str(note["meta"].get("started", "")), note["path"]))
-
-
 def _handed(note: dict) -> dict | None:
     to = note["meta"].get("handed_to")
     if not isinstance(to, str) or not to.strip():
@@ -150,16 +148,29 @@ def _find_session(brain: Brain, wanted: str) -> dict:
 # ------------------------------------------------------------ reading
 
 
-def _session_devices(notes: list[dict], here: str) -> list[str]:
-    """The other computers that have a session note: read from the notes the live page holds anyway, so
-    a poll does not open every note of the brain."""
+def _glance(brain: Brain, here: str) -> tuple[list[str], list[dict]]:
+    """(the other computers that have a session note, this computer's handed sessions), from the session
+    notes the live page holds anyway. A brain can hold thousands of them and the page asks every few
+    seconds, so a note is parsed only when its top says it was handed over; a computer's name is read
+    off its `machine:` line."""
+    folder = core.FOLDERS["session"] + "/"
     found: dict[str, str] = {}
-    for note in notes:
-        name = " ".join(str(note["meta"].get("machine", "") or "").split())
+    handed: list[dict] = []
+    for file in vibe.vibe_files(brain):
+        if not file["path"].startswith(folder):
+            continue
+        top = file["text"][:HEADER_CHARS]
+        line = _MACHINE_LINE.search(top)
+        name = " ".join(line.group(1).strip("\"'").split()) if line else ""
         key = core.device_key(name)
         if key and key != core.device_key(here):
             found.setdefault(key, name)
-    return sorted(found.values(), key=str.lower)
+        elif "handed_to:" in top:
+            note = core.note_from_file(file["path"], file["text"], file["mtime"])
+            if note["type"] == "session" and not vibe.elsewhere(note):
+                handed.append(note)
+    handed.sort(key=lambda note: (str(note["meta"].get("started", "")), note["path"]))
+    return sorted(found.values(), key=str.lower), handed
 
 
 def status(brain: Brain, folder: Path | None = None) -> dict:
@@ -168,11 +179,9 @@ def status(brain: Brain, folder: Path | None = None) -> dict:
     handed in the last day."""
     setting = _setting(brain, folder)
     here = handoff.this_device()
-    notes = [note for note in vibe._notes(brain) if note["type"] == "session"]
+    names, mine = _glance(brain, here)
     recent = (dt.datetime.now() - dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
-    mine = sorted((note for note in notes if not vibe.elsewhere(note)), key=lambda note: (str(note["meta"].get("started", "")), note["path"]))
     handed = [entry for entry in map(_handed, mine) if entry and (entry["live"] or entry["at"] >= recent)]
-    names = _session_devices(notes, here)
     if setting and core.device_key(str(setting["to"])) not in map(core.device_key, names):
         names = sorted([*names, str(setting["to"])], key=str.lower)
     return {
@@ -221,8 +230,13 @@ def notice(brain: Brain, session: str = "", folder: Path | None = None) -> str:
     parts = []
     wanted = str(session or "").strip().removesuffix(".md").rsplit("/", 1)[-1]
     if wanted:
-        note = next((n for n in _sessions(brain) if n["slug"] == wanted), None)
-        entry = _handed(note) if note else None
+        entry = None
+        try:
+            path = f"{core.FOLDERS['session']}/{wanted}.md"
+            note = core.note_from_file(path, brain.read(path)["text"])
+            entry = None if vibe.elsewhere(note) else _handed(note)
+        except (OSError, ValueError):
+            pass  # no such note: nothing to say about it
         if entry:
             thread = entry["thread"] or "its handoff"
             parts.append(
