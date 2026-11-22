@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 112,
+      "date": "2026-11-22",
+      "title": "A session that never runs cairn vibe can ask for its place in your order",
+      "changes": [
+        "The Cairn MCP server has a tool, priority: an assistant names the folder it works in (or its session) and is told its place among the running sessions, the same words cairn vibe log prints. A session the watcher found by itself, such as an OpenCode run, was ordered on the page and never told its place (#109)",
+        "The tool only reads: it does not change the order, and it says so when no order is set (#109)"
+      ]
+    },
+    {
       "build": 111,
       "date": "2026-11-22",
       "title": "The Vibe page on a phone: everything pressed is big enough to hit, and Safari no longer zooms on Capture",

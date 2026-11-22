@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 112 (2026-11-22): A session that never runs cairn vibe can ask for its place in your order
+
+- The Cairn MCP server has a tool, priority: an assistant names the folder it works in (or its session) and is told its place among the running sessions, the same words cairn vibe log prints. A session the watcher found by itself, such as an OpenCode run, was ordered on the page and never told its place ([#109](https://github.com/juw12/cairn/pull/109))
+- The tool only reads: it does not change the order, and it says so when no order is set ([#109](https://github.com/juw12/cairn/pull/109))
+
 ## Build 111 (2026-11-22): The Vibe page on a phone: everything pressed is big enough to hit, and Safari no longer zooms on Capture
 
 - On a touch screen the things to press on Vibe that were 10 to 22 px high are at least 32 px to the finger: a session's title and its fold arrow in Live recap, a lane's title and the agent groups in Overview, a piece of the overview bar, the folds in Chats' work, effort and usage. What is drawn keeps its size ([#108](https://github.com/juw12/cairn/pull/108))

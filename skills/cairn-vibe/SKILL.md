@@ -84,6 +84,8 @@ The user can say which running sessions matter most (the Vibe page, **Priority**
 cairn vibe rank              # the running sessions in the user's order (changes nothing)
 ```
 
+An assistant that does not log its steps with `cairn vibe` (a session the watcher found by itself, for example an OpenCode run) is never shown that block. It asks the Cairn MCP server instead, at the start of a turn: the tool `priority`, with `folder` (the folder it works in) or `session` (the name of its session note). The answer is the same block, or that no order is set.
+
 - Where your work and a session with a lower number need the same thing (the user's answer, a repo or a branch, this computer's processor, memory or disk, build minutes), that session goes first. Give way: wait, or do the part that does not collide, and log that you are waiting and for which session.
 - Number 1 is not held up by the others. It still does not take over their branches or undo their work.
 - The order says what goes first, not that the rest stops. Keep working on what is yours.
