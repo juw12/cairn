@@ -12,6 +12,7 @@ the app shows the same list under Version history.
 - cairn vibe limit shows the limit and every computer of the brain against it. cairn vibe limit --processor 70 --minutes 45 --memory 90 --restart-hours 72 changes it, cairn vibe limit off switches it off. The numbers are one small file, CAIRN-LIMIT.md, so every computer follows the same ones; without the file the defaults hold ([#112](https://github.com/juw12/cairn/pull/112))
 - Each computer measures itself with the watcher's look once a minute, kept for four hours in a file next to the watcher's state and never synced. Nothing is claimed while nobody has looked for 5 minutes: a closed Cairn or a sleeping computer is not judged from an old average ([#112](https://github.com/juw12/cairn/pull/112))
 - What it does not do: Cairn stops and slows no program, and reads no temperature. It limits the work that makes the heat. Holding busy programs back is Spry's work, which follows a limit of the same shape from version 0.7.0 ([#112](https://github.com/juw12/cairn/pull/112))
+- Fixed on the way: on an iPhone, Safari zoomed the whole Vibe page in when the field that logs a step (or its kind) was tapped, because their text was 14 px. On a touch screen it is 16 px now ([#112](https://github.com/juw12/cairn/pull/112))
 
 ## Build 114 (2026-11-22): Home on a phone: one day's bar is wide enough to tap
 

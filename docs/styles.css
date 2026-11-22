@@ -2708,6 +2708,8 @@ details.rc-section > summary .muted { margin-left: 4px; }
 /* Safari zooms the whole page when a field with text under 16 px is tapped. The capture field is on every page. */
 @media (pointer: coarse) {
   .capture input { font-size: 16px; }
+  /* Found by Tilik while the load limit's line was looked at: the two fields that log a step were 14 px. */
+  .vibe-log-form .select, .vibe-log-form .input { font-size: 16px; }
 }
 
 /* ------------------------------------------------------------ Home: what needs you, what runs, activity, updates */
