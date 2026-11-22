@@ -2,6 +2,14 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 109,
+      "date": "2026-11-22",
+      "title": "A Mac copy installed without Git says that it does not update itself",
+      "changes": [
+        "On a Mac without Git the installer unpacks an archive, and that copy never takes a new build. Settings and Version history now say so, with the install line and a button that copies it, where Settings said updates come with your package manager (#106)"
+      ]
+    },
+    {
       "build": 108,
       "date": "2026-11-22",
       "title": "A step names its session when several are live, and a message is never called sent on a guess",

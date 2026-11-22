@@ -713,6 +713,29 @@ class AutoUpdateTests(unittest.TestCase):
         self.assertEqual(self.hooks.act("auto-update", {"on": False}), {"autoUpdate": False})
         self.assertFalse(self.hooks.state()["autoUpdate"])
 
+    def test_a_mac_copy_installed_without_git_says_how_to_update(self):
+        """docs/mac-install.sh unpacks an archive on a Mac without Git. That copy has no .git and never
+        takes a new build: the app must say so, with the install line."""
+        with tempfile.TemporaryDirectory() as folder:
+            unpacked = Path(folder) / "Cairn" / "app"
+            unpacked.mkdir(parents=True)
+            with mock.patch.object(desktop, "APP_ROOT", unpacked):
+                with mock.patch.object(desktop.sys, "platform", "darwin"):
+                    self.assertEqual(desktop.reinstall_line(), desktop.MAC_INSTALL_LINE)
+                    state = self.hooks.state()
+                    self.assertEqual((state["updates"], state["reinstall"]), (False, desktop.MAC_INSTALL_LINE))
+                    (unpacked / ".git").mkdir()
+                    self.assertEqual(desktop.reinstall_line(), "", "a Git checkout updates itself")
+                    self.assertTrue(self.hooks.state()["updates"])
+                    (unpacked / ".git").rmdir()
+                with mock.patch.object(desktop.sys, "platform", "win32"):
+                    self.assertEqual(desktop.reinstall_line(), "", "the install line is the Mac's")
+            packaged = Path(folder) / "lib" / "python3.13" / "site-packages"
+            packaged.mkdir(parents=True)
+            with mock.patch.object(desktop, "APP_ROOT", packaged), mock.patch.object(desktop.sys, "platform", "darwin"):
+                self.assertEqual(desktop.reinstall_line(), "", "a package manager updates that copy")
+        self.assertIn(desktop.MAC_INSTALL_LINE, Path(desktop.__file__).resolve().parent.parent.joinpath("docs", "mac-install.sh").read_text(encoding="utf-8"))
+
     def test_build_is_read_without_running_git(self):
         build = git(self.app, "rev-parse", "HEAD")[:7]
         with mock.patch.object(desktop, "app_git", return_value=None) as busy_git:  # git timing out on a busy PC
