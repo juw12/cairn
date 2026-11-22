@@ -24,6 +24,7 @@ const AUTO_NOTE_KEY = "cairn.projects.autoNote";
 const GROUP_KEY = "cairn.projects.group";
 const FILTER_KEY = "cairn.projects.filter";
 const CLOSED_KEY = "cairn.projects.closedGroups";
+const SAVED_KEY = (owner) => `cairn.projects.repos:${owner.toLowerCase()}`;
 const HISTORY_KEY = (owner) => `cairn.projects.ranks:${owner.toLowerCase()}`;
 // Cairn itself is always in the ranking, whoever's repos you look at.
 const CAIRN = REPO_URL.replace(/^https:\/\/github\.com\//, "");
@@ -409,7 +410,9 @@ const local = {
   },
 };
 
-const view = { owner: null, loading: false, error: "", repos: null, facts: {}, loadedAt: 0, failedAt: 0, moves: {}, timer: null, query: "" };
+// `asked`: the GitHub account the list was read as ("" = anonymously). `kept`: when the list on show was
+// read, if it is the one kept from an earlier visit because GitHub could not be asked now (0 = it is fresh).
+const view = { owner: null, loading: false, error: "", repos: null, facts: {}, loadedAt: 0, failedAt: 0, moves: {}, timer: null, query: "", asked: "", kept: 0 };
 
 export function defaultOwner() {
   const saved = local.get(OWNER_KEY);
@@ -420,19 +423,47 @@ export function defaultOwner() {
   return CAIRN.split("/")[0];
 }
 
-async function listRepos(owner) {
-  const mine = auth.session()?.login?.toLowerCase() === owner.toLowerCase();
-  // Signed in as this owner: include private repos too.
-  const path = mine
-    ? "/user/repos?affiliation=owner&sort=pushed&per_page=100"
-    : `/users/${encodeURIComponent(owner)}/repos?type=owner&sort=pushed&per_page=100`;
+// Who GitHub is asked as: the sign-in in this browser, else the GitHub CLI's account on this computer
+// (auth.js), else nobody ("").
+async function askedAs() {
+  const here = auth.session()?.login;
+  if (here) return here;
+  if (!auth.readsThroughComputer()) return "";
+  try {
+    return (await gh.apiGet("/user")).login || "";
+  } catch {
+    return "";
+  }
+}
+
+// 100 per page; people with more repos get up to 300 (newest pushes first).
+async function pages(path) {
   const repos = [];
-  // 100 per page; people with more repos get up to 300 (newest pushes first).
   for (let page = 1; page <= 3; page += 1) {
     const batch = await gh.apiGet(`${path}&page=${page}`);
     if (!Array.isArray(batch)) throw new gh.GitHubError("GitHub didn't return a list of repos.");
     repos.push(...batch);
     if (batch.length < 100) break;
+  }
+  return repos;
+}
+
+async function listRepos(owner) {
+  const login = await askedAs();
+  view.asked = login;
+  const sameOwner = (repo) => String(repo.owner?.login || "").toLowerCase() === owner.toLowerCase();
+  // Signed in as this owner: include private repos too.
+  const mine = login.toLowerCase() === owner.toLowerCase();
+  const repos = await pages(mine
+    ? "/user/repos?affiliation=owner&sort=pushed&per_page=100"
+    : `/users/${encodeURIComponent(owner)}/repos?type=owner&sort=pushed&per_page=100`);
+  if (login && !mine) {
+    // Signed in as someone the owner works with: the owner's private repos that account was let into count too.
+    try {
+      repos.push(...(await pages("/user/repos?affiliation=collaborator&sort=pushed&per_page=100")).filter(sameOwner));
+    } catch {
+      /* the public ones are still a ranking */
+    }
   }
   if (!repos.some((r) => String(r.full_name).toLowerCase() === CAIRN.toLowerCase())) {
     try {
@@ -451,7 +482,7 @@ async function listRepos(owner) {
 const FACTS_KEY = (owner) => `cairn.projects.facts:${owner.toLowerCase()}`;
 
 async function loadFacts(owner, repos) {
-  const budget = auth.session() ? 60 : 12;
+  const budget = view.asked ? 60 : 12;
   const saved = local.get(FACTS_KEY(owner), {});
   const facts = {};
   const missing = [];
@@ -533,17 +564,41 @@ export async function loadProjects({ owner = view.owner || defaultOwner(), quiet
     view.repos = repos;
     view.facts = await loadFacts(owner, repos);
     view.loadedAt = Date.now();
+    view.kept = 0;
+    keepRepos(owner, repos);
     const list = rankProjects(repos, { facts: view.facts, mentions: mentionCounter() });
     view.moves = rankMoves(rememberRanks(owner, list), list);
     if (local.get(AUTO_NOTE_KEY, false)) await saveRankingNote({ quiet: true });
   } catch (error) {
     view.error = error.message || "Couldn't reach GitHub.";
     view.failedAt = Date.now();
-    if (!quiet) toast(view.error, { error: true });
+    // GitHub can't be asked right now (its hourly limit, no network): show the list of the last visit.
+    const kept = view.repos ? null : local.get(SAVED_KEY(owner));
+    if (Array.isArray(kept?.repos) && kept.repos.length) {
+      view.repos = kept.repos;
+      view.kept = kept.at || 0;
+      const savedFacts = local.get(FACTS_KEY(owner), {});
+      view.facts = Object.fromEntries(Object.entries(savedFacts).map(([name, entry]) => [name, entry.facts]));
+    }
+    if (!quiet && !view.repos) toast(view.error, { error: true });
   } finally {
     view.loading = false;
     if (state.view === "projects") renderView();
   }
+}
+
+// What the ranking and the cards read from a repo, and nothing else: about half a kilobyte each, so a few
+// hundred repos fit in this browser's storage.
+const KEPT_FIELDS = ["name", "full_name", "html_url", "description", "homepage", "has_pages", "topics", "size", "stargazers_count",
+  "forks_count", "fork", "archived", "private", "created_at", "pushed_at", "updated_at", "language"];
+
+function keepRepos(owner, repos) {
+  const slim = repos.map((repo) => ({
+    ...Object.fromEntries(KEPT_FIELDS.map((field) => [field, repo[field]])),
+    owner: { login: repo.owner?.login || "" },
+    license: repo.license ? { key: repo.license.key || "" } : null,
+  }));
+  local.set(SAVED_KEY(owner), { at: Date.now(), repos: slim });
 }
 
 // Re-rank on its own: when the page opens with old data, and every few minutes while Cairn stays open.
@@ -656,7 +711,7 @@ function card(project, { grouped = false } = {}) {
 function coverage(list) {
   const checked = list.filter((p) => view.facts[p.repo.full_name]).length;
   if (!list.length || checked >= list.length) return "";
-  return ` · tests & CI checked for ${checked} of ${list.length} (more each refresh${auth.session() ? "" : "; sign in to check all"})`;
+  return ` · tests & CI checked for ${checked} of ${list.length} (more each refresh${view.asked ? "" : "; sign in to check all"})`;
 }
 
 const WEEK = 7 * DAY;
@@ -762,11 +817,15 @@ export function projectsView() {
     `<button type="button" class="${sort === key ? "on" : ""}" data-action="projects-sort" data-sort="${key}" aria-pressed="${sort === key}"${title ? ` title="${title}"` : ""}>${label}</button>`;
   const groupButton = (on, label) =>
     `<button type="button" class="${grouped === on ? "on" : ""}" data-action="projects-group" data-group="${on ? "1" : ""}" aria-pressed="${grouped === on}">${label}</button>`;
+  // Read through the GitHub CLI of this computer: say whose sign-in it is, since it decides which private repos show.
+  const asked = view.asked && auth.readsThroughComputer() ? ` · asked GitHub as ${esc(view.asked)} (this computer's sign-in)` : "";
   const status = view.loading
     ? "Ranking…"
-    : view.loadedAt
-      ? `Re-ranked ${relativeTime(view.loadedAt)} · refreshes every 15 min${coverage(list)}`
-      : "";
+    : view.kept
+      ? `GitHub could not be asked now: this is the list of ${esc(relativeTime(view.kept))}. ${esc(view.error)}`
+      : view.loadedAt
+        ? `Re-ranked ${relativeTime(view.loadedAt)} · refreshes every 15 min${coverage(list)}${asked}`
+        : "";
   const top = list[0];
   const body = view.error && !list.length
     ? `<div class="card"><div class="empty-state">${icon("github")}<h3>Couldn't load the repos</h3><p>${esc(view.error)}</p></div></div>`
@@ -880,5 +939,6 @@ export function submitProjectsOwner(form) {
   view.repos = null;
   view.moves = {};
   view.loadedAt = 0;
+  view.kept = 0;
   return loadProjects({ owner: parsed.owner });
 }

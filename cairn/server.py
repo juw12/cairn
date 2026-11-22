@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, handoff, handover, machine, mcp, precedent, pro, rank, vibe
+from . import __version__, autopilot, chat, cloud_backup, core, github_move, github_push, github_read, handoff, handover, machine, mcp, precedent, pro, rank, vibe
 from .brain import ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, Brain, ConflictError, PathError, SyncError
 from .obsidian import ObsidianSync
 from .obsidian import SyncError as ObsidianSyncError
@@ -184,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
                     "path": str(brain.root) if self.desktop is not None else None,
                     "mcp": mcp.server_entry(brain),
                     "githubMove": self.github_moves,
+                    # the pages may read GitHub through the GitHub CLI's sign-in on this computer (github_read)
+                    "githubRead": bool(self.github_moves and github_read.enabled()),
                     "device": machine.device_name(),  # this computer's name, so Today knows which handoffs are for it
                 })
             elif route == "/api/files":
@@ -246,6 +248,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(self.obsidian.status())
             elif route == "/api/desktop" and self.desktop is not None:
                 self._send_json(self.desktop.state())
+            elif route == "/api/github/read" and self.github_moves:
+                self._github_read()
             else:
                 self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
             return
@@ -399,9 +403,34 @@ class Handler(BaseHTTPRequestHandler):
         the one this computer pushes as (cairn.github_push). Answers with the new state and a sentence."""
         try:
             body = self._body()
-            self._send_json(github_push.switch(str(body.get("account", ""))))
+            answer = github_push.switch(str(body.get("account", "")))
+            github_read.forget()  # the pages read GitHub as the account just picked
+            self._send_json(answer)
         except (github_push.PushError, ValueError) as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
+
+    def _github_read(self):
+        """GET /api/github/read?path=/users/NAME/repos?...: one read of the GitHub API as the account the
+        GitHub CLI is signed in to on this computer (cairn.github_read), so a page here is not held to the
+        60 anonymous answers an hour. GitHub's own answer is passed on as it is, refusals included; what
+        was never asked comes back as JSON with `error` (400 not a read we do, 503 no sign-in, 502 not reached)."""
+        try:
+            status, headers, body = github_read.read(
+                self._query_path(),
+                accept=self.headers.get("X-GitHub-Accept") or "",
+                if_none_match=self.headers.get("If-None-Match") or "",
+            )
+        except github_read.ReadError as error:
+            return self._error(error.status, str(error))
+        self.send_response(status)
+        for name, value in headers.items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        if status not in (204, 304):
+            self.wfile.write(body)
 
     def _chat(self, action: str):
         """Plain chat with your OpenCode models: send, stop, delete, refresh the model list."""

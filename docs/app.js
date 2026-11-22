@@ -731,6 +731,8 @@ export function applyInfo() {
 export async function start(store) {
   state.store = store;
   state.info = await store.info();
+  // On the computer Cairn runs on, GitHub is read with the GitHub CLI's sign-in, not anonymously.
+  auth.useComputerSignIn(state.info.githubRead);
   state.todos = null;
   state.git = null;
   state.canvas = null;
