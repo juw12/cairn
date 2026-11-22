@@ -165,6 +165,7 @@ export function estimateEffort({ elapsed, log, git, durations = [], machine = nu
 // ------------------------------------------------------------ the computer under the sessions
 
 const LEVELS = ["light", "medium", "heavy"];
+export const NET_LEVELS = ["good", "slow", "offline"]; // how the internet answers: what an assistant that runs online waits on
 export const MACHINE_FRESH_MIN = 30; // an older reading is shown with its time, and no longer lifts a session's effort
 
 const numberOrNull = (value) => (value === "" || value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value));
@@ -188,6 +189,9 @@ export function machineFromNote(note) {
     level: meta.load,
     reasons: listOf(meta.load_why),
     top: listOf(meta.load_top),
+    net: NET_LEVELS.includes(meta.net)
+      ? { level: meta.net, link: String(meta.net_link || ""), reach: String(meta.net_reach || ""), speed: String(meta.net_speed || ""), why: String(meta.net_why || "") }
+      : null,
   };
 }
 

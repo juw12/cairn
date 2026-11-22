@@ -401,7 +401,8 @@ function versionDate(day) {
   return new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
-// "#86" in a change is its pull request. Escaped text holds "&#39;" for every apostrophe, which is not one.
+// "#86" in a change is its pull request. Not the "#39" inside "&#39;", which is what an apostrophe is once escaped:
+// every "brain's" used to come out as a link to pull request 39.
 const versionChange = (text) =>
   esc(text).replace(/(^|[^&\w])#(\d+)/g, `$1<a href="${REPO_URL}/pull/$2" target="_blank" rel="noopener">#$2</a>`);
 

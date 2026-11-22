@@ -316,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._github_push()
         if route == "/api/cloud/sync" and self.github_moves:
             return self._cloud_sync()
+        if route == "/api/vibe/speed" and self.github_moves:
+            return self._net_speed()
         if route == "/api/vibe/hand":
             return self._vibe_hand()
         self._drain()
@@ -332,6 +334,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.BAD_REQUEST, str(error))
         self._send_json(cloud_backup.status())
 
+    def _net_speed(self):
+        """POST /api/vibe/speed: measure how fast the internet comes down on this computer right now
+        (cairn.machine.measure_speed: a few seconds, 8 MB at most). Only on the computer itself: the megabytes
+        are its own, and on a phone's hotspot they are counted."""
+        self._drain()
+        try:
+            self._send_json(machine.measure_speed())
+        except OSError as error:
+            self._error(HTTPStatus.BAD_GATEWAY, f"The speed could not be measured: the internet did not answer ({error}).")
     def _vibe_hand(self):
         """POST /api/vibe/hand {to, session?}: let another computer do the work of this computer's chats
         (cairn.handover). Without `session` it is the switch for all of them, and `to` "here" takes it

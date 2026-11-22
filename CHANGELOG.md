@@ -3,18 +3,27 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
-## Build 101 (2026-11-22): Let another computer do the work of this one's chats, and take it back
+## Build 102 (2026-11-22): Let another computer do the work of this one's chats, and take it back
 
 - Vibe has a new block, Chats' work, with one chip per computer of your brain. Press another computer and the assistants on this one stop doing the work themselves: each chat leaves its work for that computer as a handoff, follows the answers and checks the result. Press This computer and they do it themselves again ([#98](https://github.com/juw12/cairn/pull/98))
 - Nothing is interrupted and nothing is sent by the switch itself. A running chat is told at its next step (cairn vibe log says so), a new chat when it starts (the memory skill's rules begin with it). What only this computer can do is still done here ([#98](https://github.com/juw12/cairn/pull/98))
 - One chat alone: a live session of this computer has Hand to on its row in the live recap. Cairn writes the handoff itself, from the session's goal and its log so far, and marks the session, which every device then shows as handed. Take back on the same row closes that conversation so the other computer stops ([#98](https://github.com/juw12/cairn/pull/98))
 - What moves is the work, not the conversation: an AI app keeps its chats to itself. The other computer does the work when a chat there picks the handoff up ([#98](https://github.com/juw12/cairn/pull/98))
 - From a terminal: cairn vibe hand (where the work goes), cairn vibe hand NAME, cairn vibe hand here, and --session NAME for one session ([#98](https://github.com/juw12/cairn/pull/98))
-- Version history no longer turns every apostrophe in a change into a link to pull request 39 ([#98](https://github.com/juw12/cairn/pull/98))
+
+## Build 101 (2026-11-22): The network under the computer: which Wi-Fi, how the internet answers, how fast
+
+- The computer on the Vibe page now shows its network: the Wi-Fi's name, whether it is a phone's hotspot, the kind of Wi-Fi and its band, how strong the signal is and the link rate to the router. On a cable it says so ([#99](https://github.com/juw12/cairn/pull/99))
+- Next to it: whether the internet answers and how long a small request takes, checked every half minute with a request of under 1 kB, and how much is going down and up right now. A badge says Internet good, Internet slow (half a second or more) or No internet
+- When the internet is slow or gone the block says what that means for the work: an assistant that runs online answers late or not at all, while a model that runs on the computer itself is not held up
+- Measure speed downloads for up to 4 seconds (8 MB at most) and says how fast the internet really comes down. It runs only when pressed, because on a phone's hotspot those megabytes are counted. The link rate is only the stretch to the router: a strong 192 Mbit/s Wi-Fi can sit on a slow hotspot
+- The other computer's network shows too, from the note its watcher writes, and a change (the internet gone, back, or slow) is written at once
+- macOS 14.4 and later, and Windows 11 24H2 without location permission, keep the Wi-Fi's name from apps. The block says so and shows everything else
+- Version history no longer turns every apostrophe into a link to pull request 39 ([#99](https://github.com/juw12/cairn/pull/99))
 
 ## Build 100 (2026-11-22): Cairn for Mac
 
-- The desktop app can now be had on a Mac: one line pasted in Terminal installs it, with no admin rights and no password, and puts Cairn.app in your Applications folder. It is the same app as on Windows: your notes open by themselves, one Sync button, and it updates itself
+- The desktop app can now be had on a Mac: one line pasted in Terminal installs it, with no admin rights and no password, and puts Cairn.app in your Applications folder. It is the same app as on Windows: your notes open by themselves, one Sync button, and it updates itself ([#90](https://github.com/juw12/cairn/pull/90))
 - On a Mac, closing the window keeps Cairn in the menu bar, and a click on its Dock icon brings the window back
 - The welcome page offers the Mac line first when it is opened on a Mac, and the Windows download first everywhere else
 - On a Mac the desktop app now finds the Obsidian vault you used last. It looked in the place Linux keeps that list, so a Mac always started with an empty brain

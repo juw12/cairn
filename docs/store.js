@@ -181,6 +181,11 @@ export class ServerStore {
   async cloudSync(repos = false) {
     return this.request("POST", "api/cloud/sync", repos ? { repos: true } : {});
   }
+
+  // Measure how fast the internet comes down on this computer right now: a few seconds, 8 MB at most.
+  async netSpeed() {
+    return this.request("POST", "api/vibe/speed", {});
+  }
 }
 
 // ------------------------------------------------------------ browser-only: a real folder on disk
