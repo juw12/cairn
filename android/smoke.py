@@ -90,5 +90,32 @@ def main():
     print("\nCairn for Android installs, opens and stays up")
 
 
+def killed_with_play_services(folder):
+    """True when Android ended the app because Google Play services restarted under it.
+
+    A freshly started emulator updates Play services in its first minutes. The WebView holds Play
+    services' font provider, so Android ends every app that does when Play services goes down. That
+    says nothing about the app, and the next start stays up.
+    """
+    try:
+        with open(os.path.join(folder, "android-logcat.txt"), encoding="utf-8") as handle:
+            log = handle.read()
+    except OSError:
+        return False
+    with open(os.path.join(HERE, "app.json"), encoding="utf-8") as handle:
+        package = json.load(handle)["id"]
+    return any("Killing" in line and package in line and "com.google.android.gms" in line for line in log.splitlines())
+
+
 if __name__ == "__main__":
-    main()
+    for attempt in (1, 2, 3):
+        try:
+            main()
+            break
+        except SystemExit as stopped:
+            folder = os.path.dirname(os.path.abspath(sys.argv[1]))
+            if not stopped.code or attempt == 3 or not killed_with_play_services(folder):
+                raise
+            print("\nAndroid ended the app because Google Play services restarted on this new emulator. "
+                  "Trying again (%d of 3).\n" % (attempt + 1), flush=True)
+            time.sleep(20)
