@@ -3,6 +3,12 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 111 (2026-11-22): The Vibe page on a phone: everything pressed is big enough to hit, and Safari no longer zooms on Capture
+
+- On a touch screen the things to press on Vibe that were 10 to 22 px high are at least 32 px to the finger: a session's title and its fold arrow in Live recap, a lane's title and the agent groups in Overview, a piece of the overview bar, the folds in Chats' work, effort and usage. What is drawn keeps its size ([#108](https://github.com/juw12/cairn/pull/108))
+- The Capture field has 16 px text on a touch screen, on every page: Safari on an iPhone zoomed the whole page when it was tapped ([#108](https://github.com/juw12/cairn/pull/108))
+- Last 14 days: a day's column takes a press a little into the gaps beside it, so it is wide enough on a 360 px phone ([#108](https://github.com/juw12/cairn/pull/108))
+
 ## Build 110 (2026-11-22): Projects sort themselves into categories, read A to Z, and can be filtered; any block can be hidden
 
 - Projects: Cairn sorts every repo into a category by itself (AI and agents, Games, Engineering and science, Money and work, and nine more), from the repo's topics on GitHub, its name and its description. Each project shows its category; point at it to see which words decided it. To move a project, change its topics on GitHub ([#107](https://github.com/juw12/cairn/pull/107))
