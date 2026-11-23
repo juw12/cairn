@@ -3,6 +3,10 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 116 (2026-11-23): A brain that keeps failing to sync is shown, not only logged
+
+- The desktop app counts background syncs that fail one after another. From the third in a row it shows a notification, 'Cairn has not synced for N passes in a row', with git's last sentence; one good pass starts the count again and is written to the log. Why: on the ASUS the brain went six hours without a live sync on 21 Nov and fifteen on 22 Nov (a crash, a corrupt git index, and Cairn not started again), and each time the only trace was a line in cairn.log. A sync you start yourself is still shown at once when it fails
+
 ## Build 115 (2026-11-22): A load limit every computer of the brain follows
 
 - Every computer of the brain follows one load limit: the processor's average use over an hour (75% unless changed), or memory that stays 90% full for 15 minutes. Why: a laptop that ran several assistants for 100 hours at about 80% of its processor lost its drive in the middle of the work, and its load note had called every one of those hours medium. A level describes a moment; the limit describes the stretch ([#112](https://github.com/juw12/cairn/pull/112))
