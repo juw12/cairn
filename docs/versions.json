@@ -2,6 +2,15 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 117,
+      "date": "2026-11-23",
+      "title": "Cloud backup on Windows deletes a repo's mirror before it packs the archive",
+      "changes": [
+        "On Windows the mirror of a repo stayed on the disk next to its bundle and archive: git writes its objects read-only there, and the folder was deleted with errors ignored, so nothing was deleted. Every folder the cloud backup deletes now goes through remove_tree, which clears the read-only mark and tries again, and still never stops a run. Found on the ASUS: test_the_mirror_is_gone_before_the_archive_is_made failed there (a mirror beside 2 of 3 archives) and passes now",
+        "A test of cairn connect compared a Windows path with the JSON text it is written in, where every backslash is doubled; it reads the JSON now"
+      ]
+    },
+    {
       "build": 116,
       "date": "2026-11-23",
       "title": "A brain that keeps failing to sync is shown, not only logged",

@@ -3,6 +3,11 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 117 (2026-11-23): Cloud backup on Windows deletes a repo's mirror before it packs the archive
+
+- On Windows the mirror of a repo stayed on the disk next to its bundle and archive: git writes its objects read-only there, and the folder was deleted with errors ignored, so nothing was deleted. Every folder the cloud backup deletes now goes through remove_tree, which clears the read-only mark and tries again, and still never stops a run. Found on the ASUS: test_the_mirror_is_gone_before_the_archive_is_made failed there (a mirror beside 2 of 3 archives) and passes now
+- A test of cairn connect compared a Windows path with the JSON text it is written in, where every backslash is doubled; it reads the JSON now
+
 ## Build 116 (2026-11-23): A brain that keeps failing to sync is shown, not only logged
 
 - The desktop app counts background syncs that fail one after another. From the third in a row it shows a notification, 'Cairn has not synced for N passes in a row', with git's last sentence; one good pass starts the count again and is written to the log. Why: on the ASUS the brain went six hours without a live sync on 21 Nov and fifteen on 22 Nov (a crash, a corrupt git index, and Cairn not started again), and each time the only trace was a line in cairn.log. A sync you start yourself is still shown at once when it fails
