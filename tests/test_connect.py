@@ -110,7 +110,9 @@ class ConnectTests(ConnectCase):
         other = Brain(self.tmp / "other")
         other.init()
         self.assertEqual(self.connect(auto=True, brain=other), {"vector": "other-brain"})
-        self.assertIn(str(self.brain.dir), (self.vector_skill / "config.json").read_text(encoding="utf-8"))
+        # read as JSON: on Windows the path is written with its backslashes escaped
+        config = json.loads((self.vector_skill / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(Path(config["brain"]), Path(self.brain.dir))
         # asked by name, it moves
         self.assertEqual(self.connect("vector", brain=other), {"vector": "updated"})
         self.assertEqual(json.loads((self.vector_skill / "config.json").read_text(encoding="utf-8"))["brain"], str(other.dir))

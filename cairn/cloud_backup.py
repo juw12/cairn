@@ -225,6 +225,24 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def remove_tree(path) -> None:
+    """Delete a folder, also on Windows: git writes its objects read-only there, and shutil.rmtree with
+    ignore_errors left a whole mirror behind (found on the ASUS, 2026-11-23). Never raises."""
+    import stat
+
+    def clear_and_retry(function, failed_path, *_):
+        try:
+            os.chmod(failed_path, stat.S_IWRITE)
+            function(failed_path)
+        except OSError:
+            pass
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_and_retry)
+    else:
+        shutil.rmtree(path, onerror=clear_and_retry)
+
+
 def free_gb(folder: Path) -> float:
     return shutil.disk_usage(folder).free / 1e9
 
@@ -251,7 +269,7 @@ def pack(source: Path, name: str, folder: Path, key: str, drop_source: bool = Fa
             entry.update({"kind": "git bundle", "refs": len(heads),
                           "head": next((line.split()[0] for line in heads if line.endswith(" HEAD")), heads[0].split()[0] if heads else "")})
             if drop_source:
-                shutil.rmtree(source, ignore_errors=True)
+                remove_tree(source)
             _run(*lock, str(bundle))
     else:
         entry["kind"] = "folder"
@@ -342,7 +360,7 @@ def _stamp() -> str:
 
 
 def _sync_brain(brain: Brain, key: str, log) -> dict:
-    shutil.rmtree(home() / "work", ignore_errors=True)
+    remove_tree(home() / "work")
     name = f"brain {_stamp()}"
     work = home() / "work" / name
     _step("Making the brain's archive", log)
@@ -356,7 +374,7 @@ def _sync_brain(brain: Brain, key: str, log) -> dict:
     size = sum(part["bytes"] for part in entry["files"])
     _step(f"Sending the brain ({size / 1e6:.0f} MB)", log)
     send("upload-folder", str(work), DRIVE_FOLDER, log=log)
-    shutil.rmtree(work, ignore_errors=True)
+    remove_tree(work)
     # Only now, with the new copy checked on the drive, do older copies go (to the drive's recycle bin).
     there = send("list", DRIVE_FOLDER, log=log).get("files", {})
     older = sorted(folder for folder in there if folder == "brain" or folder.startswith("brain ") and folder != name)
@@ -391,7 +409,7 @@ def _sync_repos(owner: str, key: str, log) -> dict:
         send("upload-folder", str(work), remote, log=log)
         done += len(batch)
         _write("sent.json", record)  # what is up is recorded at once: a run that stops later starts from here
-        shutil.rmtree(work, ignore_errors=True)
+        remove_tree(work)
         batch.clear()
         batches += 1
         work = home() / "work" / f"{run_name} part {batches + 1}"
@@ -415,7 +433,7 @@ def _sync_repos(owner: str, key: str, log) -> dict:
         if len(batch) >= BATCH_FILES or sum(part["bytes"] for _, item in batch for part in item["files"]) >= BATCH_BYTES:
             flush()
     flush()
-    shutil.rmtree(home() / "work", ignore_errors=True)
+    remove_tree(home() / "work")
     record["repos_at"] = _now()
     _write("sent.json", record)
     return {"at": record["repos_at"], "sent": done, "waiting": waiting, "held": sum(1 for entry in held.values() if not entry.get("empty")), "on_github": len(repos)}
@@ -459,7 +477,7 @@ def sync(brain: Brain, repos: bool | None = None, log=print) -> dict:
         outcome["message"] = f"{type(error).__name__}: {error}"
         raise CloudError(outcome["message"]) from error
     finally:
-        shutil.rmtree(home() / "work", ignore_errors=True)
+        remove_tree(home() / "work")
         record = sent()
         record["last"] = {key_: outcome[key_] for key_ in ("at", "ok", "message", "with_repos") if key_ in outcome}
         _write("sent.json", record)

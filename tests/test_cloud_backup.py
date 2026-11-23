@@ -10,6 +10,7 @@ import datetime as dt
 import io
 import json
 import os
+import stat
 import shutil
 import subprocess
 import sys
@@ -303,6 +304,17 @@ class RepoTests(CloudCase):
         self.assertEqual((contents["alpha"]["folder"], contents["beta"]["folder"]), (f"repos/{first}", "repos/2030-01-01 0000"))
         self.assertTrue((base / first / "beta.7z").is_file())  # the older archive stays where it was
         self.assertIn("1 repo(s) sent, 2 of 3 held", third["message"])
+
+    def test_remove_tree_takes_read_only_files_too(self):
+        # git writes its objects read-only on Windows; shutil.rmtree(ignore_errors=True) left them all
+        folder = self.tmp / "mirror.git" / "objects" / "ab"
+        folder.mkdir(parents=True)
+        packed = folder / "cdef"
+        packed.write_bytes(b"x")
+        os.chmod(packed, stat.S_IREAD)
+        cloud_backup.remove_tree(self.tmp / "mirror.git")
+        self.assertFalse((self.tmp / "mirror.git").exists())
+        cloud_backup.remove_tree(self.tmp / "never-there")  # a missing folder is not an error
 
     def test_the_mirror_is_gone_before_the_archive_is_made(self):
         seen: list[bool] = []
