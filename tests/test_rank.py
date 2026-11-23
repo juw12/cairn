@@ -512,3 +512,21 @@ class PageTests(RankCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LineEndTests(unittest.TestCase):
+    """A session note pulled by git with core.autocrlf (the ASUS) ends its lines in \\r\\n: it still runs."""
+
+    def test_a_live_session_with_windows_line_ends_is_running(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        brain = Brain(root)
+        brain.init()
+        folder = brain.dir / core.FOLDERS["session"]
+        folder.mkdir(parents=True, exist_ok=True)
+        now = dt.datetime.now()
+        day, clock = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+        text = (f"---\ntitle: \"lab\"\ntype: session\nstatus: live\ntags: []\ncreated: {day}\n"
+                f"started: {day}T{clock}\nagent: opencode\n---\n## Log\n\n- {clock} start: lab\n")
+        (folder / f"{day}-lab.md").write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+        self.assertEqual([note["slug"] for note in rank.running(brain)], [f"{day}-lab"])
