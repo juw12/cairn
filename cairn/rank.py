@@ -33,9 +33,9 @@ STALE_MIN = 1440  # no step for a day and still marked live: left open, not runn
 NAMED_BEFORE = 5  # how many of the sessions before it a notice names
 MOVES = ("top", "up", "down", "bottom")
 
-_LINE = re.compile(r"^[ \t]*\d+[.)][ \t]+(.+?)[ \t]*$", re.M)
+_LINE = re.compile(r"^[ \t]*\d+[.)][ \t]+(.+?)[ \t\r]*$", re.M)
 _HEADER_CHARS = 2000  # a note's properties are at its top: enough to see whether it is live without parsing it
-_LIVE_LINE = re.compile(r"^status:[ \t]*[\"']?live[\"']?[ \t]*$", re.M)
+_LIVE_LINE = re.compile(r"^status:[ \t]*[\"']?live[\"']?[ \t\r]*$", re.M)
 
 INTRO = """---
 type: settings

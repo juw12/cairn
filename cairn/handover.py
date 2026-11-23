@@ -39,11 +39,11 @@ SESSION_KEYS = ("handed_to", "handed_at", "handed_thread", "handed_agent")
 AGENTS = {"vector": "Vector", "opencode": "OpenCode"}
 STARTS_ITSELF = ("opencode",)
 PHONE_AGENT = "opencode"  # what carries out a prompt from the phone until another one is chosen
-AGENT_LINE = re.compile(r"^Agent:[ \t]*([a-z]+)[ \t]*$", re.M)  # the line of a handoff that names the app asked for
+AGENT_LINE = re.compile(r"^Agent:[ \t]*([a-z]+)[ \t\r]*$", re.M)  # the line of a handoff that names the app asked for
 SOON_TTL_SECONDS = 10  # the live page shows a switch made elsewhere (a terminal, an assistant) this soon
 
 HEADER_CHARS = 2000  # a session note's properties are at its top: enough to look for one without parsing it
-_MACHINE_LINE = re.compile(r"^machine:[ \t]*(.+?)[ \t]*$", re.M)
+_MACHINE_LINE = re.compile(r"^machine:[ \t]*(.+?)[ \t\r]*$", re.M)
 
 _soon: dict[str, tuple[float, dict]] = {}
 _soon_lock = threading.Lock()
