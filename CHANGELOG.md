@@ -3,6 +3,10 @@
 Every build of Cairn, newest first. Written from `docs/versions.json` by `scripts/make_changelog.py`;
 the app shows the same list under Version history.
 
+## Build 118 (2026-11-23): On Windows a running session is seen as running again
+
+- A session note whose lines end in \r\n (written on Windows, or brought by git where core.autocrlf is on, as on the ASUS) was never seen as running: Priority on Vibe and the MCP tool priority left it out and said 'No session is running'. The four line rules that read a note's top (status: live, the numbered priority lines, Agent: and machine:) now allow the \r at a line's end ([#115](https://github.com/juw12/cairn/pull/115))
+
 ## Build 117 (2026-11-23): Cloud backup on Windows deletes a repo's mirror before it packs the archive
 
 - On Windows the mirror of a repo stayed on the disk next to its bundle and archive: git writes its objects read-only there, and the folder was deleted with errors ignored, so nothing was deleted. Every folder the cloud backup deletes now goes through remove_tree, which clears the read-only mark and tries again, and still never stops a run. Found on the ASUS: test_the_mirror_is_gone_before_the_archive_is_made failed there (a mirror beside 2 of 3 archives) and passes now ([#114](https://github.com/juw12/cairn/pull/114))

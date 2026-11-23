@@ -2,6 +2,14 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 118,
+      "date": "2026-11-23",
+      "title": "On Windows a running session is seen as running again",
+      "changes": [
+        "A session note whose lines end in \\r\\n (written on Windows, or brought by git where core.autocrlf is on, as on the ASUS) was never seen as running: Priority on Vibe and the MCP tool priority left it out and said 'No session is running'. The four line rules that read a note's top (status: live, the numbered priority lines, Agent: and machine:) now allow the \\r at a line's end (#115)"
+      ]
+    },
+    {
       "build": 117,
       "date": "2026-11-23",
       "title": "Cloud backup on Windows deletes a repo's mirror before it packs the archive",
