@@ -46,6 +46,9 @@ from .winshell import AUMID, stamp_shortcut, start_menu_shortcut
 APP_ROOT = Path(__file__).resolve().parent.parent  # the git checkout the installer made
 PORT = 47777  # own fixed port: saved settings survive restarts; never clashes with `cairn serve` (4777)
 SYNC_FIRST_SECONDS = 60
+# Background passes that may fail quietly before Juwen is told (the ASUS went six hours without a
+# live sync on 2026-11-21 and fifteen on 2026-11-22 with nothing on the screen).
+SYNC_FAILS_BEFORE_NOTICE = 3
 SYNC_EVERY_SECONDS = 10 * 60
 UPDATE_FIRST_SECONDS = 60
 UPDATE_EVERY_SECONDS = 20 * 60
@@ -1097,18 +1100,33 @@ class DesktopApp:
             if not status["remote"]:
                 return  # nothing to sync with; commits stay a manual choice in the app
             result = brain.git_sync()
+            if getattr(self, "sync_failures", 0):
+                log(f"synced again after {self.sync_failures} failed pass(es)")
+            self.sync_failures = 0
             if result["pulled"] or result["committed"] or result["pushed"]:
                 log(f"synced: committed={result['committed']} pulled={result['pulled']} pushed={result['pushed']}")
                 self.reload_page()
         except SyncError as error:
             log(f"sync skipped: {error}")
-            if manual and self.tray:
-                try:
-                    self.tray.notify(str(error), "Cairn couldn't sync")
-                except Exception:
-                    pass
+            self.sync_failed(str(error), manual)
         except Exception as error:  # never let a background sync take the app down
             log(f"sync failed: {error}")
+            self.sync_failed(str(error), manual)
+
+    def sync_failed(self, error: str, manual: bool = False) -> None:
+        """Count a failed pass. A manual one is shown at once; background ones from the third in a row on,
+        so a brain that stopped syncing is never only a line in the log."""
+        self.sync_failures = getattr(self, "sync_failures", 0) + 1
+        count = self.sync_failures
+        if not manual and count < SYNC_FAILS_BEFORE_NOTICE:
+            return
+        title = "Cairn couldn't sync" if manual else f"Cairn has not synced for {count} passes in a row"
+        if not self.tray:
+            return
+        try:
+            self.tray.notify(error, title)
+        except Exception:
+            pass
 
     def sync_loop(self):
         wait = SYNC_FIRST_SECONDS

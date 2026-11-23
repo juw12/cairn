@@ -2,6 +2,14 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 116,
+      "date": "2026-11-23",
+      "title": "A brain that keeps failing to sync is shown, not only logged",
+      "changes": [
+        "The desktop app counts background syncs that fail one after another. From the third in a row it shows a notification, 'Cairn has not synced for N passes in a row', with git's last sentence; one good pass starts the count again and is written to the log. Why: on the ASUS the brain went six hours without a live sync on 21 Nov and fifteen on 22 Nov (a crash, a corrupt git index, and Cairn not started again), and each time the only trace was a line in cairn.log. A sync you start yourself is still shown at once when it fails"
+      ]
+    },
+    {
       "build": 115,
       "date": "2026-11-22",
       "title": "A load limit every computer of the brain follows",

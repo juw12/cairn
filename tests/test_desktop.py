@@ -796,6 +796,47 @@ class AutoUpdateTests(unittest.TestCase):
         self.assertFalse(app.restart_visible)
 
 
+class SyncFailureNoticeTests(unittest.TestCase):
+    """A background sync that keeps failing is shown, not only logged (ASUS, 21 and 22 Nov 2026)."""
+
+    def make_app(self, outcomes):
+        app = desktop.DesktopApp.__new__(desktop.DesktopApp)
+        app.config = mock.Mock()
+        app.config.get.return_value = True
+        app.tray = mock.Mock()
+        app.reload_page = mock.Mock()
+        brain = mock.Mock()
+        brain.git_status.return_value = {"available": True, "remote": True, "changes": []}
+        brain.git_sync.side_effect = outcomes
+        app.server = mock.Mock()
+        app.server.RequestHandlerClass.brain = brain
+        return app
+
+    def test_the_third_failed_pass_in_a_row_is_shown_and_a_good_pass_starts_the_count_again(self):
+        failure = desktop.SyncError("git timed out after 20 s")
+        ok = {"committed": None, "pulled": 0, "pushed": 0, "remote": True}
+        app = self.make_app([failure, failure, failure, ok, failure])
+        with mock.patch.object(desktop, "log"):
+            app.sync_once()
+            app.sync_once()
+            app.tray.notify.assert_not_called()
+            app.sync_once()
+            app.tray.notify.assert_called_once()
+            message, title = app.tray.notify.call_args.args
+            self.assertIn("3 passes in a row", title)
+            self.assertIn("git timed out", message)
+            app.sync_once()
+            self.assertEqual(app.sync_failures, 0)
+            app.sync_once()
+        self.assertEqual(app.tray.notify.call_count, 1, "one failure after a good pass is quiet again")
+
+    def test_a_manual_sync_that_fails_is_shown_at_once(self):
+        app = self.make_app([desktop.SyncError("offline")])
+        with mock.patch.object(desktop, "log"):
+            app.sync_once(manual=True)
+        app.tray.notify.assert_called_once_with("offline", "Cairn couldn't sync")
+
+
 if __name__ == "__main__":
     unittest.main()
 
