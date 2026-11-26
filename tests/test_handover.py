@@ -250,7 +250,8 @@ class OneSessionTests(HandoverCase):
         self.assertIn(f"step {handover.LOG_LINES + 4}", body)
 
     def test_an_ended_session_handed_long_ago_leaves_the_list(self):
-        self.hand()
+        # Handed now, not on the fixed date hand() uses: "handed today" is measured against the real clock.
+        handover.hand_session(self.brain, self.session, "asus", now=dt.datetime.now())
         vibe.end(self.brain, "partial", "left for the ASUS", session_slug=self.session)
         self.assertEqual(len(handover.status(self.brain)["sessions"]), 1, "handed today: still listed, to take back")
         path = f"sessions/{self.session}.md"
