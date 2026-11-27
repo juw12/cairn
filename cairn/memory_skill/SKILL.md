@@ -34,7 +34,7 @@ Run the two scripts with this Python, the one Cairn runs on:
    where the brain is set up to sync by itself; each command says what it did.
 
 A short question that needs no memory (a sum, a definition) needs none of this.
-
+{{ON_CAIRN}}
 ## Recall
 
 - Every word of a search must match, so use two or three words, then try other words.

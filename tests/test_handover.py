@@ -335,6 +335,30 @@ class MemorySkillTests(HandoverCase):
         handover.switch(self.brain, "here")
         self.assertNotIn("HAND-OVER", self.rules())
 
+    def test_while_it_is_on_the_chat_is_still_on_the_page(self):
+        handover.switch(self.brain, ASUS)
+        said = self.rules()
+        self.assertTrue(said.startswith("HAND-OVER IS ON"), said[:200])
+        self.assertIn("THIS CHAT IS ON CAIRN", said)
+
+    def test_a_chat_whose_own_work_was_handed_over_hears_it_at_its_next_command(self):
+        # The chat is on the page because the skill checked it in; Juwen hands that one chat to the ASUS.
+        chat = self.tmp / "chat"
+        chat.mkdir()
+
+        def script(name: str, *arguments: str) -> str:
+            done = subprocess.run([sys.executable, str(self.skill / name), *arguments], capture_output=True, text=True,
+                                  encoding="utf-8", timeout=120, cwd=chat, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            return done.stdout
+
+        said = script("recall.py", "rules", "--task", "Neon Coast 1.7: second car")
+        self.assertNotIn("HANDED", said)
+        mine = next(note for note in vibe.live_sessions(self.brain) if note["title"] == "Neon Coast 1.7: second car")
+        handover.hand_session(self.brain, mine["slug"], ASUS)
+        self.assertIn(f"THIS CHAT'S WORK WAS HANDED TO {ASUS}", script("remember.py", "step", "car model loaded"))
+        self.assertTrue(script("recall.py", "rules").startswith(f"THIS CHAT'S WORK WAS HANDED TO {ASUS}"))
+
     def test_the_guide_says_what_that_first_line_means(self):
         guide = (self.skill / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("HAND-OVER IS ON", guide)

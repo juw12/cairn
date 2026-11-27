@@ -2,6 +2,21 @@
   "about": "One entry per build of the web app, newest first. build = the number in the service worker cache name (docs/sw.js). Add an entry with every change; scripts/make_changelog.py writes CHANGELOG.md from this file.",
   "releases": [
     {
+      "build": 119,
+      "date": "2026-11-27",
+      "title": "Every chat is on the Vibe page from its first command",
+      "changes": [
+        "A chat of an AI app that has the brain as its memory (Vector, and Claude Code or Codex when connected) is now on the Vibe page from the first command it runs, without the assistant having to start a session. Why: Cairn does not read an app's chats, so a chat was only there when the assistant remembered cairn vibe start. On 27 Nov a chat on the ASUS had drafted mail since the morning and written each turn in the journal, and from the Mac nobody could tell whether it was still running: it had no session (#120)",
+        "How: the memory skill checks the chat in each time recall.py or remember.py runs. The first command opens a live session note, every later one is a sign of life (turn_at, written at most once in 5 minutes), and what the chat saves is logged as a step by itself: a note, a decision, a message for another computer, and a journal line written with cairn log in the chat's folder (#120)",
+        "Three commands for the chat: recall.py rules --task \"the request\" names the session, remember.py step \"what was just done\" --progress 40 logs a step, remember.py finish shipped|partial|dropped|done \"what came out\" ends it. recall.py rules tells the chat where its session is and what to run (#120)",
+        "Which chat is calling is told by the folder the command runs in, the chat's own working folder. No file of the AI app is read. Two chats that share one project folder share one session. The folder is written as ~/... so no user name is in the note (#120)",
+        "cairn vibe start in a chat's folder names the chat's session instead of opening a second one (run from another folder with --agent, it names the one nameless chat of that app that checked in within the last 15 minutes), and cairn vibe log, check and end there mean the chat's session when none is named. Before, a step with several sessions live on the computer was refused until one was named (#120)",
+        "A chat that never said what it was doing is taken off the page after 1 hour without a sign of life, a named one after 4 hours as before; the chat's next command puts it back. After remember.py finish, the chat's closing commands (a record, a handoff) open nothing new for 10 minutes; a new request is a new session. A session that ended for silence more than 12 hours ago is not gone on with, so the next chat in a shared project folder gets a note of its own (#120)",
+        "After remember.py begin and step the chat is told what cairn vibe log tells it: that its work was handed to another computer, its place among the running sessions, and that the computer is over its load limit. recall.py rules still begins with HAND-OVER IS ON while that is on (#120)",
+        "What it does not do: it does not see a chat that never runs the skill or the cairn command, and it cannot tell that a chat's window was closed. OpenCode's chats are left to the watcher, which reads them from OpenCode's own database. CAIRN_NO_CHECKIN=1 switches the check-in off (#120)"
+      ]
+    },
+    {
       "build": 118,
       "date": "2026-11-23",
       "title": "On Windows a running session is seen as running again",

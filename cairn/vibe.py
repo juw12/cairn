@@ -183,6 +183,10 @@ def _save(brain: Brain, note: dict, changes: dict | None = None, line: str = "")
     body = None
     if line:
         body = core.parse_note(current["text"])["body"].rstrip() + f"\n- {_clock()} {line}\n"
+    if note["meta"].get("chat"):
+        # A chat that checked itself in (cairn/chatlog.py) carries its last sign of life in `turn_at`, and
+        # that is what "last step" is read from: a step written here has to move it too.
+        changes = {**(changes or {}), "turn_at": now_stamp()}
     text = core.update_note_text(current["text"], changes or {}, body)
     brain.write(note["path"], text, current["mtime"])
     return brain.read(note["path"])

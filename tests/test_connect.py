@@ -48,7 +48,9 @@ class ConnectCase(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(self.vector_skill / name), *args],
             capture_output=True, text=True, encoding="utf-8", timeout=120,
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            # What these tests count is what recalling and remembering write. The session a chat is checked
+            # in with by the same scripts has its own tests (test_chatlog.py).
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "CAIRN_NO_CHECKIN": "1"},
         )
 
 
@@ -171,7 +173,7 @@ class ConnectTests(ConnectCase):
         for name in ("SKILL.md", *connect.COPIED):
             self.assertTrue((connect.SOURCE / name).is_file(), name)
         guide = (connect.SOURCE / "SKILL.md").read_text(encoding="utf-8")
-        self.assertEqual(sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", guide))), ["{{BRAIN}}", "{{PYTHON}}", "{{SKILL}}", "{{WRITE_RULES}}"])
+        self.assertEqual(sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", guide))), ["{{BRAIN}}", "{{ON_CAIRN}}", "{{PYTHON}}", "{{SKILL}}", "{{WRITE_RULES}}"])
 
 
 class SkillScriptsTests(ConnectCase):
