@@ -15,8 +15,8 @@ jobs:
       matrix:
         python: ["3.13", "3.x"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install browser for parity + e2e tests
