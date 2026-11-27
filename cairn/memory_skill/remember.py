@@ -192,8 +192,12 @@ def report(options) -> int:
         else:
             entry = chatlog.finish(brain, here, options.result, text, agent=app)
             print(f"Ended as {options.result}: {entry['path']}")
+            return 0
     except chatlog.ChatError as error:
         raise SystemExit(str(error))
+    told = chatlog.notices(brain, entry["path"])  # handed to another computer, its place, the load limit
+    if told:
+        print("\n" + told)
     return 0
 
 

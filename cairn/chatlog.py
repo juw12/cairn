@@ -357,6 +357,22 @@ def finish(brain: Brain, folder, result: str = "shipped", summary: str = "", age
     return _answer(note, "ended")
 
 
+def notices(brain: Brain, path: str) -> str:
+    """What an assistant is told after a step, the same as after `cairn vibe log`: its work was handed to
+    another computer, its place among the running sessions, this computer is over its load limit."""
+    from . import handover, limit, rank
+
+    parts = []
+    for say in (lambda: handover.notice(brain, path), lambda: rank.notice(brain, path), lambda: limit.notice(brain)):
+        try:
+            text = say()
+        except Exception:  # noqa: BLE001 - a step that is logged never fails on this
+            continue
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
 def mirror(brain: Brain, folder, text: str, now: dt.datetime | None = None) -> bool:
     """A journal line written from a chat's folder is a step of that chat too. Only for a folder a chat
     has checked in from, and only while its session runs. Never the reason the journal line fails."""

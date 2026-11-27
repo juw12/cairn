@@ -26,13 +26,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common  # noqa: E402
 
 
-def handed_over(brain) -> str:
-    """Set in Cairn (Vibe, Chats' work): the work of this computer's chats goes to another computer for now.
-    A chat has to know that before anything else, so it stands above the decisions. "" when it is off."""
+def handed_over(brain, session: str = "") -> str:
+    """Set in Cairn (Vibe, Chats' work): the work of this computer's chats goes to another computer for now,
+    or the work of this one chat (`session`, its note) does. A chat has to know that before anything else,
+    so it stands above the decisions. "" when it is off."""
     try:
         from cairn import handover
 
-        text = handover.notice(brain)
+        text = handover.notice(brain, session)
     except Exception:  # noqa: BLE001 - an older Cairn, or a setting that cannot be read: the rules still print
         return ""
     return text + "\n\n" if text else ""
@@ -53,7 +54,7 @@ def on_cairn(entry: dict | None) -> str:
 
 def rules(brain, entry: dict | None = None) -> str:
     """The decisions to follow: this computer's own when it has a folder, else every accepted one."""
-    first = on_cairn(entry) + handed_over(brain)
+    first = handed_over(brain, entry["path"] if entry else "") + on_cairn(entry)
     folder = common.write_folder(brain)
     decisions = folder / "decisions" if folder else None
     if decisions is None or not decisions.is_dir():
