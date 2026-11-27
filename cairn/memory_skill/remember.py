@@ -7,6 +7,10 @@
     remember.py handoff "Short title" --to "computer" [--to "another"] --body "What it must know or do."
     remember.py answer "a few words of the conversation" --says picked-up|done|note|closed [--text "..."]
 
+    remember.py begin "what the user asked, in one line"       this chat's session on Cairn's Vibe page
+    remember.py step "what was just done" [--progress 40] [--kind note|prompt|pass|fail|commit]
+    remember.py finish shipped|partial|dropped|done "what came out"
+
 It never overwrites a note, and it refuses text that looks like a password, key or token.
 When this computer has its own folder in the brain, what this script saves goes there.
 
@@ -159,10 +163,53 @@ def check_github() -> int:
     return 0
 
 
+REPORTS = ("begin", "step", "finish")
+
+
+def report(options) -> int:
+    """The chat's own session on Cairn's Vibe page: what it is doing, each step, how it ended."""
+    if common.where(options.cloud) == "cloud":
+        raise SystemExit("A chat's session is kept in the brain's folder, which is not on this computer. "
+                         "Nothing was written; go on with the work.")
+    if not common.checks_in():
+        raise SystemExit("This app's chats are not reported through the skill (Cairn's watcher reads them). "
+                         "Nothing was written; go on with the work.")
+    brain = common.open_brain()
+    from cairn import chatlog
+
+    here, app = Path.cwd(), common.CONFIG.get("app") or ""
+    text = " ".join(options.text).strip()
+    refuse_secrets(text)
+    try:
+        if options.command == "begin":
+            if not text:
+                raise SystemExit('Say what the chat is doing: remember.py begin "the request in one line"')
+            entry = chatlog.checkin(brain, here, agent=app, task=text)
+            print(f"On Cairn: {entry['path']} ({entry['state']})")
+        elif options.command == "step":
+            entry = chatlog.step(brain, here, text, kind=options.kind, progress=options.progress, agent=app)
+            print(f"Logged in {entry['path']}")
+        else:
+            entry = chatlog.finish(brain, here, options.result, text, agent=app)
+            print(f"Ended as {options.result}: {entry['path']}")
+    except chatlog.ChatError as error:
+        raise SystemExit(str(error))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     common.plain_output()
     parser = argparse.ArgumentParser(prog="remember.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
+    begin = commands.add_parser("begin")
+    begin.add_argument("text", nargs="+")
+    step = commands.add_parser("step")
+    step.add_argument("text", nargs="+")
+    step.add_argument("--progress", type=int, default=None, metavar="PCT")
+    step.add_argument("--kind", default="note", choices=["note", "prompt", "pass", "fail", "commit", "skill"])
+    finish = commands.add_parser("finish")
+    finish.add_argument("result", choices=["shipped", "partial", "dropped", "done"])
+    finish.add_argument("text", nargs="*")
     note = commands.add_parser("note")
     note.add_argument("title")
     note.add_argument("--body", required=True)
@@ -188,11 +235,15 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--cloud", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     options = parser.parse_args(argv)
 
+    if options.command in REPORTS:
+        return report(options)
     in_cloud = common.where(options.cloud) == "cloud"
     if options.command == "check":
         if in_cloud:
             return check_github()
-        check(common.open_brain())
+        brain = common.open_brain()
+        common.checkin(brain)
+        check(brain)
         return 0
     if options.command in ("handoff", "answer"):
         if in_cloud:
@@ -203,9 +254,11 @@ def main(argv: list[str] | None = None) -> int:
             # A message for another computer is its own file in handoffs/, never an edit of someone else's note.
             refuse_secrets(options.title, options.body)
             print(common.call(brain, "handoff_send", {"title": options.title, "to": options.to, "body": options.body}, read_only=False))
+            common.saved_step(brain, f"left for {', '.join(options.to)}: {options.title}")
         else:
             refuse_secrets(options.text)
             print(common.call(brain, "handoff_answer", {"thread": options.thread, "says": options.says, "text": options.text}, read_only=False))
+            common.saved_step(brain, f"answered another computer ({options.says}): {options.thread}")
         return 0
 
     tags = [tag.strip().lstrip("#") for tag in options.tags.split(",") if tag.strip().lstrip("#")]
@@ -224,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         path = save_in_folder(brain, folder, options.command, options.title, tags, body, today)
     else:
         path = save_shared(brain, options.command, options.title, tags, body, today)
+    common.saved_step(brain, f"saved {options.command}: {options.title}")
     return 0 if check(brain, path) else 1
 
 

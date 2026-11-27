@@ -36,6 +36,9 @@ SKILL_NAME = "cairn-memory"
 MARKER = ".cairn-connect.json"
 SOURCE = Path(__file__).resolve().parent / "memory_skill"
 COPIED = ("recall.py", "remember.py", "common.py", "cloud.py")
+# A chat of these apps is put on the Vibe page by the skill itself (cairn/chatlog.py). Not OpenCode's: the
+# watcher reads its sessions from OpenCode's own database, and a second note would count each one twice.
+CHECKS_IN = ("vector", "claude", "codex")
 OFF_SWITCH = "CAIRN_NO_CONNECT"
 
 # home: the folder that shows the app is installed. skills: where it reads personal skills.
@@ -63,6 +66,32 @@ FOLDER_RULES = (
     "- Hand something to another computer only when it is physically there: its files, its apps, a check that\n"
     "  needs that machine."
 )
+
+
+# Only in the skill of an app whose chats the skill checks in (CHECKS_IN).
+ON_CAIRN = """
+## This chat on Cairn
+
+The user follows every chat from Cairn's Vibe page, on every device, and asks other chats how this one is
+doing. The skill puts this chat there by itself: its first command opens the chat's session, every later
+command is a sign of life, and what `remember.py` saves is logged as a step. `recall.py rules` says where
+the session is. Your part is three commands:
+
+    recall.py rules --task "what the user asked, in one line"
+    remember.py step "what was just done, with the numbers" [--progress 40]
+    remember.py finish shipped|partial|dropped|done "what came out"
+
+- `--task` at the start, and again when the user asks for something new in the same chat. Without it the
+  session has no name and the user cannot tell the chats apart.
+- A step is something that happened: a file written, a mail drafted or sent, tests passed, a pull request
+  merged, a question you are waiting on. With the numbers. Not every command.
+- `finish` is the last thing before the final answer, also when the work is partial or blocked. `done` is
+  for an answer with nothing built. A chat that never says how it ended is closed after hours of silence
+  as "outcome not reported".
+- Run the skill's commands from the chat's own folder, without a `cd` first: the folder is how Cairn knows
+  which chat is calling. No file of the AI app is read for it.
+- A step is read on every device: no password, key or token in it.
+"""
 
 
 class ConnectError(ValueError):
@@ -176,8 +205,8 @@ def script_python() -> str:
     return str(python)
 
 
-def skill_files(brain: Brain, target: Path, write_folder: str = "") -> dict[str, str]:
-    """Every file of the skill as it should be in `target`, filled in for this brain and computer."""
+def skill_files(brain: Brain, target: Path, write_folder: str = "", app: str = "") -> dict[str, str]:
+    """Every file of the skill as it should be in `target`, filled in for this brain, computer and app."""
     python = script_python()
     rules = FOLDER_RULES.format(folder=write_folder) if write_folder else SHARED_RULES
     remote = isinstance(brain, RemoteBrain)
@@ -188,8 +217,9 @@ def skill_files(brain: Brain, target: Path, write_folder: str = "") -> dict[str,
     else:
         place = f"at `{brain.dir}`"
     guide = (SOURCE / "SKILL.md").read_text(encoding="utf-8")
+    on_cairn = ON_CAIRN if app in CHECKS_IN and not remote else ""
     for token, value in (("{{BRAIN}}", place), ("{{PYTHON}}", python), ("{{SKILL}}", target.as_posix()),
-                         ("{{WRITE_RULES}}", rules)):
+                         ("{{WRITE_RULES}}", rules), ("{{ON_CAIRN}}", on_cairn)):
         guide = guide.replace(token, value)
     config = {
         "root": "" if remote else str(brain.root),
@@ -198,6 +228,8 @@ def skill_files(brain: Brain, target: Path, write_folder: str = "") -> dict[str,
         "package_parent": str(Path(__file__).resolve().parent.parent),
         "write_folder": write_folder,
         "cloud": cloud,
+        "app": app,
+        "checkin": app in CHECKS_IN and not remote,
     }
     files = {"SKILL.md": guide, "config.json": json.dumps(config, indent=2) + "\n"}
     for name in COPIED:
@@ -282,7 +314,7 @@ def connect(brain: Brain, apps=None, auto: bool = False, home: Path | None = Non
             row["state"] = "other-brain"
             row["brain"] = marker.get("brain", "")
             continue
-        files = skill_files(brain, target, write_folder)
+        files = skill_files(brain, target, write_folder, name)
         if marker and marker.get("brain") == str(brain.dir) and _on_disk(target, files) == files:
             row["state"] = "unchanged"
             continue
@@ -322,7 +354,7 @@ def status(brain: Brain, home: Path | None = None, settings_folder: Path | None 
         elif marker.get("brain") != str(brain.dir):
             state = "other-brain"
         else:
-            files = skill_files(brain, target, write_folder_for(brain, settings_folder))
+            files = skill_files(brain, target, write_folder_for(brain, settings_folder), name)
             state = "connected" if _on_disk(target, files) == files else "out of date"
         rows.append({"app": name, "title": app["title"], "path": str(target), "state": state,
                      "brain": (marker or {}).get("brain", "")})

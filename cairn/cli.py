@@ -84,6 +84,10 @@ def cmd_log(brain: Brain, args) -> int:
         line = match.group(2).strip() if kind == "journal" else text
     page = brain.log(line, day, _now_time())
     print(f"Logged to brain/{page['path']}")
+    if day == _today():
+        from . import chatlog
+
+        chatlog.mirror(brain, Path.cwd(), line)  # only in a folder a chat checked in from; else nothing
     return 0
 
 
@@ -316,13 +320,23 @@ def _vibe_watch(brain: Brain, args) -> int:
     return 0
 
 def cmd_vibe(brain: Brain, args) -> int:
-    from . import vibe
+    from . import chatlog, vibe
 
     brain.init()
+    if args.action in ("log", "skill", "check", "end") and not args.session and not os.environ.get("CAIRN_SESSION", "").strip():
+        # Run in a chat's own folder with no session named: the chat's session, not this computer's newest.
+        args.session = chatlog.live_slug(brain, Path.cwd())
     try:
         if args.action == "start":
             others = vibe.live_sessions(brain)
-            note = vibe.start(brain, " ".join(args.text), task=args.task or "", agent=args.agent or "")
+            # In the folder of a chat that checked itself in and has not named its work, this names that
+            # session instead of opening a second one: one chat, one note.
+            note = None if args.task else chatlog.adopt(brain, Path.cwd(), " ".join(args.text), args.agent or "")
+            if note is not None:
+                others = [other for other in others if other["path"] != note["path"]]
+            else:
+                note = vibe.start(brain, " ".join(args.text), task=args.task or "", agent=args.agent or "")
+                chatlog.point(brain, Path.cwd(), note["path"])
             slug = note["path"].rsplit("/", 1)[-1][:-3]
             print(f"Live: brain/{note['path']}  (open Cairn > Vibe to watch it)")
             if others:

@@ -43,6 +43,7 @@ from .brain import Brain, ConflictError
 
 IDLE_MINUTES = 30
 REPORTED_IDLE_MINUTES = 240  # an assistant reporting its own session can think for hours between steps
+UNNAMED_IDLE_MINUTES = 60  # a chat that checked itself in and never said what it was doing: a question, answered
 CLOSED_BY = "watcher"  # marks a session the watcher ended for silence, so its next step can open it again
 ACTIVE_GAP_MINUTES = 10  # a pause longer than this between messages is not counted as working time
 DAYS = 14
@@ -691,11 +692,16 @@ def close_silent_reported(brain: Brain, now_ms: int, idle_minutes: int = REPORTE
         if note["meta"].get("source") == "opencode" or elsewhere(note):
             continue  # the OpenCode database decides when these end; another computer ends its own
         last = core.session_last_activity(note)
-        if last is None or now - last < idle_minutes:
+        # A chat the memory skill checked in (cairn/chatlog.py) that never named its work asked something
+        # and got its answer: it does not stay on the page for four hours. Its next command opens it again.
+        unnamed = bool(str(note["meta"].get("unnamed", "")).strip()) and bool(note["meta"].get("chat"))
+        limit = min(idle_minutes, UNNAMED_IDLE_MINUTES) if unnamed else idle_minutes
+        if last is None or now - last < limit:
             continue
-        hours = idle_minutes / 60
-        waited = f"{hours:g} h" if idle_minutes >= 60 else f"{idle_minutes} min"
-        closed += _close(brain, note, "done", last, f"auto-ended, no step for {waited} (outcome not reported)", {"closed_by": CLOSED_BY})
+        hours = limit / 60
+        waited = f"{hours:g} h" if limit >= 60 else f"{limit} min"
+        what = "no sign of life" if unnamed else "no step"
+        closed += _close(brain, note, "done", last, f"auto-ended, {what} for {waited} (outcome not reported)", {"closed_by": CLOSED_BY})
     return closed
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -73,6 +74,38 @@ def open_brain():
     from cairn.brain import Brain
 
     return Brain(CONFIG["root"], CONFIG["brain"])
+
+
+def checks_in() -> bool:
+    """This app's chats are put on Cairn's Vibe page by the skill (not OpenCode's: the watcher reads those)."""
+    return bool(CONFIG.get("checkin")) and not os.environ.get("CAIRN_NO_CHECKIN")
+
+
+def checkin(brain, task: str = "") -> dict | None:
+    """Every command of the skill says the chat is at work: the first one opens its session on the Vibe
+    page, the later ones are its signs of life. Which chat it is, is told by the folder the command runs in.
+    Never the reason a command fails; None where it does not apply or an older Cairn cannot do it."""
+    if not checks_in():
+        return None
+    try:
+        from cairn import chatlog
+
+        return chatlog.checkin(brain, Path.cwd(), agent=CONFIG.get("app") or "", task=task)
+    except Exception:  # noqa: BLE001 - recalling and remembering come first
+        return None
+
+
+def saved_step(brain, text: str) -> None:
+    """What the chat just saved is a step of its session, logged without the chat doing anything."""
+    if not checks_in():
+        return
+    try:
+        from cairn import chatlog
+
+        if chatlog.checkin(brain, Path.cwd(), agent=CONFIG.get("app") or "")["state"] != "resting":
+            chatlog.step(brain, Path.cwd(), text, agent=CONFIG.get("app") or "")
+    except Exception:  # noqa: BLE001 - the note is saved; the step is a nicety
+        pass
 
 
 def write_folder(brain) -> Path | None:

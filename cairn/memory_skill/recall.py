@@ -2,7 +2,8 @@
 """Recall from the Cairn brain. Read-only: nothing here can change a note. (`handoffs` first fetches the
 other computers' notes where the brain syncs by itself; `--offline` skips that.)
 
-    recall.py rules                              standing decisions (read these first)
+    recall.py rules [--task "the request"]       standing decisions (read these first); with --task the chat
+                                                 says what it is doing, for its session on Cairn's Vibe page
     recall.py search "words" [--type T] [--limit 10]
     recall.py read "path, slug or title"
     recall.py recent [--days 7]
@@ -37,9 +38,22 @@ def handed_over(brain) -> str:
     return text + "\n\n" if text else ""
 
 
-def rules(brain) -> str:
+def on_cairn(entry: dict | None) -> str:
+    """What the chat is told about its own session, above the decisions. "" where chats are not checked in."""
+    if not entry or entry.get("state") == "resting":
+        return ""
+    lines = [f"THIS CHAT IS ON CAIRN (Vibe page, every device): {entry['path']}"]
+    if entry.get("unnamed"):
+        lines.append('  It has no name yet. Say what it is doing:  remember.py begin "the request in one line"')
+    lines.append('  At each real step:   remember.py step "what was just done" [--progress 40]')
+    lines.append('  Before the last answer:  remember.py finish shipped|partial|dropped|done "what came out"')
+    lines.append("  Run the skill's commands from the chat's own folder (no cd first): the folder says which chat it is.")
+    return "\n".join(lines) + "\n\n"
+
+
+def rules(brain, entry: dict | None = None) -> str:
     """The decisions to follow: this computer's own when it has a folder, else every accepted one."""
-    first = handed_over(brain)
+    first = on_cairn(entry) + handed_over(brain)
     folder = common.write_folder(brain)
     decisions = folder / "decisions" if folder else None
     if decisions is None or not decisions.is_dir():
@@ -62,8 +76,12 @@ NEEDS_THE_FOLDER = ("The messages between computers are worked out by Cairn from
 
 def from_this_computer(options) -> str:
     brain = common.open_brain()
+    entry = common.checkin(brain, getattr(options, "task", "") or "")
     if options.command == "rules":
-        return rules(brain)
+        return rules(brain, entry)
+    if entry and entry.get("state") == "opened":
+        # The chat did not start with `rules`: it still has to learn that it is on the page, and how to name it.
+        print(on_cairn(entry), file=sys.stderr, end="")
     if options.command == "search":
         arguments = {"query": options.query, "limit": options.limit}
         if options.type:
@@ -110,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="recall.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cloud", action="store_true", help="read the newest copy on GitHub")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("rules")
+    rules_parser = commands.add_parser("rules")
+    rules_parser.add_argument("--task", default="", help="what the user asked, in one line")
     search = commands.add_parser("search")
     search.add_argument("query")
     search.add_argument("--type", default="")

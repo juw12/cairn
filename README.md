@@ -828,6 +828,26 @@ cairn connect --remove vector            # take it out again
 cairn connect --off                      # stop connecting by itself (--on turns it back on)
 ```
 
+**Every chat is on the Vibe page from its first command.** Cairn does not read your AI app's chats, so until now a
+chat was only there when the assistant remembered to start a session, and a chat that forgot could not be followed
+from another computer at all. The skill now checks the chat in each time one of its scripts runs. The first
+command opens a live session for the chat, before it has said what it is doing. Every later command is a sign of
+life, so the page says when it last moved. What it saves (a note, a decision, a message for another computer, a
+journal line written with `cairn log` in its folder) is logged as a step by itself. The chat adds the rest:
+
+```bash
+recall.py rules --task "what the user asked, in one line"     # names the session; again for a new request
+remember.py step "49 retest rows filled, not sent" --progress 80
+remember.py finish partial "in Drafts, not sent: 2 values open"   # shipped | partial | dropped | done
+```
+
+Which chat is calling is told by the folder the command runs in (an AI app starts a chat's commands in the chat's
+own working folder); no file of the app is opened for it, and two chats that share one project folder share one
+session. `cairn vibe start` in that folder names the chat's session instead of opening a second one, and
+`cairn vibe log` there needs no `--session`. A chat that never names its work is taken off the page after an hour
+without a sign of life, a named one after four, and its next command puts it back. OpenCode's chats are left to
+the watcher, which reads them from OpenCode itself. `CAIRN_NO_CHECKIN=1` switches the check-in off.
+
 **The brain does not have to be on the computer.** A brain that is pushed to GitHub is the cloud copy, and the
 skill knows its repo. When the brain's folder is missing (a new computer, a wiped disk, a folder that was moved) the
 same two scripts work on GitHub by themselves and say so: they fetch the text of the notes once, then only what
